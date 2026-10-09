@@ -11,8 +11,8 @@ name: Unit Tests
 #   - next-app-build : `next build` + `tsc --noEmit` + lint ratchet + an
 #                 assertion that /anime/[id] is still statically prerendered.
 #
-# This is the safety net that keeps the suites GREEN. E2E (live prod) and
-# Lighthouse live in sibling workflows; this one is the fast unit gate.
+# This is the safety net that keeps the suites GREEN. E2E (live prod) lives
+# in a sibling workflow; this one is the fast unit gate.
 on:
   pull_request:
     branches: [main, feat/go-backend]

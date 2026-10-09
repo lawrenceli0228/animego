@@ -4,6 +4,10 @@
 
 ## [未发布]
 
+### CI 不再对线上跑 Lighthouse
+
+`Lighthouse against live prod` 在每个 PR 和每次推送 main 时，都要把线上首页、详情页、季度页和 welcome 页各跑三遍。它测的是线上已经部署的版本，跟 PR 里的代码无关，而且从 2026-10-08 起每次都失败，不再提供有用的信号。workflow（`.github/workflows/lighthouse.yml`）和它的配置 `lighthouserc.json` 一起删除。线上 Playwright 保留，部署后仍当冒烟检查用。
+
 ### 图片的并发上限改成先排队，不公开的 nginx 规则有了存放处
 
 上一条（next-image 单独容器）上线后，nginx 到 next-image 的上限是 64。超出就立刻返回 503，而图片失败不会重试，卡片就一直空着。有人成批请求图片时，这 64 个名额会被占满几十秒，这段时间里真实读者的新图也被拒了。
