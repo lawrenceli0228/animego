@@ -9,7 +9,9 @@ import { authFetch } from "@/lib/authFetch";
 import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n/lang";
 
-type ReportTargetType = "comment" | "user";
+// "review" | "thread" | "reply" are the anime community tab's content
+// (go-api internal/community, migration 0046); /api/reports takes all five.
+type ReportTargetType = "comment" | "user" | "review" | "thread" | "reply";
 
 interface ReportDialogProps {
   targetType: ReportTargetType;

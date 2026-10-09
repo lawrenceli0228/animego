@@ -1,0 +1,325 @@
+/* The write page — the canvas's WriteReview board: crumbs, the cover and the
+ * heading, then the editor beside a 340px settings card (stacked on phones).
+ * Shared pieces (buttons, cards, counters) come from community.module.css. */
+
+.page {
+  padding-top: 32px;
+  padding-bottom: 64px;
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--c-meta);
+}
+
+.crumbs a {
+  color: var(--c-tx2);
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  color: var(--c-tone-hi);
+}
+
+.pageHead {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.pageCover {
+  display: block;
+  width: 52px;
+  height: 74px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--c-s3);
+  flex: none;
+}
+
+.pageTitle {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.pageSub {
+  margin: 4px 0 0;
+  color: var(--c-tx2);
+}
+
+.state {
+  margin-top: 28px;
+}
+
+.loginBtn {
+  margin-top: 16px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px;
+  margin-top: 28px;
+}
+
+@media (min-width: 980px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+}
+
+.editorColumn {
+  min-width: 0;
+}
+
+.req {
+  color: var(--c-tone-hi);
+}
+
+.summaryInput {
+  width: 100%;
+  height: 46px;
+  border-radius: 9px;
+  background: var(--c-s1);
+  border: 1px solid var(--c-line);
+  padding: 0 12px;
+  color: var(--c-tx);
+  font: inherit;
+  font-size: 15px;
+}
+
+.summaryInput::placeholder,
+.bodyInput::placeholder,
+.linkInput::placeholder {
+  color: rgba(235, 235, 245, 0.4);
+}
+
+.bodyHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.bodyHead label {
+  margin: 0;
+}
+
+/* The canvas .seg — 编辑 / 预览. */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--c-s1);
+  border: 1px solid var(--c-line);
+}
+
+.segBtn {
+  height: 32px;
+  padding: 0 13px;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--c-tx2);
+  cursor: pointer;
+}
+
+.segOn {
+  composes: segBtn;
+  background: var(--c-s3);
+  color: var(--c-tx);
+}
+
+.editor {
+  margin-top: 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--c-s1);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.toolIcon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--c-tx);
+  font: inherit;
+  cursor: pointer;
+}
+
+.toolIcon:hover,
+.tool:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tool {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--c-line2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-tx);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tool:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.linkRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+}
+
+.linkInput {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border-radius: 8px;
+  background: #000;
+  border: 1px solid var(--c-line);
+  padding: 0 10px;
+  color: var(--c-tx);
+  font: inherit;
+  font-size: 13px;
+}
+
+.bodyInput {
+  display: block;
+  width: 100%;
+  height: 440px;
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  padding: 16px;
+  color: var(--c-tx);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+/* The editor box carries the ring for its textarea: the box clips anything
+ * drawn outside the textarea itself. */
+.editor:has(.bodyInput:focus-visible) {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.preview {
+  min-height: 440px;
+  padding: 16px;
+}
+
+.flags {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.submitRow {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.grow {
+  flex: 1;
+}
+
+.grow[data-incomplete="true"] {
+  opacity: 0.6;
+}
+
+.deleteRow {
+  margin-top: 12px;
+}
+
+@media (max-width: 600px) {
+  .page {
+    padding-top: 20px;
+    padding-bottom: 48px;
+  }
+
+  .pageTitle {
+    font-size: 22px;
+  }
+
+  .bodyInput,
+  .preview {
+    height: 320px;
+    min-height: 320px;
+  }
+
+  .summaryInput {
+    height: 48px;
+  }
+
+  .toolIcon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .tool,
+  .segBtn {
+    height: 44px;
+  }
+}
+
+/* The thread page reuses this page's frame (crumbs, padding). */
+.threadCard {
+  margin-top: 18px;
+}
+
+.threadTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.threadByline {
+  margin-top: 14px;
+}
+
+.threadReplies {
+  margin-top: 40px;
+}
+
+.threadComposer {
+  margin-top: 16px;
+}
+
+@media (max-width: 600px) {
+  .threadTitle {
+    font-size: 20px;
+  }
+}
