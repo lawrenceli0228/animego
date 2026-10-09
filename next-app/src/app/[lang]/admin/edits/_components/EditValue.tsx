@@ -15,6 +15,7 @@ import { personDisplayName } from "@/lib/people/names";
 import type { EditItem, ImageValue, VoiceValue } from "@/lib/people/edit/review";
 import type { FuzzyDate } from "@/lib/people/types";
 import q from "../edits.module.css";
+import { anilistImgProps } from "@/lib/images/anilistImg";
 
 interface EditValueProps {
   item: EditItem;
@@ -38,7 +39,7 @@ export default function EditValue({ item, side, lang, labels }: EditValueProps) 
       if (side === "old") {
         return typeof value === "string" ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={value} alt={labels.oldImage} className={`${q.image} ${q.oldImage}`} />
+          <img {...anilistImgProps(value, 80, 120)} alt={labels.oldImage} className={`${q.image} ${q.oldImage}`} />
         ) : (
           <span className={tone}>{EMPTY}</span>
         );
@@ -77,7 +78,7 @@ export default function EditValue({ item, side, lang, labels }: EditValueProps) 
         <span className={`${q.person} ${tone}`}>
           {v.image ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={v.image} alt="" className={q.avatar} />
+            <img {...anilistImgProps(v.image, 28, 28)} alt="" className={q.avatar} />
           ) : null}
           <span>
             {personDisplayName(v.name, lang) || `#${v.personId}`}

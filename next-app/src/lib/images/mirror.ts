@@ -45,6 +45,19 @@ export const MIRRORED_PATH = new RegExp(
 );
 
 /**
+ * Whether a URL is an AniList image of a kind the mirror serves, whatever this
+ * build's switch says. lib/images/anilistImg.ts uses it to decide which plain
+ * <img> and CSS-background sources to route through the optimizer.
+ */
+export function isMirrorableAniListUrl(url: string | null | undefined): url is string {
+  return (
+    typeof url === "string" &&
+    url.startsWith(ANILIST_CDN_PREFIX) &&
+    MIRRORED_PATH.test(url.slice(ANILIST_CDN_PREFIX.length))
+  );
+}
+
+/**
  * The mirror URL for an AniList image when this build has a mirror and nginx
  * serves that kind of image; otherwise the input, unchanged. Never throws.
  *
@@ -56,10 +69,9 @@ export function toMirrorUrl(url: string | null | undefined): string | null | und
   // Read on every call rather than once at module load: Next replaces this
   // exact expression with the build-time value, and tests flip it per case.
   const base = process.env.NEXT_PUBLIC_IMAGE_MIRROR_BASE?.trim();
-  if (!base || typeof url !== "string" || !url.startsWith(ANILIST_CDN_PREFIX)) return url;
+  if (!base || !isMirrorableAniListUrl(url)) return url;
 
   const path = url.slice(ANILIST_CDN_PREFIX.length);
-  if (!MIRRORED_PATH.test(path)) return url;
 
   // A base set without its trailing slash would glue the path onto the last
   // segment ("/img/anilistmedia/...") and break every image on the site.

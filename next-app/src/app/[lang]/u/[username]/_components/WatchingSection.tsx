@@ -6,6 +6,7 @@ import type { WatchingEntry } from "./types";
 import { useLang } from "@/lib/lang-client";
 import { pickTitle } from "@/lib/formatters";
 import type { Lang } from "@/lib/i18n";
+import { anilistImgProps } from "@/lib/images/anilistImg";
 
 interface WatchingSectionProps {
   watching: WatchingEntry[];
@@ -87,7 +88,7 @@ function ProfileAnimeCard({ anime, lang }: { anime: WatchingEntry; lang: Lang })
         {anime.coverImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={anime.coverImageUrl}
+            {...anilistImgProps(anime.coverImageUrl, 120, 170)}
             alt={title}
             width={120}
             height={170}

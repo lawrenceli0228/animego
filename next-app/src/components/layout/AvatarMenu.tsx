@@ -9,6 +9,10 @@ import FallbackImg from "@/components/ui/FallbackImg";
 import type { NavUser } from "./Navbar";
 import { LanguageMenuInline } from "./LanguageMenu";
 import styles from "./AvatarMenu.module.css";
+import { anilistImageSrc } from "@/lib/images/anilistImg";
+
+/** The menu's width (AvatarMenu.module.css .menu), which the banner spans. */
+const MENU_BANNER_WIDTH = 244;
 
 // AvatarMenu — the signed-in navbar chrome collapsed into the member's face.
 // The face is the member-pass photo when set, else the chosen anime's cover,
@@ -118,7 +122,7 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
             {banner && (
               <span
                 className={styles.headBanner}
-                style={{ backgroundImage: cssUrl(banner, DEFAULT_BACKDROP_IMAGE) }}
+                style={{ backgroundImage: cssUrl(anilistImageSrc(banner, MENU_BANNER_WIDTH), DEFAULT_BACKDROP_IMAGE) }}
                 aria-hidden="true"
               />
             )}

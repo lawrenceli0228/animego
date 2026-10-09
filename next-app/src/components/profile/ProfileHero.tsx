@@ -7,6 +7,7 @@ import type { BackdropOption } from "./backdropTypes";
 import { DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
 import { cssUrl } from "@/lib/cssUrl";
 import "./cinematic.css";
+import { anilistImageSrc, FULL_WIDTH } from "@/lib/images/anilistImg";
 
 // ProfileHero — the cinematic identity head of /profile. The member pass is
 // the hero; behind it the chosen anime's wide banner fills the page. The two
@@ -155,7 +156,7 @@ export default function ProfileHero({
         {backdrop && (
           <div
             className="agc-cine-bg-img is-shown"
-            style={{ backgroundImage: cssUrl(backdrop, DEFAULT_BACKDROP_IMAGE) }}
+            style={{ backgroundImage: cssUrl(anilistImageSrc(backdrop, FULL_WIDTH), DEFAULT_BACKDROP_IMAGE) }}
           />
         )}
       </div>
