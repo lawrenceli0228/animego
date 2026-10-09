@@ -23,6 +23,12 @@ services:
         SENTRY_PROJECT: ${SENTRY_PROJECT:-}
         # Set by deploy.sh from `git rev-parse HEAD`; empty elsewhere.
         GIT_SHA: ${GIT_SHA:-}
+        # Where pages point AniList images: our own copy of the originals
+        # (nginx /img/anilist/, filled by go-api's image warm job) instead of
+        # AniList's CDN. Inlined at build time like every NEXT_PUBLIC_*. The
+        # `-` (not `:-`) is the off switch: an empty value in .env.production
+        # survives and puts every image back on AniList at the next deploy.
+        NEXT_PUBLIC_IMAGE_MIRROR_BASE: ${NEXT_PUBLIC_IMAGE_MIRROR_BASE-https://animegoclub.com/img/anilist/}
     # Named so next-image below can run this same build without building it
     # a second time. It is the name compose would give it anyway.
     image: animego-next-app:latest
@@ -244,6 +250,12 @@ services:
       # checkout-relative data/hant, which does not exist in the image, so
       # this line is what makes the sweep able to run at all in production.
       HANT_DATA_DIR: /usr/local/share/animego/hant
+      # The image warm job asks nginx's internal warm location to store each
+      # AniList original the database references. Port 8090 exists only on the
+      # compose network (nginx publishes 80/443 and nothing else). As with the
+      # mirror switch above, an empty value in .env.production turns the job
+      # off.
+      IMAGE_WARM_BASE_URL: ${IMAGE_WARM_BASE_URL-http://nginx:8090/warm/}
     volumes:
       # Member-pass photos live here (served at /api/avatars/*). A named
       # volume keeps them across deploys — back this up alongside postgres.
@@ -349,6 +361,9 @@ services:
   nginx:
     image: nginx:alpine
     restart: unless-stopped
+    # 80 and 443 only. The warm server on 8090 stores whatever it is asked
+    # for, so it must stay reachable from the compose network alone: never
+    # add it here.
     ports:
       - "80:80"
       - "443:443"
@@ -363,9 +378,10 @@ services:
       # Bind-mount, not COPY, so editing the file + `docker compose restart
       # nginx` is enough — no image rebuild.
       - ./nginx/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
-      # The image cache (next_image in default.conf) on a volume, so a
-      # recreated nginx starts with every image it has already encoded
-      # instead of sending them all to next-image again.
+      # Both image caches in default.conf live on this volume: next_image
+      # (encoded variants, so a recreated nginx does not send them all to
+      # next-image again) and anilist_orig (the AniList originals, which
+      # take hours to warm and must outlive every deploy).
       - nginx-cache:/var/cache/nginx
       # Rules that must not be public, kept only on the server (git ignores
       # the directory). default.conf includes what is there; an empty or

@@ -62,3 +62,9 @@ services:
       # (auth/handlers.go:642), which is the only part the spec reads.
       GMAIL_USER: ""
       GMAIL_APP_PASSWORD: ""
+
+      # The image warm job sends every AniList image the database references
+      # to nginx's internal warm location. nginx never starts here, so there
+      # is nothing to warm and every pass would only fail to connect. Empty
+      # turns the job off.
+      IMAGE_WARM_BASE_URL: ""
