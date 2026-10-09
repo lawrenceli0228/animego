@@ -259,13 +259,17 @@ jobs:
           # /anime/0/characters, /anime/0/staff and /anime/0/social compile
           # the detail tabs' segments the same way /anime/0 compiles the
           # overview's, and answer 404 for the same reason, before any API
-          # call; so do the 社区 tab's write-review and thread pages below it.
+          # call; so do the 社区 tab's write-review and thread pages below it,
+          # the person and character pages, and their edit states. The edit
+          # review queue is an admin page: 307 to the login, like /admin.
           for probe in /:200 /login:200 /register:200 /forgot-password:200 \
                        /reset-password/warmup:200 /welcome:200 /library:307 \
-                       /player:200 /admin:307 /anime/0:404 \
+                       /player:200 /admin:307 /admin/edits:307 /anime/0:404 \
                        /anime/0/characters:404 /anime/0/staff:404 \
                        /anime/0/social:404 /anime/0/social/review:404 \
                        /anime/0/social/threads/warmup:404 \
+                       /person/0:404 /character/0:404 \
+                       /person/0/edit:404 /character/0/edit:404 \
                        /seasonal/spring/2026:200; do
             # Split on the LAST colon, so a path that ever contains one still
             # pairs correctly with its status.
