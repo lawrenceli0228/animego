@@ -36,10 +36,17 @@ type stubFetcher struct {
 	body []byte
 	err  error
 	got  string
+	// When set, Fetch signals entered and then waits for release.
+	entered chan struct{}
+	release chan struct{}
 }
 
 func (f *stubFetcher) Fetch(_ context.Context, link string) ([]byte, error) {
 	f.got = link
+	if f.entered != nil {
+		f.entered <- struct{}{}
+		<-f.release
+	}
 	return f.body, f.err
 }
 

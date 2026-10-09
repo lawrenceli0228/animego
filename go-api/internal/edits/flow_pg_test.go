@@ -85,26 +85,32 @@ func newFlow(t *testing.T) *flow {
 	require.NoError(t, err)
 	f := &flow{t: t, pool: pool, signer: signer, root: t.TempDir(), fetcher: &stubFetcher{}}
 	f.images = NewImageStore(f.root, "https://example.org", f.fetcher)
-	h := NewHandlers(pool, f.images, func(ids ...int32) {
+	f.router = f.process()
+	return f
+}
+
+// process is the API as one server process would run it: its own handlers
+// (and so its own record of who has a submission in flight) over the shared
+// database and image directory.
+func (f *flow) process() http.Handler {
+	h := NewHandlers(f.pool, f.images, func(ids ...int32) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.forgotten = append(f.forgotten, ids...)
 	})
-
-	q := dbgen.New(pool)
+	q := dbgen.New(f.pool)
 	r := chi.NewRouter()
-	h.Mount(r, jwtx.RequireAuth(signer))
+	h.Mount(r, jwtx.RequireAuth(f.signer))
 	r.Route("/api/admin", func(r chi.Router) {
-		r.Use(jwtx.RequireAuth(signer))
+		r.Use(jwtx.RequireAuth(f.signer))
 		r.Use(jwtx.RequireAdmin())
 		h.MountAdmin(r)
 	})
-	r.With(jwtx.RequireAuth(signer)).Get("/api/notifications", notifications.NewHandlers(q).List)
+	r.With(jwtx.RequireAuth(f.signer)).Get("/api/notifications", notifications.NewHandlers(q).List)
 	cache := people.NewSitemapCache(people.SitemapTTL)
 	r.Route("/api/characters", func(r chi.Router) { people.MountCharacters(r, q, cache) })
 	r.Route("/api/people", func(r chi.Router) { people.MountPeople(r, q, cache) })
-	f.router = r
-	return f
+	return r
 }
 
 func (f *flow) user(name string, admin bool) account {
@@ -125,6 +131,11 @@ func (f *flow) user(name string, admin bool) account {
 
 func (f *flow) do(method, path string, who *account, body any) (int, map[string]any) {
 	f.t.Helper()
+	return f.doOn(f.router, method, path, who, body)
+}
+
+func (f *flow) doOn(router http.Handler, method, path string, who *account, body any) (int, map[string]any) {
+	f.t.Helper()
 	var reader *bytes.Reader
 	if s, ok := body.(string); ok {
 		reader = bytes.NewReader([]byte(s))
@@ -140,7 +151,7 @@ func (f *flow) do(method, path string, who *account, body any) (int, map[string]
 		req.Header.Set("Authorization", "Bearer "+who.token)
 	}
 	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	return rec.Code, out
@@ -243,16 +254,20 @@ func TestSubmit_LimitsAndOnePendingPerPage_PG(t *testing.T) {
 	assert.Equal(t, msgTooMany, errMessage(body))
 }
 
+// Each request on a process of its own, as behind a load balancer: the
+// in-process record of who is in flight cannot see the others, so this is
+// the database's guard alone -- the submitter's lock and the unique index.
 func TestSubmit_ConcurrentSubmissionsCannotBothPass_PG(t *testing.T) {
 	f := newFlow(t)
 	reader := f.user("reader-race", false)
 	var wg sync.WaitGroup
 	codes := make([]int, 4)
 	for i := range codes {
+		router := f.process()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			codes[i], _ = f.do(http.MethodPost, "/api/edits", &reader, submission(map[string]any{"age": fmt.Sprint(30 + i)}))
+			codes[i], _ = f.doOn(router, http.MethodPost, "/api/edits", &reader, submission(map[string]any{"age": fmt.Sprint(30 + i)}))
 		}()
 	}
 	wg.Wait()
@@ -261,10 +276,39 @@ func TestSubmit_ConcurrentSubmissionsCannotBothPass_PG(t *testing.T) {
 		if c == http.StatusCreated {
 			created++
 		} else {
-			assert.Equal(t, http.StatusConflict, c)
+			assert.Equal(t, http.StatusConflict, c, "one open submission per person per page")
 		}
 	}
 	assert.Equal(t, 1, created, "the submitter's lock and the unique index admit one")
+	assert.Equal(t, 1, f.count(`SELECT count(*) FROM edit_submissions`))
+}
+
+func TestSubmit_OneInFlightPerPerson_PG(t *testing.T) {
+	f := newFlow(t)
+	reader := f.user("reader-inflight", false)
+	f.fetcher.body = pngBytes(t, 20, 30)
+	f.fetcher.entered = make(chan struct{}, 1)
+	f.fetcher.release = make(chan struct{})
+
+	first := make(chan int, 1)
+	go func() {
+		code, _ := f.do(http.MethodPost, "/api/edits", &reader, submission(map[string]any{
+			"image": map[string]any{"url": "https://images.example.org/slow.png"},
+		}))
+		first <- code
+	}()
+	<-f.fetcher.entered // the first is fetching its photo
+
+	code, body := f.do(http.MethodPost, "/api/edits", &reader, submission(map[string]any{"age": "18"}))
+	assert.Equal(t, http.StatusTooManyRequests, code, "a second while the first is in flight")
+	assert.Equal(t, msgTooMany, errMessage(body))
+	other := f.user("reader-other", false)
+	code, _ = f.do(http.MethodPost, "/api/edits", &other, submission(map[string]any{"age": "18"}))
+	assert.Equal(t, http.StatusCreated, code, "someone else is not held up")
+
+	close(f.fetcher.release)
+	assert.Equal(t, http.StatusCreated, <-first)
+	f.fetcher.entered = nil
 }
 
 func TestEditFlow_PG(t *testing.T) {

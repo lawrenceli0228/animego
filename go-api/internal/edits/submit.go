@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -78,6 +79,13 @@ type Handlers struct {
 	images *ImageStore
 	forget ForgetFunc
 	now    func() time.Time
+
+	// inflight holds the users with a submission being handled.  A second
+	// one from the same person while the first is still running is refused
+	// at once (429): without this, parallel requests would each pass the
+	// cheap checks and each fetch a linked photo before the transaction
+	// let only one of them through.
+	inflight sync.Map
 }
 
 // NewHandlers wires the handlers.  forget may be nil.
@@ -125,6 +133,12 @@ func (h *Handlers) Submit(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "Authentication required")
 		return
 	}
+	if _, busy := h.inflight.LoadOrStore(claims.UserID, struct{}{}); busy {
+		fail(w, http.StatusTooManyRequests, httpx.CodeTooManyRequests, msgTooMany)
+		return
+	}
+	defer h.inflight.Delete(claims.UserID)
+
 	var req submitRequest
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
