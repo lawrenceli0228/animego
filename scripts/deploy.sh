@@ -93,6 +93,8 @@ echo "==> Smoke (via nginx, -k for self-signed cert)..."
 curl -sk -o /dev/null -w "HTTP %{http_code} from /api/health\n" https://localhost/api/health
 curl -sk -o /dev/null -w "HTTP %{http_code} from /\n" https://localhost/
 curl -sk -o /dev/null -w "HTTP %{http_code} from /anime/154587\n" https://localhost/anime/154587
+# /_next/image is served by the next-image container, not next-app.
+curl -sk -o /dev/null -w "HTTP %{http_code} from /_next/image (next-image)\n" "https://localhost/_next/image?url=%2Fcommunity-guide.jpg&w=640&q=85"
 
 echo ""
 echo "==> Done. If a smoke line shows 5xx, check 'docker compose logs --tail=50 <service>'."

@@ -123,22 +123,26 @@ const nextConfig: NextConfig = {
   // below the knee -- gradients (sky, skin) start to band. quality={85} lands
   // on AVIF q65, which measures SSIM 0.986-0.988 against the source. Since
   // Next 16 `qualities` is an allowlist, 85 has to be named here or the call
-  // sites asking for it get silently clamped. 75 stays in the list because
-  // that is what a call site that passes nothing gets.
+  // sites asking for it get silently clamped. It is the only entry: a call
+  // site that passes nothing asks for the default 75, and the component moves
+  // it to 85.
   //
-  // ## The container is 512 MB and has no volume (docker-compose.yml)
+  // ## The optimizer runs in a small container of its own
   //
-  // Both of the next two keys exist because of that, and neither default is
-  // safe here:
+  // In production every /_next/image request goes to `next-image`
+  // (docker-compose.yml), a copy of this build with its own memory limit and
+  // CPU ceiling, so encoding can never take the CPU that page renders need.
+  // Both of the next two keys exist because that container is small, and
+  // neither default is safe there:
   //
   //  - maximumResponseBody defaults to 50 MB, and the source image is read
   //    fully into memory before sharp touches it. The largest thing we
   //    actually reference is a ~708 KB cover, so 8 MB is already generous;
   //    50 MB x a few concurrent requests is how this container gets OOM-killed.
   //  - maximumDiskCacheSize defaults to "50% of free disk measured at startup",
-  //    which inside a container reads the HOST disk. The cache is also thrown
-  //    away on every deploy (writable layer, no volume), so an unbounded one
-  //    buys nothing and can crowd the host.
+  //    which inside a container reads the HOST disk. This cache sits on a
+  //    volume behind nginx's own, larger one, so it only has to cover what
+  //    nginx evicts.
   //
   // ## Edge caching is NOT free here -- see docs/ section 12.6
   //
@@ -181,7 +185,23 @@ const nextConfig: NextConfig = {
     ],
 
     formats: ["image/avif", "image/webp"],
-    qualities: [75, 85],
+
+    // The optimizer answers only these widths and qualities, and each width
+    // is its own encode and its own cache entry for the same source. Next's
+    // defaults are 15 widths; with two qualities and three formats that let
+    // anyone ask for 90 encodes of every image the site shows, and requests
+    // shaped like that are what a scraper sends. These lists are what the
+    // site's own pages ask for, read from the access log:
+    //   - 3840 and 2048 are gone because no source is that wide. AniList
+    //     banners are 1900px and Next never enlarges, so they re-encoded the
+    //     1920 image under a key of their own.
+    //   - 32, 48 and 750 were a few dozen requests a day. The next width up
+    //     serves them.
+    //   - 85 is the only quality any page uses (FadeImage's default). A call
+    //     site that asks for 75 is moved to 85 by the component.
+    deviceSizes: [640, 828, 1080, 1200, 1920],
+    imageSizes: [64, 96, 128, 256, 384],
+    qualities: [85],
 
     // AniList serves its own covers with a ~31 day max-age; matching it means
     // a variant is re-encoded about as often as the upstream file changes.
