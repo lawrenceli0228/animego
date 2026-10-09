@@ -25,6 +25,7 @@ const (
 	msgReviewBody       = "Each item needs a decision"
 	msgRejectNote       = "A rejected item needs a note"
 	msgAlreadyReviewed  = "This submission has already been reviewed"
+	msgStale            = "Some changes no longer match the page"
 	msgSubmissionAbsent = "Submission not found"
 	maxRejectNoteLen    = 500
 	defaultPageSize     = 30
@@ -71,6 +72,10 @@ type itemResponse struct {
 	// route while it waits, its public address once accepted, null once
 	// rejected (the file is gone).
 	PreviewURL *string `json:"previewUrl"`
+	// Stale is set on a pending item whose old value the page no longer
+	// shows: another edit was accepted meanwhile (stale.go).  It can only be
+	// rejected.
+	Stale bool `json:"stale"`
 }
 
 // submissionResponse is GET /api/admin/edits/{id}.
@@ -223,11 +228,19 @@ func (h *Handlers) load(ctx context.Context, id uuid.UUID) (submissionResponse, 
 	if err != nil {
 		return submissionResponse{}, false, err
 	}
+	stale := map[uuid.UUID]bool{}
+	if row.Status == "pending" {
+		value, err := h.currentPage(ctx, row.Kind, row.EntityID)
+		if err != nil {
+			return submissionResponse{}, false, err
+		}
+		stale = staleItems(value, rows)
+	}
 	items := make([]itemResponse, 0, len(rows))
 	for _, it := range rows {
 		items = append(items, itemResponse{
 			ID: it.ID, Field: it.Field, Key: it.ItemKey, Old: it.OldValue, New: it.NewValue, Meta: it.Meta,
-			Status: it.Status, RejectNote: it.RejectNote, PreviewURL: h.previewURL(it),
+			Status: it.Status, RejectNote: it.RejectNote, PreviewURL: h.previewURL(it), Stale: stale[it.ID],
 		})
 	}
 	var reviewer *string
@@ -285,7 +298,8 @@ type reviewRequest struct {
 // it themselves).  After it, rejected photos are deleted and every title
 // crediting the page is dropped from the detail cache.  Answers the
 // submission as Get does.  415 for a body that is not application/json (see
-// isJSON); 409 when someone reviewed it first.
+// isJSON); 409 when someone reviewed it first, or when an accepted item is
+// stale (stale.go) -- then nothing is decided.
 func (h *Handlers) Review(w http.ResponseWriter, r *http.Request) {
 	claims, ok := jwtx.ClaimsFrom(r.Context())
 	if !ok || claims == nil {
@@ -342,6 +356,9 @@ func (h *Handlers) Review(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errAlreadyReviewed):
 		fail(w, http.StatusConflict, httpx.CodeConflict, msgAlreadyReviewed)
 		return
+	case errors.Is(err, errStale):
+		fail(w, http.StatusConflict, httpx.CodeConflict, msgStale)
+		return
 	case errors.Is(err, errDecisionsIncomplete):
 		fail(w, http.StatusBadRequest, httpx.CodeValidationError, msgReviewBody)
 		return
@@ -373,6 +390,7 @@ func (h *Handlers) Review(w http.ResponseWriter, r *http.Request) {
 var (
 	errAlreadyReviewed     = errors.New(msgAlreadyReviewed)
 	errDecisionsIncomplete = errors.New(msgReviewBody)
+	errStale               = errors.New(msgStale)
 )
 
 type reviewOutcome struct {
@@ -449,6 +467,18 @@ func (h *Handlers) review(ctx context.Context, id, reviewer uuid.UUID, notes map
 		raw, err := q.LockEntityOverlay(ctx, sub.Kind, sub.EntityID)
 		if err != nil {
 			return reviewOutcome{}, err
+		}
+		// The page as it is now, read once the overlay is locked: no other
+		// review can change it until this one commits.  (Read on the pool,
+		// not the transaction -- the loaders query concurrently, which a
+		// transaction cannot.  The overlay row they read is the one locked
+		// here, unchanged: the overlay is written only under this lock.)
+		value, err := h.currentPage(ctx, sub.Kind, sub.EntityID)
+		if err != nil {
+			return reviewOutcome{}, err
+		}
+		if len(staleItems(value, acceptedItems)) > 0 {
+			return reviewOutcome{}, errStale
 		}
 		doc, err := overlay.Decode(raw)
 		if err != nil {

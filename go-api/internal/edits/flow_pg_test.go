@@ -409,6 +409,90 @@ func TestSubmit_RefusedAttemptsCount_PG(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, code, "someone else's attempts are their own")
 }
 
+// Two readers edit the same voice row and the aliases; the first is
+// accepted.  The second's row and aliases were made against a page that is
+// gone: accepting them would put back the first reader's row and drop their
+// alias, so they are marked and refused, and what else the second changed
+// can still be accepted.
+func TestReview_StaleItemsAreNotAccepted_PG(t *testing.T) {
+	f := newFlow(t)
+	a := f.user("reader-a", false)
+	b := f.user("reader-b", false)
+	admin := f.user("admin-stale", true)
+
+	submit := func(who account, changes map[string]any) string {
+		code, body := f.do(http.MethodPost, "/api/edits", &who, submission(changes))
+		require.Equal(t, http.StatusCreated, code, "%v", body)
+		return body["data"].(map[string]any)["id"].(string)
+	}
+	itemsOf := func(id string) []map[string]any {
+		code, got := f.do(http.MethodGet, "/api/admin/edits/"+id, &admin, nil)
+		require.Equal(t, http.StatusOK, code)
+		var out []map[string]any
+		for _, it := range got["data"].(map[string]any)["items"].([]any) {
+			out = append(out, it.(map[string]any))
+		}
+		return out
+	}
+	staleOf := func(items []map[string]any) map[string]any {
+		out := map[string]any{}
+		for _, it := range items {
+			out[it["field"].(string)] = it["stale"]
+		}
+		return out
+	}
+	review := func(id string, items []map[string]any, reject ...string) (int, map[string]any) {
+		var decisions []map[string]any
+		for _, it := range items {
+			d := map[string]any{"itemId": it["id"], "accept": true}
+			for _, field := range reject {
+				if it["field"] == field {
+					d = map[string]any{"itemId": it["id"], "accept": false, "note": "页面已经改过，请按现在的页面重新提交"}
+				}
+			}
+			decisions = append(decisions, d)
+		}
+		return f.do(http.MethodPost, "/api/admin/edits/"+id+"/review", &admin, map[string]any{"decisions": decisions})
+	}
+
+	aid := submit(a, map[string]any{
+		"voices":  []map[string]any{{"key": "133507|Japanese|", "personId": 95185}},
+		"aliases": []string{"斯塔克"},
+	})
+	bid := submit(b, map[string]any{
+		"voices":  []map[string]any{{"key": "133507|Japanese|", "line": "日配 · 主役"}},
+		"aliases": []string{"史塔克"},
+		"age":     "18",
+	})
+	assert.Equal(t, map[string]any{"voice": false, "aliases": false, "age": false}, staleOf(itemsOf(bid)),
+		"nothing is stale while the page is as both saw it")
+
+	code, body := review(aid, itemsOf(aid))
+	require.Equal(t, http.StatusOK, code, "%v", body)
+
+	items := itemsOf(bid)
+	assert.Equal(t, map[string]any{"voice": true, "aliases": true, "age": false}, staleOf(items))
+
+	code, body = review(bid, items)
+	assert.Equal(t, http.StatusConflict, code)
+	assert.Equal(t, msgStale, errMessage(body))
+	assert.Equal(t, 1, f.count(`SELECT count(*) FROM edit_submissions WHERE status = 'pending'`), "nothing was decided")
+
+	code, body = review(bid, items, "voice", "aliases")
+	require.Equal(t, http.StatusOK, code, "%v", body)
+	_, page := f.do(http.MethodGet, "/api/characters/184313", nil, nil)
+	c := page["data"].(map[string]any)
+	assert.Equal(t, []any{"斯塔克"}, c["alternativeNames"], "the first reader's alias stays")
+	row := c["voices"].([]any)[0].(map[string]any)
+	assert.Equal(t, "133507|Japanese|", row["key"])
+	assert.Equal(t, float64(95185), row["person"].(map[string]any)["anilistId"], "and their row")
+	assert.Nil(t, row["line"])
+	assert.Equal(t, "18", c["profile"].(map[string]any)["age"], "the second reader's age is accepted")
+	for _, it := range itemsOf(bid) {
+		assert.Equal(t, false, it["stale"], "a reviewed submission is past being stale")
+	}
+}
+
 func TestEditFlow_PG(t *testing.T) {
 	f := newFlow(t)
 	ctx := context.Background()

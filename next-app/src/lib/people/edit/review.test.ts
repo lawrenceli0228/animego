@@ -6,8 +6,10 @@ import zhHantSpa from "@/locales/zh-Hant-spa.js";
 import { getDictByLang } from "@/lib/i18n";
 import { LANGS } from "@/lib/i18n/lang";
 import {
+  acceptAllDecisions,
   decisionsComplete,
   EDIT_FIELDS,
+  panelKey,
   fieldLabelKey,
   initialDecisions,
   reviewBody,
@@ -16,7 +18,7 @@ import {
 } from "./review";
 
 function item(id: string, field: EditItem["field"] = "nameCn"): EditItem {
-  return { id, field, key: "", old: null, new: "x", meta: null, status: "pending", rejectNote: null, previewUrl: null };
+  return { id, field, key: "", old: null, new: "x", meta: null, status: "pending", rejectNote: null, previewUrl: null, stale: false };
 }
 
 const A = "11111111-1111-4111-8111-111111111111";
@@ -38,6 +40,25 @@ describe("the review's decisions", () => {
         { itemId: B, accept: false, note: "第二季的造型" },
       ],
     });
+  });
+
+  test("a stale item starts rejected with the note given, and 全部采纳 leaves it so", () => {
+    const items = [item(A), { ...item(B, "voice"), stale: true }];
+    const decisions = initialDecisions(items, "页面已经改过");
+    expect(decisions).toEqual({ [A]: { accept: true, note: "" }, [B]: { accept: false, note: "页面已经改过" } });
+    expect(decisionsComplete(items, decisions)).toBe(true);
+
+    const edited = { ...decisions, [A]: { accept: false, note: "不对" }, [B]: { accept: false, note: "改过了" } };
+    expect(acceptAllDecisions(items, edited)).toEqual({
+      [A]: { accept: true, note: "" },
+      [B]: { accept: false, note: "改过了" },
+    });
+  });
+
+  test("the panel is keyed by what is stale: a reload that finds more starts it again", () => {
+    const sub = { id: "s", status: "pending" as const, items: [item(A), { ...item(B), stale: true }] };
+    expect(panelKey(sub)).toBe(`s:pending:${B}`);
+    expect(panelKey({ ...sub, items: [item(A), item(B)] })).toBe("s:pending:");
   });
 
   test("the server action checks what it forwards", () => {
