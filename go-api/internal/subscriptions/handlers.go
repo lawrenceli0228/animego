@@ -101,14 +101,18 @@ type SubscriptionsDB interface {
 	// statement can only add.  Same single-statement discipline, same
 	// zero-rows-means-no-subscription contract.
 	MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error)
-	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
+	// UpsertSubscription and InsertSubscriptionIfAbsent return their own row
+	// types since migration 0046 wrapped them in a CTE (each also appends a
+	// 'status' activity event); the fields are exactly dbgen.Subscription's,
+	// and CreateSubscription converts.
+	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.UpsertSubscriptionRow, error)
 	// InsertSubscriptionIfAbsent backs POST bodies carrying
 	// `"ifAbsent": true`.  It differs from UpsertSubscription in exactly
 	// one way that matters: on conflict it returns the existing row
 	// untouched instead of overwriting `status`.  Click-to-track fires on
 	// paths the user did not explicitly ask to re-subscribe on, so an
 	// upsert there would silently resurrect dropped/completed titles.
-	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
+	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error)
 	// GetAnimeEpisodeCount reads the authoritative total-episode count
 	// used as the upper bound on PATCH.  Nil result = still airing /
 	// unknown length = no bound to enforce.  Kept out of the PATCH CTE on
@@ -601,9 +605,13 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 	var sub dbgen.Subscription
 	var err error
 	if req.IfAbsent {
-		sub, err = h.Queries.InsertSubscriptionIfAbsent(ctx, claims.UserID, req.AnilistID, req.Status)
+		var row dbgen.InsertSubscriptionIfAbsentRow
+		row, err = h.Queries.InsertSubscriptionIfAbsent(ctx, claims.UserID, req.AnilistID, req.Status)
+		sub = dbgen.Subscription(row)
 	} else {
-		sub, err = h.Queries.UpsertSubscription(ctx, claims.UserID, req.AnilistID, req.Status)
+		var row dbgen.UpsertSubscriptionRow
+		row, err = h.Queries.UpsertSubscription(ctx, claims.UserID, req.AnilistID, req.Status)
+		sub = dbgen.Subscription(row)
 	}
 	if err != nil {
 		// FK race: anime_cache row vanished between EnsureCached's

@@ -38,12 +38,40 @@ WITH inserted_block AS (
            AND comment.user_id = sqlc.arg('blocker_id')::uuid)
       )
     RETURNING reaction.comment_id
+), removed_activity_likes AS (
+    -- The community tab's two acknowledgement primitives (migration 0046)
+    -- are severed the same way comment likes are.
+    DELETE FROM activity_likes activity_like
+    USING activity_events event
+    WHERE activity_like.activity_event_id = event.id
+      AND (
+          (activity_like.user_id = sqlc.arg('blocker_id')::uuid
+           AND event.user_id = sqlc.arg('blocked_id')::uuid)
+          OR
+          (activity_like.user_id = sqlc.arg('blocked_id')::uuid
+           AND event.user_id = sqlc.arg('blocker_id')::uuid)
+      )
+    RETURNING activity_like.activity_event_id
+), removed_review_votes AS (
+    DELETE FROM anime_review_votes vote
+    USING anime_reviews review
+    WHERE vote.review_id = review.id
+      AND (
+          (vote.user_id = sqlc.arg('blocker_id')::uuid
+           AND review.user_id = sqlc.arg('blocked_id')::uuid)
+          OR
+          (vote.user_id = sqlc.arg('blocked_id')::uuid
+           AND review.user_id = sqlc.arg('blocker_id')::uuid)
+      )
+    RETURNING vote.review_id
 )
 SELECT
     EXISTS (SELECT 1 FROM inserted_block)::boolean AS inserted,
     (SELECT count(*) FROM removed_follows)::bigint AS removed_follows,
     (SELECT count(*) FROM removed_notifications)::bigint AS removed_notifications,
-    (SELECT count(*) FROM removed_reactions)::bigint AS removed_reactions;
+    ((SELECT count(*) FROM removed_reactions)
+     + (SELECT count(*) FROM removed_activity_likes)
+     + (SELECT count(*) FROM removed_review_votes))::bigint AS removed_reactions;
 
 -- name: UnblockUser :execrows
 DELETE FROM user_blocks
@@ -90,10 +118,18 @@ SELECT EXISTS (
 -- name: CreatePendingReport :one
 -- A repeated report while the first is pending returns that canonical report.
 -- Once moderation moves it out of pending the reporter may file a new report.
+--
+-- Reviews, threads and replies (migration 0046) are reportable while they are
+-- up; a private review is not (nobody but its author can see it).  Their
+-- snapshot carries the text as it stood, like a comment's, and the anime and
+-- thread / activity it lives under so a moderator can find it.
 WITH report_target AS (
     SELECT
         comment.id AS target_comment_id,
         NULL::uuid AS target_user_id,
+        NULL::uuid AS target_review_id,
+        NULL::uuid AS target_thread_id,
+        NULL::uuid AS target_reply_id,
         jsonb_build_object(
             'username', author.username,
             'content', comment.content,
@@ -111,16 +147,88 @@ WITH report_target AS (
     SELECT
         NULL::uuid AS target_comment_id,
         target_user.id AS target_user_id,
+        NULL::uuid AS target_review_id,
+        NULL::uuid AS target_thread_id,
+        NULL::uuid AS target_reply_id,
         jsonb_build_object('username', target_user.username) AS target_snapshot
     FROM users target_user
     WHERE sqlc.arg('target_type')::text = 'user'
       AND target_user.id = sqlc.narg('target_user_id')::uuid
+
+    UNION ALL
+
+    SELECT
+        NULL::uuid AS target_comment_id,
+        NULL::uuid AS target_user_id,
+        review.id AS target_review_id,
+        NULL::uuid AS target_thread_id,
+        NULL::uuid AS target_reply_id,
+        jsonb_build_object(
+            'username', author.username,
+            'summary', review.summary,
+            'content', review.body,
+            'isSpoiler', review.is_spoiler,
+            'anilistId', review.anilist_id
+        ) AS target_snapshot
+    FROM anime_reviews review
+    JOIN users author ON author.id = review.user_id
+    WHERE sqlc.arg('target_type')::text = 'review'
+      AND review.id = sqlc.narg('target_review_id')::uuid
+      AND review.deleted_at IS NULL
+      AND NOT review.is_private
+
+    UNION ALL
+
+    SELECT
+        NULL::uuid AS target_comment_id,
+        NULL::uuid AS target_user_id,
+        NULL::uuid AS target_review_id,
+        thread.id AS target_thread_id,
+        NULL::uuid AS target_reply_id,
+        jsonb_build_object(
+            'username', author.username,
+            'title', thread.title,
+            'content', thread.body,
+            'isSpoiler', thread.is_spoiler,
+            'anilistId', thread.anilist_id,
+            'threadId', thread.id
+        ) AS target_snapshot
+    FROM anime_threads thread
+    JOIN users author ON author.id = thread.user_id
+    WHERE sqlc.arg('target_type')::text = 'thread'
+      AND thread.id = sqlc.narg('target_thread_id')::uuid
+      AND thread.deleted_at IS NULL
+
+    UNION ALL
+
+    SELECT
+        NULL::uuid AS target_comment_id,
+        NULL::uuid AS target_user_id,
+        NULL::uuid AS target_review_id,
+        NULL::uuid AS target_thread_id,
+        reply.id AS target_reply_id,
+        jsonb_build_object(
+            'username', author.username,
+            'content', reply.body,
+            'isSpoiler', reply.is_spoiler,
+            'anilistId', reply.anilist_id,
+            'threadId', reply.thread_id,
+            'activityId', reply.activity_event_id
+        ) AS target_snapshot
+    FROM community_replies reply
+    JOIN users author ON author.id = reply.user_id
+    WHERE sqlc.arg('target_type')::text = 'reply'
+      AND reply.id = sqlc.narg('target_reply_id')::uuid
+      AND reply.deleted_at IS NULL
 ), inserted_report AS (
     INSERT INTO reports (
         reporter_id,
         target_type,
         target_comment_id,
         target_user_id,
+        target_review_id,
+        target_thread_id,
+        target_reply_id,
         target_snapshot,
         reason,
         details
@@ -130,6 +238,9 @@ WITH report_target AS (
         sqlc.arg('target_type')::text,
         target.target_comment_id,
         target.target_user_id,
+        target.target_review_id,
+        target.target_thread_id,
+        target.target_reply_id,
         target.target_snapshot,
         sqlc.arg('reason')::text,
         sqlc.narg('details')::text
@@ -150,6 +261,15 @@ WHERE report.reporter_id = sqlc.arg('reporter_id')::uuid
       OR
       (report.target_type = 'user'
        AND report.target_user_id = sqlc.narg('target_user_id')::uuid)
+      OR
+      (report.target_type = 'review'
+       AND report.target_review_id = sqlc.narg('target_review_id')::uuid)
+      OR
+      (report.target_type = 'thread'
+       AND report.target_thread_id = sqlc.narg('target_thread_id')::uuid)
+      OR
+      (report.target_type = 'reply'
+       AND report.target_reply_id = sqlc.narg('target_reply_id')::uuid)
   )
   AND NOT EXISTS (SELECT 1 FROM inserted_report)
 LIMIT 1;
@@ -163,6 +283,9 @@ SELECT
     report.target_type,
     report.target_comment_id,
     report.target_user_id,
+    report.target_review_id,
+    report.target_thread_id,
+    report.target_reply_id,
     report.target_snapshot,
     target_user.username AS target_username,
     target_comment.content AS target_comment_content,

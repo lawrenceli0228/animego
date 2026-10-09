@@ -102,25 +102,54 @@ func (q *Queries) GetSubscription(ctx context.Context, userID uuid.UUID, anilist
 }
 
 const insertSubscriptionIfAbsent = `-- name: InsertSubscriptionIfAbsent :one
-INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
-VALUES (
-    $1::uuid,
-    $2::integer,
-    $3::text,
-    now()
+WITH upserted AS (
+    INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
+    VALUES (
+        $1::uuid,
+        $2::integer,
+        $3::text,
+        now()
+    )
+    ON CONFLICT (user_id, anilist_id) DO UPDATE
+    SET status = subscriptions.status
+    RETURNING
+        user_id,
+        anilist_id,
+        status,
+        current_episode,
+        score,
+        last_watched_at,
+        created_at,
+        updated_at
+), status_event AS (
+    INSERT INTO activity_events (user_id, event_type, anilist_id, status)
+    SELECT u.user_id, 'status', u.anilist_id, u.status
+    FROM upserted u
+    WHERE u.created_at = now()
+    RETURNING id
 )
-ON CONFLICT (user_id, anilist_id) DO UPDATE
-SET status = subscriptions.status
-RETURNING
-    user_id,
-    anilist_id,
-    status,
-    current_episode,
-    score,
-    last_watched_at,
-    created_at,
-    updated_at
+SELECT
+    u.user_id,
+    u.anilist_id,
+    u.status,
+    u.current_episode,
+    u.score,
+    u.last_watched_at,
+    u.created_at,
+    u.updated_at
+FROM upserted u
 `
+
+type InsertSubscriptionIfAbsentRow struct {
+	UserID         uuid.UUID          `json:"userId"`
+	AnilistID      int32              `json:"anilistId"`
+	Status         string             `json:"status"`
+	CurrentEpisode int32              `json:"currentEpisode"`
+	Score          *int32             `json:"score"`
+	LastWatchedAt  pgtype.Timestamptz `json:"lastWatchedAt"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
+}
 
 // POST /api/subscriptions with `"ifAbsent": true` — the click-to-track path.
 //
@@ -149,9 +178,16 @@ RETURNING
 // race open and asserts the 201.
 //
 // Caller MUST have ensured the anime_cache row exists (else the FK kicks).
-func (q *Queries) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (Subscription, error) {
+//
+// Only a row this statement created appends a 'status' activity event
+// (migration 0046) — the conflict arm changes nothing, so it has nothing to
+// announce.  created_at = now() is the "created here" test: now() is this
+// transaction's start time, and a row that won the race in another
+// transaction carries that transaction's.  The final SELECT still reads the
+// upsert's RETURNING, so the DO UPDATE guarantee above is untouched.
+func (q *Queries) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (InsertSubscriptionIfAbsentRow, error) {
 	row := q.db.QueryRow(ctx, insertSubscriptionIfAbsent, userID, anilistID, status)
-	var i Subscription
+	var i InsertSubscriptionIfAbsentRow
 	err := row.Scan(
 		&i.UserID,
 		&i.AnilistID,
@@ -793,7 +829,7 @@ func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscription
 
 const updateSubscriptionWithActivity = `-- name: UpdateSubscriptionWithActivity :one
 WITH previous AS (
-    SELECT s.user_id, s.anilist_id, s.current_episode
+    SELECT s.user_id, s.anilist_id, s.current_episode, s.status
     FROM subscriptions s
     WHERE s.user_id = $1::uuid
       AND s.anilist_id = $2::integer
@@ -851,7 +887,9 @@ WITH previous AS (
     FROM previous
     WHERE subscription.user_id = $1::uuid
       AND subscription.anilist_id = $2::integer
-    RETURNING subscription.user_id, subscription.anilist_id, subscription.status, subscription.current_episode, subscription.score, subscription.last_watched_at, subscription.created_at, subscription.updated_at, previous.current_episode AS previous_episode
+    RETURNING subscription.user_id, subscription.anilist_id, subscription.status, subscription.current_episode, subscription.score, subscription.last_watched_at, subscription.created_at, subscription.updated_at,
+              previous.current_episode AS previous_episode,
+              previous.status AS previous_status
 ), inserted_activity AS (
     INSERT INTO activity_events (user_id, event_type, anilist_id, episode)
     SELECT
@@ -862,6 +900,20 @@ WITH previous AS (
     FROM updated
     WHERE $3::integer IS NOT NULL
       AND current_episode IS DISTINCT FROM previous_episode
+    RETURNING id
+), inserted_status_activity AS (
+    -- A status the caller actually moved (migration 0046): the community
+    -- tab's 最近动态 reads these.  ` + "`" + `previous` + "`" + ` holds the row lock, so a
+    -- repeated PATCH to the same status reads the value the first one wrote
+    -- and appends nothing.
+    INSERT INTO activity_events (user_id, event_type, anilist_id, status)
+    SELECT
+        user_id,
+        'status',
+        anilist_id,
+        status
+    FROM updated
+    WHERE status IS DISTINCT FROM previous_status
     RETURNING id
 )
 SELECT
@@ -1022,30 +1074,88 @@ func (q *Queries) UpdateSubscriptionWithActivity(ctx context.Context, arg Update
 }
 
 const upsertSubscription = `-- name: UpsertSubscription :one
-INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
-VALUES ($1, $2, $3, now())
-ON CONFLICT (user_id, anilist_id) DO UPDATE
-SET status     = EXCLUDED.status,
-    updated_at = now()
-RETURNING
-    user_id,
-    anilist_id,
-    status,
-    current_episode,
-    score,
-    last_watched_at,
-    created_at,
-    updated_at
+WITH previous AS (
+    SELECT s.status
+    FROM subscriptions s
+    WHERE s.user_id = $1::uuid
+      AND s.anilist_id = $2::integer
+    FOR UPDATE
+), upserted AS (
+    INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
+    SELECT
+        $1::uuid,
+        $2::integer,
+        $3::text,
+        now()
+    FROM (SELECT count(*) FROM previous) AS read_previous_first
+    ON CONFLICT (user_id, anilist_id) DO UPDATE
+    SET status     = EXCLUDED.status,
+        updated_at = now()
+    RETURNING
+        user_id,
+        anilist_id,
+        status,
+        current_episode,
+        score,
+        last_watched_at,
+        created_at,
+        updated_at
+), status_event AS (
+    INSERT INTO activity_events (user_id, event_type, anilist_id, status)
+    SELECT u.user_id, 'status', u.anilist_id, u.status
+    FROM upserted u
+    WHERE u.created_at = now()
+       OR u.status IS DISTINCT FROM (SELECT p.status FROM previous p)
+    RETURNING id
+)
+SELECT
+    u.user_id,
+    u.anilist_id,
+    u.status,
+    u.current_episode,
+    u.score,
+    u.last_watched_at,
+    u.created_at,
+    u.updated_at
+FROM upserted u
 `
+
+type UpsertSubscriptionRow struct {
+	UserID         uuid.UUID          `json:"userId"`
+	AnilistID      int32              `json:"anilistId"`
+	Status         string             `json:"status"`
+	CurrentEpisode int32              `json:"currentEpisode"`
+	Score          *int32             `json:"score"`
+	LastWatchedAt  pgtype.Timestamptz `json:"lastWatchedAt"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
+}
 
 // POST /api/subscriptions — create-or-update on (user_id, anilist_id).
 // Caller MUST have ensured anime_cache row exists (else the FK kicks).
 // ON CONFLICT only writes status — Express also only patches `status`
 // in the upsert payload, leaving current_episode/score untouched on
 // re-add.  RETURNING gives the canonical post-write state.
-func (q *Queries) UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (Subscription, error) {
+//
+// A 'status' activity event (migration 0046) is appended in the same
+// statement when the row is new or its status actually moved, so the
+// anime's community tab can say "看完了".  `previous` locks the existing
+// row first: two overlapping upserts to the same status then serialise, and
+// the second reads the first one's value rather than its own stale snapshot
+// and appends nothing.  A brand-new row is recognised by created_at = now():
+// now() is this transaction's start, which no row written by another
+// transaction carries.
+//
+// ★ The insert reads `previous` (the count below) on purpose.  A CTE runs
+// when something first reads it, and the only other reader is status_event,
+// which runs after the upsert.  By then the row has been rewritten by this
+// same statement, and FOR UPDATE on a row the current command already
+// modified finds nothing — `previous` would come back empty, every repeat
+// would look like a change, and the feed would fill with duplicates.
+// Reading it here takes the lock and the old status before the write.
+func (q *Queries) UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (UpsertSubscriptionRow, error) {
 	row := q.db.QueryRow(ctx, upsertSubscription, userID, anilistID, status)
-	var i Subscription
+	var i UpsertSubscriptionRow
 	err := row.Scan(
 		&i.UserID,
 		&i.AnilistID,

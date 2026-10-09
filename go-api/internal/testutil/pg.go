@@ -76,6 +76,13 @@ var allTables = []string{
 	// Community safety tables (migration 0019).
 	"user_blocks",
 	"reports",
+	// The anime community tab (migration 0046).  Every one cascades from
+	// users or anime_cache; listed to keep the inventory true.
+	"anime_reviews",
+	"anime_review_votes",
+	"anime_threads",
+	"community_replies",
+	"activity_likes",
 	// Community discovery aggregate (migration 0020).
 	"community_engagement_daily",
 	// Activity rollup (migration 0025).  The CASCADE from users would reach
