@@ -25,20 +25,45 @@
 //	 ├─ IMAGE_WARM_BASE_URL empty? ─────────────────────── yes ─► INFO, nothing to do
 //	 ├─ a throttled row whose next_attempt_at is ahead? ─── yes ─► INFO, skip the pass
 //	 ├─ free space on the host disk < 10 GiB? ───────────── yes ─► ERROR (Sentry), skip the pass
-//	 └─ batch: never asked, then due retries, then month-old re-checks
+//	 └─ batch: never asked, then due retries, then month-old re-checks of
+//	    unhashed URLs, then due failures
 //	      each URL, about ten a second, while the pass has time left:
 //	        outside the allowlist ─► missing, no request sent; WARN
 //	        200 ───────────────────► warmed, warmed_at = now
 //	        404, 410, other 4xx ───► missing, asked again in 30 days
 //	        429 ───────────────────► throttled until Retry-After (1h if absent,
 //	                                 24h at most); ERROR; STOP, no further request
-//	        5xx, timeout, 401, 403,
-//	        a 200 cut short ───────► row untouched; failures in a row + 1;
-//	                                 the 3rd in a row ─► ERROR; STOP
+//	        5xx, 3xx, 401, 403,
+//	        timeout, or a 200
+//	        cut short ─────────────► failed, asked again in 1h, 2h, 4h ... as the
+//	                                 URL keeps failing, 30 days at most; the
+//	                                 pass's 3rd failure in a row ─► ERROR; STOP
 //	        cannot connect ────────► row untouched; WARN; STOP (nginx not up yet);
 //	                                 the 3rd pass in a row to stop here ─► ERROR
-//	      a 200 or a missing answer sets failures in a row back to 0
+//	        pass cancelled ────────► row untouched; STOP (a deploy)
+//	      a 200 or a missing answer ends the pass's run of failures; any
+//	      answer but a failure sets the URL's own count of them back to 0
 //	 INFO: one summary line, the count of each outcome and why the pass stopped
+//
+// # Which originals are asked for again
+//
+// Most AniList file names end in a content hash: a dash, twelve letters and
+// digits, then the extension, as in bx154587-qQTzQnEJJ3oB.jpg.  The bytes
+// behind such a name never change.  When AniList changes an image it gives
+// it a new name, and the new URL reaches us through the database, where the
+// next pass finds it never asked about.  Asking for a hashed original again
+// would only spend AniList requests, which this job exists to keep few.  So
+// a stored original is asked for again, once it is imageWarmRecheckAfter
+// old, only when its name carries no hash -- a bare number such as 21.jpg,
+// or default.jpg -- and nginx answers that with a conditional request.
+//
+// The test (ListImageWarmBatch) is narrow on purpose.  A name that only
+// nearly matches, with eleven or thirteen characters where the hash would
+// be, counts as unhashed and is re-checked, so if AniList changes how it
+// names files the job re-checks too much rather than too little.  nginx
+// revalidates an expired hashed original by itself when a reader asks for
+// it, and serves the stored copy while AniList is in trouble; that needs
+// nothing from this job.
 //
 // # Why a 429 stops everything
 //
@@ -64,6 +89,26 @@
 // stop that way is no deploy -- a wrong host or port in IMAGE_WARM_BASE_URL,
 // or an nginx without the warm server -- and is an ERROR, or the store could
 // stop filling for good with nothing anyone reads saying so.
+//
+// # Why a failure is recorded, and asked for last
+//
+// A failure is written down as 'failed', with a time to ask again: an hour,
+// doubled for each failure of the URL in a row before it, and 30 days at
+// most (MarkImageFailed).  Unrecorded, a URL that fails every time would
+// stay among the never asked, which head every batch in URL order.  Three
+// such URLs sorting together would make every pass three requests and a
+// stop, and nothing behind them -- new images, retries, re-checks -- would
+// be reached again.  Recorded, it waits for its time, and then it comes
+// last: due failures are the batch's final tier, so a run of them that
+// stops a pass cuts off only the failures behind it.  The third failure in
+// a row stops the pass as the section above says, each of the three
+// written down before it does.  The doubling is the URL's own, so one that
+// keeps failing is asked less and less often, and an AniList in trouble for
+// a day costs each URL a handful of requests rather than one a pass.
+//
+// What is no answer about the URL is not recorded: a connection to nginx
+// that cannot be made, and a pass cancelled.  Both are what a deploy looks
+// like, and a deploy must not put any URL off.
 //
 // # Why it has a queue of its own
 //
@@ -142,8 +187,8 @@ const (
 	// unreachable rather than as a slow AniList.
 	imageWarmDialTimeout = 5 * time.Second
 
-	// imageWarmFailuresToStop is how many 5xx answers or timeouts in a row
-	// end a pass.
+	// imageWarmFailuresToStop is how many failures in a row (answerFailed:
+	// 5xx answers, timeouts, refusals) end a pass.
 	imageWarmFailuresToStop = 3
 
 	// imageWarmUnreachablePassesToAlert is the pass, counting those that
@@ -152,9 +197,11 @@ const (
 	// deploy, three hours of it is not.
 	imageWarmUnreachablePassesToAlert = 3
 
-	// imageWarmRecheckAfter is how long a stored original goes before it is
-	// asked for again.  nginx answers that with a conditional request, so an
-	// image AniList has not changed costs it no body.
+	// imageWarmRecheckAfter is how long a stored original whose file name
+	// carries no content hash goes before it is asked for again; a hashed
+	// one never is (see the file comment).  nginx answers that with a
+	// conditional request, so an image AniList has not changed costs it no
+	// body.
 	imageWarmRecheckAfter = 30 * 24 * time.Hour
 
 	// imageWarmMissingRetryAfter is how long a URL AniList had no file for
@@ -196,6 +243,7 @@ type ImageWarmStore interface {
 	MarkImageWarmed(ctx context.Context, url string) error
 	MarkImageMissing(ctx context.Context, url string, retryAfter pgtype.Interval, lastHTTPStatus *int32) error
 	MarkImageThrottled(ctx context.Context, url string, retryAfter pgtype.Interval) error
+	MarkImageFailed(ctx context.Context, url string, lastHTTPStatus *int32) error
 }
 
 // ImageWarmWorker runs the job.
@@ -449,11 +497,14 @@ func (p *imageWarmPass) onThrottled(ctx context.Context, imageURL string, a warm
 	p.write(ctx, imageURL, p.w.store.MarkImageThrottled(ctx, imageURL, toPgInterval(a.retryAfter)))
 }
 
-// onFailure counts a 5xx, a timeout or a refusal.  The URL's row is left as
-// it was, so it is due again next pass; the third in a row stops this one.
+// onFailure records a 5xx, a timeout or a refusal as 'failed', which puts
+// the URL off by its own backoff and out of the head of the next batches
+// (see the file comment).  The third in a row stops the pass, once it too is
+// recorded.
 func (p *imageWarmPass) onFailure(ctx context.Context, imageURL string, a warmAnswer) {
 	p.failed++
 	p.failuresInARow++
+	p.write(ctx, imageURL, p.w.store.MarkImageFailed(ctx, imageURL, failedStatus(a)))
 	if p.failuresInARow < imageWarmFailuresToStop {
 		return
 	}
@@ -465,6 +516,17 @@ func (p *imageWarmPass) onFailure(ctx context.Context, imageURL string, a warmAn
 				" and that the allowlists in image_warm.go and nginx/default.p9.conf agree")
 	}
 	slog.ErrorContext(ctx, "image warm: upstream failing or refusing, pass stopped", attrs...)
+}
+
+// failedStatus is the status a failure is recorded with: the HTTP status
+// when that is what failed, nil when there was none (a timeout) or the
+// failure came after it (a 200 whose body broke off).
+func failedStatus(a warmAnswer) *int32 {
+	if a.status == 0 || a.status == http.StatusOK {
+		return nil
+	}
+	status := int32(a.status)
+	return &status
 }
 
 // write checks the write that recorded an answer.  A failed one stops the

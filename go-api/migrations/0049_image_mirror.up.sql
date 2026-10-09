@@ -25,24 +25,53 @@
 -- that):
 --
 --   status            'warmed'    nginx holds the original, since
---                                 warmed_at.  Asked again once that is
---                                 older than the job's re-check interval;
---                                 nginx answers with a conditional request
---                                 to AniList.
+--                                 warmed_at.  If the file name carries no
+--                                 content hash, the URL is asked again once
+--                                 warmed_at is older than the job's
+--                                 re-check interval, and nginx answers with
+--                                 a conditional request to AniList.  A
+--                                 hashed one is not asked again: its bytes
+--                                 never change.
 --                     'missing'   AniList has no such file, or the path is
 --                                 outside the ones nginx will store.  Asked
 --                                 again at next_attempt_at.
 --                     'throttled' AniList asked us to slow down.  No pass
 --                                 runs until next_attempt_at.
+--                     'failed'    the last answer was a failure: a 5xx, a
+--                                 timeout, a 401 or 403, a redirect, or a
+--                                 200 whose body broke off.  Asked again at
+--                                 next_attempt_at, which moves further off
+--                                 with each failure in a row.
 --   attempts          how many answers the job has recorded for the URL.
+--   failures          how many answers in a row, ending with the last, were
+--                     failures: 0 unless the row is 'failed', since any
+--                     other answer sets it back to 0.  The wait after a
+--                     failure is an hour, doubled for each failure in a row
+--                     before it, and 30 days at most.
 --   last_http_status  the status of the last answer.  NULL on a 'missing'
---                     row: the path was refused before a request was sent.
+--                     row whose path was refused before a request was
+--                     sent, and on a 'failed' row whose failure was not a
+--                     status: a timeout, or a 200 whose body broke off.
 --
--- A URL with no row has never been asked about.  A failed request (a 5xx
--- or a timeout) is not an answer and is not recorded, so the URL stays due
--- exactly as it was.  The CHECKs keep every row reachable by the job's
--- batch query: a 'warmed' row with no warmed_at would never be re-checked,
--- and a row waiting on a NULL next_attempt_at would wait forever.
+-- A URL with no row has never been asked about.  A request that got no
+-- answer about the URL at all -- no connection to nginx, or a pass
+-- cancelled -- is not recorded, so a deploy leaves every URL due exactly as
+-- it was.  A failure is recorded, and must be: unrecorded, a URL that fails
+-- every time would stay among the never asked, which head every batch, and
+-- three such URLs sorting together would stop every pass before it reached
+-- anything behind them.
+--
+-- The first CHECKs keep every row reachable by the job's batch query: a
+-- 'warmed' row with no warmed_at would never be re-checked, and a row
+-- waiting on a NULL next_attempt_at, a 'failed' one included, would wait
+-- forever.  The last holds failures to the status: a count left over from a
+-- run of failures that has ended would stretch the wait after the next one.
+--
+-- The batch.  ListImageWarmBatch takes, in this order: URLs never asked
+-- about; 'missing' and 'throttled' rows that are due; 'warmed' rows of
+-- unhashed URLs due a re-check; 'failed' rows that are due.  Failures come
+-- last, so a run of them, which stops the pass, cuts off only the failures
+-- behind it.
 --
 -- Indexes.  The batch query (ListImageWarmBatch) reaches this table only
 -- by looking each referenced URL up, which is what the primary key serves.
@@ -60,15 +89,18 @@ CREATE TABLE image_manager (
     warmed_at        timestamptz,
     next_attempt_at  timestamptz,
     attempts         integer NOT NULL DEFAULT 0,
+    failures         integer NOT NULL DEFAULT 0,
     last_http_status integer,
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT image_manager_status_chk
-        CHECK (status IN ('warmed', 'missing', 'throttled')),
+        CHECK (status IN ('warmed', 'missing', 'throttled', 'failed')),
     CONSTRAINT image_manager_warmed_at_chk
         CHECK (status <> 'warmed' OR warmed_at IS NOT NULL),
     CONSTRAINT image_manager_next_attempt_at_chk
-        CHECK (status = 'warmed' OR next_attempt_at IS NOT NULL)
+        CHECK (status = 'warmed' OR next_attempt_at IS NOT NULL),
+    CONSTRAINT image_manager_failures_chk
+        CHECK ((status = 'failed' AND failures > 0) OR (status <> 'failed' AND failures = 0))
 );
 
 CREATE INDEX image_manager_status_next_attempt_idx ON image_manager (status, next_attempt_at);

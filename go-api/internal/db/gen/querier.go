@@ -1821,14 +1821,36 @@ type Querier interface {
 	// precisely because the bgm_id is map-confirmed — we never heal a fuzzy or
 	// uncertain bind (whose dandanplay title could belong to the wrong subject).
 	ListIdMapRowsMissingCn(ctx context.Context) ([]ListIdMapRowsMissingCnRow, error)
-	// The URLs one pass asks for, at most row_limit, in three tiers:
+	// The URLs one pass asks for, at most row_limit, in four tiers:
 	//
 	//   1. never asked about (no row), by URL;
 	//   2. due again: a 'missing' or 'throttled' row whose next_attempt_at has
 	//      passed, longest due first;
-	//   3. the monthly re-check: a 'warmed' row warmed longer ago than
-	//      recheck_after, oldest first.  nginx answers it with a conditional
-	//      request to AniList, so an unchanged image costs AniList no body.
+	//   3. the monthly re-check of a URL whose file name carries no content
+	//      hash: a 'warmed' row warmed longer ago than recheck_after, oldest
+	//      first.  nginx answers it with a conditional request to AniList, so an
+	//      unchanged image costs AniList no body;
+	//   4. due again after failing: a 'failed' row whose next_attempt_at has
+	//      passed, longest due first.
+	//
+	// Only an unhashed URL is re-checked.  AniList names most files with a
+	// content hash, a dash and twelve letters and digits before the extension
+	// (bx154587-qQTzQnEJJ3oB.jpg), and the bytes behind such a name never
+	// change: when AniList changes an image it gives it a new URL, which reaches
+	// us through the database as a URL never asked about.  Asking for a hashed
+	// original again would only spend AniList requests, which this job exists
+	// to keep few.  The test is narrow on purpose: a name that only nearly
+	// matches -- eleven or thirteen characters, or a character that is not a
+	// letter or digit -- counts as unhashed and is re-checked, so if AniList
+	// changes how it names files the job re-checks too much, never too little.
+	// (nginx still revalidates an expired hashed original when a reader asks for
+	// it, and serves the stored copy while AniList is in trouble.  That needs
+	// nothing from this job.)
+	//
+	// Failures come last.  Three in a row stop a pass, and a URL that fails
+	// every time is asked again on its own backoff (MarkImageFailed); at the end
+	// of the batch a run of them cuts off only the failures behind it, never a
+	// new image, a retry or a re-check.
 	//
 	// Driven from image_refs, so a URL nothing references any more is never
 	// asked for again, whatever its row says.  The cost is the view's: it reads
@@ -2315,18 +2337,40 @@ type Querier interface {
 	// neither claims a viewing that did not happen nor reorders the home page's
 	// continue-watching row.
 	MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (MarkEpisodesWatchedRow, error)
+	// The request failed: a 5xx, a timeout, a 401 or 403, a redirect, or a 200
+	// whose body broke off.  last_http_status is the status when the status was
+	// the failure, and NULL when it was not: a timeout has none, and a 200 cut
+	// short failed in its body.
+	//
+	// Recorded so that a URL that fails every time stops heading the batch: it
+	// leaves the never-asked tier, and the batch reaches it only once it is due
+	// again, last of all.  The wait is an hour, doubled for each failure in a
+	// row before this one, and never more than 30 days: 1h, 2h, 4h and so on.  A
+	// URL that keeps failing is asked less and less often, and an AniList that
+	// fails for a day costs each URL a handful of requests rather than one a
+	// pass.  The exponent stops at 10, where the doubling is already past 30
+	// days: unbounded, enough failures in a row would overflow the interval
+	// before least() could cap it.
+	//
+	// warmed_at is left as it was: a re-check that fails does not take away the
+	// original nginx stored, and when it was stored is still true.
+	MarkImageFailed(ctx context.Context, url string, lastHttpStatus *int32) error
 	// AniList has no such file (a 4xx other than 401, 403 and 429, which the job
 	// treats as being refused or throttled), or the path is outside
 	// the ones nginx will store, in which case no request was sent and
 	// last_http_status is NULL.  Asked again after retry_after.  warmed_at is
-	// left as it was: when the image was last held is still true.
+	// left as it was: when the image was last held is still true.  failures
+	// goes back to 0, as it does for every answer but a failure.
 	MarkImageMissing(ctx context.Context, url string, retryAfter pgtype.Interval, lastHttpStatus *int32) error
 	// AniList answered 429.  next_attempt_at is when it asked us to come back,
 	// and until then ImageWarmBlocked stops every pass.  The URL itself is due
-	// again from that time, as a retry.
+	// again from that time, as a retry.  failures goes back to 0, as it does
+	// for every answer but a failure: being told to wait is not the URL failing.
 	MarkImageThrottled(ctx context.Context, url string, retryAfter pgtype.Interval) error
-	// nginx answered 200: it holds the original.  The row is due for a
-	// re-check once warmed_at is older than the job's re-check interval.
+	// nginx answered 200: it holds the original.  If the URL carries no content
+	// hash, the row is due for a re-check once warmed_at is older than the job's
+	// re-check interval.  Like every answer but a failure, it ends a run of
+	// failures, so failures goes back to 0.
 	MarkImageWarmed(ctx context.Context, url string) error
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
