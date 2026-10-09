@@ -255,9 +255,14 @@ jobs:
           # against a dev server with go-api not running at all. The year is a
           # literal because parseSeasonYear bounds it to 1990..2100 and nothing
           # else, so this probe cannot go stale.
+          #
+          # /anime/0/characters and /anime/0/staff compile the detail tabs'
+          # two segments the same way /anime/0 compiles the overview's, and
+          # answer 404 for the same reason, before any API call.
           for probe in /:200 /login:200 /register:200 /forgot-password:200 \
                        /reset-password/warmup:200 /welcome:200 /library:307 \
                        /player:200 /admin:307 /anime/0:404 \
+                       /anime/0/characters:404 /anime/0/staff:404 \
                        /seasonal/spring/2026:200; do
             # Split on the LAST colon, so a path that ever contains one still
             # pairs correctly with its status.

@@ -156,6 +156,13 @@ jobs:
       - name: Assert /anime/[id] is still prerendered
         run: node scripts/ci/assert-isr.mjs
 
+      # The detail page's 角色 and 制作 tabs are routes of their own under
+      # /anime/ and sit behind the same edge cache, so they get the same gate.
+      - name: Assert the detail tabs are prerendered too
+        run: |
+          node scripts/ci/assert-isr.mjs --route-suffix "/anime/[id]/characters"
+          node scripts/ci/assert-isr.mjs --route-suffix "/anime/[id]/staff"
+
   ws-server:
     name: ws-server (jest)
     runs-on: ubuntu-latest
