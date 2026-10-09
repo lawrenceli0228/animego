@@ -81,15 +81,15 @@
 }
 
 /* A phone: the design's `.mtabs` — 48px, a little tighter. The gap above
- * separates the overview's action row from the bar; the compact hero of the
- * list tabs ends in its own hairline, so the bar follows it directly. */
+ * separates the overview's action row from the bar; every other tab has the
+ * compact hero (DetailShell: compact={active !== "overview"}), which ends in
+ * its own hairline, so the bar follows it directly. */
 @media (max-width: 600px) {
   .bar {
     margin-top: 16px;
   }
 
-  [data-tab="characters"] .bar,
-  [data-tab="staff"] .bar {
+  [data-tab]:not([data-tab="overview"]) .bar {
     margin-top: 0;
   }
 

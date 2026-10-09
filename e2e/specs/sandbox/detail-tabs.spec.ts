@@ -467,6 +467,25 @@ test.describe("phone", () => {
     await expect(cards(page)).toHaveCount(10);
   });
 
+  test("社区 folds the hero like the list tabs, and the bar follows it directly", async ({ page }) => {
+    // The gap between the hero and the bar: the overview's action row wants
+    // 16px above the bar; a folded hero ends in its own hairline and wants none.
+    const gapAboveBar = () =>
+      tabs(page).evaluate(
+        (el) => el.getBoundingClientRect().top - (el.previousElementSibling?.getBoundingClientRect().bottom ?? 0),
+      );
+    await page.goto(`/anime/${TITLE}/characters`);
+    await expect(tabs(page)).toBeVisible();
+    expect(await gapAboveBar()).toBe(0);
+
+    await page.goto(`/anime/${TITLE}/social`);
+    await expect(page.locator("h1")).toHaveText("E2E 标签页");
+    await expect(page.getByRole("button", { name: "分享" })).toBeHidden();
+    await expect(tabs(page)).toBeVisible();
+    expect(await gapAboveBar()).toBe(0);
+    await expect(page.getByRole("heading", { level: 2, name: "评价", exact: true })).toBeInViewport();
+  });
+
   test("a tab chosen from a scrolled tab bar opens on its list, the tab focused", async ({ page }) => {
     await page.goto(`/anime/${TITLE}`);
     await waitForHydration(page, `nav a[href="/anime/${TITLE}/characters"]`);
