@@ -228,6 +228,10 @@ func (h *Handlers) attachEdits(ctx context.Context, userID uuid.UUID, items []it
 	for i := range items {
 		if items[i].Type == typeEditReview {
 			items[i].Edit = byID[items[i].ID]
+			// The row's actor is the admin who reviewed the edit; who that
+			// was is not the submitter's to know.  The field stays, empty,
+			// so every row keeps the one shape.
+			items[i].Actor = actorResponse{}
 		}
 	}
 	return nil

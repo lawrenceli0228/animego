@@ -575,6 +575,7 @@ func TestEditFlow_PG(t *testing.T) {
 		assert.Equal(t, float64(1), edit["rejected"])
 		assert.Equal(t, []any{"这张图是第二季的造型，会剧透，先不换"}, edit["rejectNotes"])
 		assert.Equal(t, float64(1), inbox["data"].(map[string]any)["unreadCount"])
+		assert.Equal(t, map[string]any{"username": "", "avatarUrl": nil}, n["actor"], "not who reviewed it")
 	})
 
 	t.Run("an accepted photo is published and shown", func(t *testing.T) {
