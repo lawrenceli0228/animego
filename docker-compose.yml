@@ -23,6 +23,9 @@ services:
         SENTRY_PROJECT: ${SENTRY_PROJECT:-}
         # Set by deploy.sh from `git rev-parse HEAD`; empty elsewhere.
         GIT_SHA: ${GIT_SHA:-}
+    # Named so next-image below can run this same build without building it
+    # a second time. It is the name compose would give it anyway.
+    image: animego-next-app:latest
     restart: unless-stopped
     env_file: .env.production
     environment:
@@ -57,13 +60,56 @@ services:
       timeout: 3s
       retries: 3
       start_period: 30s
-    # Headroom for the image optimizer and SSR while caches are still cold
-    # after a deploy.
+    # Headroom for SSR while caches are still cold after a deploy.
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── next-image (the image optimizer, on its own) ────────────────────
+  # The same build as next-app, but nginx sends it /_next/image and nothing
+  # else. An image nobody has asked for yet costs a download and an AVIF
+  # encode, and anyone can ask for any image the site shows; when a scraper
+  # did exactly that, the encodes shared next-app's CPU and page renders timed
+  # out behind them. Here they get a ceiling of their own: a flood of new
+  # images makes images slow (past nginx's max_conns, some come back 503 and
+  # are tried again on the next view), and pages keep the rest of the machine.
+  #
+  # No env_file: this container fetches and decodes images from outside and
+  # needs none of the application's secrets to do it.
+  next-image:
+    image: animego-next-app:latest
+    # Built by next-app's `build:` above, never pulled from a registry.
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      TZ: Asia/Shanghai
+      # Server-side error reporting, the one runtime variable the server reads
+      # at boot (sentry.server.config.ts). Empty disables it.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    networks:
+      - animego
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    cpus: 1.5
+    # Every request in flight holds its source image, and the ones sharp is
+    # working on hold decoded frames too. nginx caps how many are in flight
+    # (max_conns in default.conf, sized for a whole page of cold images).
     mem_limit: 1g
     volumes:
       # Optimized images survive container recreation (every deploy recreates
-      # next-app). Only images/: the rest of .next/cache is the fetch data
-      # cache, which must not outlive the build that wrote it.
+      # this container). Only images/: the rest of .next/cache is the fetch
+      # data cache, which must not outlive the build that wrote it.
       - next-image-cache:/app/.next/cache/images
     logging:
       driver: json-file
@@ -316,12 +362,18 @@ services:
       # Bind-mount, not COPY, so editing the file + `docker compose restart
       # nginx` is enough — no image rebuild.
       - ./nginx/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
+      # The image cache (next_image in default.conf) on a volume, so a
+      # recreated nginx starts with every image it has already encoded
+      # instead of sending them all to next-image again.
+      - nginx-cache:/var/cache/nginx
     depends_on:
       - next-app
     networks:
       - animego
-    # Headroom for open connections and the image cache's working set.
-    mem_limit: 256m
+    # Headroom for open connections and the image cache's working set. The
+    # cache's key index is shared memory (keys_zone in default.conf) and
+    # counts against this limit.
+    mem_limit: 512m
     logging:
       driver: json-file
       options:
@@ -332,6 +384,7 @@ volumes:
   postgres-data:
   avatars:
   next-image-cache:
+  nginx-cache:
 
 networks:
   animego:

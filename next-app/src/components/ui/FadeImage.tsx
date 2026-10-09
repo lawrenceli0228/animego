@@ -27,7 +27,7 @@
 // artwork is past the knee — skies and skin start to band. 85 lands on AVIF
 // q65, which measures clean. The failure mode is a slightly worse-looking
 // image, never an error, so per-call-site discipline would not survive; the
-// default lives here instead. `qualities: [75, 85]` in next.config.ts is the
+// default lives here instead. `qualities: [85]` in next.config.ts is the
 // matching allowlist — Next 16 requires one, and an unlisted value is clamped
 // by the component (and 400s if the optimizer URL is hit directly).
 //
@@ -108,7 +108,8 @@ type Sizing =
       height: number | `${number}`;
       /**
        * Omit for fixed-size images. Supplying it makes Next emit the FULL
-       * candidate list (15 entries, ~2 KB of srcset per image) instead of the
+       * candidate list (every width in next.config.ts, ~1.5 KB of srcset per
+       * image) instead of the
        * 1x/2x pair derived from `width` — which on a 207-cover homepage is
        * hundreds of KB of extra HTML. Only worth it when the rendered width
        * genuinely tracks the viewport.
