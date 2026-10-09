@@ -252,11 +252,14 @@ type Querier interface {
 	// Total for BrowseAnime's pagination envelope; same WHERE.
 	CountBrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32) (int64, error)
 	CountCommentReactions(ctx context.Context, commentID uuid.UUID) (int64, error)
+	CountEditSubmissionsSince(ctx context.Context, userID uuid.UUID, since pgtype.Timestamptz) (int32, error)
 	// Total for pagination — same filter as ListFeedActivities sans paging.
 	CountFeedActivities(ctx context.Context, dollar_1 []uuid.UUID) (int64, error)
 	// Total follower count for the pagination envelope.
 	CountFollowers(ctx context.Context, followeeID uuid.UUID) (int64, error)
 	CountFollowing(ctx context.Context, followerID uuid.UUID) (int64, error)
+	CountPendingEditSubmissions(ctx context.Context) (int32, error)
+	CountPendingEditSubmissionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
 	// Total non-Hentai entries for a given season + year.  Drives the
 	// pagination meta in /api/anime/seasonal so the frontend can render
 	// "X of Y" without a separate count call.
@@ -299,6 +302,7 @@ type Querier interface {
 	// Unique constraint violations (username/email already taken) surface
 	// as pgx.PgError code 23505 — handler catches + maps to 400 DUPLICATE.
 	CreateUser(ctx context.Context, username string, email string, password string) (User, error)
+	DecideEditItem(ctx context.Context, status string, rejectNote *string, iD uuid.UUID, submissionID uuid.UUID) (int64, error)
 	// Wipe child tables when Reset clears a row.  Express puts characters /
 	// episode_titles back to `undefined` in the document — Postgres mirrors
 	// that with a DELETE inside the reset transaction.
@@ -363,6 +367,8 @@ type Querier interface {
 	// so the handler can 404 when no row matched (matches Express's
 	// findOneAndDelete returning null → 404 "Subscription not found").
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	// So LockEntityOverlay has a row to lock even for a first edit.
+	EnsureEntityOverlay(ctx context.Context, kind string, entityID int32) error
 	// POST /api/admin/enrichment/:anilistId/flag — set admin_flag to one of
 	// 'needs-review' / 'manually-corrected' / NULL.  CHECK constraint on the
 	// column enforces the allow-list at DB level; handler also pre-validates
@@ -874,6 +880,7 @@ type Querier interface {
 	// because the Bangumi channel may have landed a real summary between scan and
 	// work.  In that race the LLM worker must stand down, not spend tokens.
 	GetDescriptionForLlmTranslate(ctx context.Context, anilistID int32) (GetDescriptionForLlmTranslateRow, error)
+	GetEditSubmission(ctx context.Context, id uuid.UUID) (GetEditSubmissionRow, error)
 	// Batch episode-count read for GET /api/anime/episodes, which the
 	// browser-side library calls once to backfill a per-series total for
 	// series it has ALREADY bound.  The binding path short-circuits on an
@@ -1131,6 +1138,7 @@ type Querier interface {
 	// Express limit is 20 hard, slice down to query limit in handler.
 	GetYearlyTop(ctx context.Context, seasonYear *int32, limit int32) ([]GetYearlyTopRow, error)
 	HasCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (bool, error)
+	HasPendingEditSubmission(ctx context.Context, userID uuid.UUID, kind string, entityID int32) (bool, error)
 	// Write a Chinese title sourced from dandanplay onto a trusted row.  Guarded
 	// on title_chinese IS NULL so a concurrent enrichment that already filled CN
 	// is never clobbered.
@@ -1156,6 +1164,12 @@ type Querier interface {
 	InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error)
 	// The rows an import adds or replaces, in one COPY.
 	InsertBgmPersonMap(ctx context.Context, arg []InsertBgmPersonMapParams) (int64, error)
+	InsertEditItem(ctx context.Context, arg InsertEditItemParams) error
+	// The submitter learns the outcome through the inbox.  One per
+	// submission (the dedupe key), and never to oneself: an admin reviewing
+	// their own submission is not notified (notifications_not_self_chk).
+	InsertEditReviewNotification(ctx context.Context, userID uuid.UUID, actorID uuid.UUID, submissionID uuid.UUID) error
+	InsertEditSubmission(ctx context.Context, arg InsertEditSubmissionParams) (InsertEditSubmissionRow, error)
 	// A repeated delivery attempt returns the canonical existing row without
 	// resetting read state.  Natural keys are chosen by the caller per event.
 	//
@@ -1294,6 +1308,10 @@ type Querier interface {
 	// In PG the column is `NOT NULL DEFAULT 0` (see 0001_init.up.sql:53) so
 	// "missing" is impossible — a single = 0 covers it.
 	ListAnimeForReEnrichByVersion(ctx context.Context, bangumiVersion int32) ([]ListAnimeForReEnrichByVersionRow, error)
+	// Every title whose credits name the person or character: the detail
+	// responses that carry their name and image, which a review drops from
+	// the detail cache.
+	ListAnimeIDsCrediting(ctx context.Context, kind string, entityID int32) ([]int32, error)
 	// ListAnimeCastCandidates for staff.
 	ListAnimeStaffCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error)
 	// The Bangumi half of ListAnilistRatingCandidates.  Same two populations
@@ -1455,6 +1473,10 @@ type Querier interface {
 	// translation failed validation goes to the back instead of holding the
 	// front of every batch.
 	ListDescriptionCnLlmCandidates(ctx context.Context, retryAfter pgtype.Interval, rowLimit int32) ([]int32, error)
+	ListEditItems(ctx context.Context, submissionID uuid.UUID) ([]ListEditItemsRow, error)
+	// What an edit_review notification reports: the page, how it was decided,
+	// and the notes on the parts that were not accepted, in item order.
+	ListEditReviewNotifications(ctx context.Context, notificationIds []uuid.UUID, userID uuid.UUID) ([]ListEditReviewNotificationsRow, error)
 	// For re-enrich v=2:  rows that have a bgm_id can be V3-healed.
 	// Returns the queue-payload fields directly.
 	ListEnrichedV2WithBgm(ctx context.Context) ([]ListEnrichedV2WithBgmRow, error)
@@ -1463,6 +1485,12 @@ type Querier interface {
 	// updateMany.  This query is the SELECT half; PromoteAnimeToV3 is the
 	// UPDATE half.
 	ListEnrichedV2WithoutBgm(ctx context.Context) ([]int32, error)
+	// edits.sql — reader edits to the person and character pages
+	// (internal/edits), their review, and the overlay layer every read of
+	// those pages applies (internal/overlay, migration 0047).
+	// The accepted overlays of the given people and characters, by primary
+	// key.  An id without one is simply absent from the result.
+	ListEntityOverlays(ctx context.Context, personIds []int32, characterIds []int32) ([]ListEntityOverlaysRow, error)
 	// Comment counts plus the newest N previews per episode for an anime's episode
 	// grid.  The window count avoids a second round-trip.  preview_limit is
 	// deliberately caller-controlled so desktop/mobile can choose a small payload.
@@ -1623,6 +1651,10 @@ type Querier interface {
 	// large enough for it not to.
 	ListNewUserCountsByDay(ctx context.Context, dayCount int32) ([]ListNewUserCountsByDayRow, error)
 	ListNotifications(ctx context.Context, userID uuid.UUID, pageLimit int32) ([]ListNotificationsRow, error)
+	// The queue, oldest first, with what its rows say about the submitter:
+	// the how-many-th submission this is, and how many of theirs had anything
+	// accepted.
+	ListPendingEditSubmissions(ctx context.Context, kind *string, pageOffset int32, pageLimit int32) ([]ListPendingEditSubmissionsRow, error)
 	// Profiles: AniList's people and characters (migration 0044), written by
 	// the profiles sweep (queue/profiles.go), one transaction per batch of up
 	// to fifty ids: an upsert per profile AniList returned, then one stamp for
@@ -1656,6 +1688,16 @@ type Querier interface {
 	// title the person is credited on: the page is built from those rows and
 	// from nothing else.
 	ListPeopleSitemapShard(ctx context.Context, minVoiceWorks int32, minStaffWorks int32, shardCount int32, shardIndex int32) ([]ListPeopleSitemapShardRow, error)
+	// What a credit line needs to show a person -- names and a portrait -- for
+	// ids an edit names that the page's own credits do not carry: the person a
+	// voice row was given to, or a voice an edit added.
+	//
+	// Only people a non-adult title credits are returned (the LATERAL is an
+	// inner join), which is also the check that such an id has a page to link
+	// to.  The credit columns are the most popular such credit's; the profile
+	// (fetched rows only) and Bangumi's Chinese name come first where they
+	// exist, as on the person page.
+	ListPersonRefs(ctx context.Context, ids []int32) ([]ListPersonRefsRow, error)
 	// Every production credit a person holds on a non-adult title, one row
 	// per (title, role) in the order AniList lists the title's staff.  The
 	// person's name and image as the credit stored them ride along, for the
@@ -1711,6 +1753,8 @@ type Querier interface {
 	ListReleasingEpisodeTitleCandidates(ctx context.Context, staleAfter pgtype.Interval, rowLimit int32) ([]ListReleasingEpisodeTitleCandidatesRow, error)
 	// Passing NULL report_status returns the entire moderation queue.
 	ListReports(ctx context.Context, reportStatus *string, pageOffset int32, pageLimit int32) ([]ListReportsRow, error)
+	// The reviewed list, newest review first; the same columns as the queue.
+	ListReviewedEditSubmissions(ctx context.Context, kind *string, pageOffset int32, pageLimit int32) ([]ListReviewedEditSubmissionsRow, error)
 	// Every (season, year) pair with a non-adult title, for the sitemap: the
 	// seasonal route already renders all of them, it just never listed more
 	// than the current quarter.
@@ -1811,6 +1855,16 @@ type Querier interface {
 	// it (the lock ends with the transaction) instead of interleaving its
 	// deletes and inserts with the first one's.  Readers are not affected.
 	LockBgmNameMaps(ctx context.Context) error
+	// The review holds the submission row for its whole transaction: a second
+	// admin reviewing the same submission waits, then finds it reviewed.
+	LockEditSubmission(ctx context.Context, id uuid.UUID) (LockEditSubmissionRow, error)
+	// Serialises one person's submissions, so the rate limits below count
+	// what is really there: two requests racing past the counts would each
+	// see the other's row missing.  Held to the end of the transaction.
+	LockEditSubmitter(ctx context.Context, userID uuid.UUID) error
+	// Read-modify-write of one overlay: two reviews of the same page accept
+	// one after the other, and neither loses the other's fields.
+	LockEntityOverlay(ctx context.Context, kind string, entityID int32) ([]byte, error)
 	// Authoritative AniList->Bangumi binding from the vendored id map
 	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
 	// consults this BEFORE any Bangumi search; a hit binds the subject with
@@ -1907,6 +1961,7 @@ type Querier interface {
 	// ListDescriptionCnLlmCandidates, exactly as migration 0015 is to the
 	// Bangumi sweep.
 	MarkDescriptionCnLlmAttempted(ctx context.Context, anilistID int32) error
+	MarkEditSubmissionReviewed(ctx context.Context, acceptedCount int16, rejectedCount int16, reviewedBy uuid.UUID, iD uuid.UUID) error
 	// -----------------------------------------------------------------------------
 	// Per-episode watch marks (migration 0024)
 	// -----------------------------------------------------------------------------
@@ -2229,6 +2284,7 @@ type Querier interface {
 	// — every refresh would fall to grace and the whole site would 401 thirty
 	// seconds later.  RETURNING removes the temptation to hand-roll a row count.
 	RotateRefreshToken(ctx context.Context, newToken *string, iD uuid.UUID, expectedToken *string) (RotateRefreshTokenRow, error)
+	SaveEntityOverlay(ctx context.Context, data []byte, updatedBy *uuid.UUID, kind string, entityID int32) error
 	// Queries used by /api/dandanplay/* orchestration (P2.6).
 	//
 	// One query — SearchAnimeCacheForDandanplay — replaces Express's

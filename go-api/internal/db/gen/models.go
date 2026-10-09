@@ -58,6 +58,7 @@ type Notification struct {
 	DedupeKey        string             `json:"dedupeKey"`
 	ReadAt           pgtype.Timestamptz `json:"readAt"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	EditSubmissionID *uuid.UUID         `json:"editSubmissionId"`
 }
 
 type Report struct {

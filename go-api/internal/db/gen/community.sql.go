@@ -225,11 +225,11 @@ WITH inserted AS (
         $6::text
     )
     ON CONFLICT (user_id, dedupe_key) DO NOTHING
-    RETURNING id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at
+    RETURNING id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at, edit_submission_id
 )
-SELECT id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at FROM inserted
+SELECT id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at, edit_submission_id FROM inserted
 UNION ALL
-SELECT n.id, n.user_id, n.actor_id, n.notification_type, n.comment_id, n.activity_event_id, n.dedupe_key, n.read_at, n.created_at
+SELECT n.id, n.user_id, n.actor_id, n.notification_type, n.comment_id, n.activity_event_id, n.dedupe_key, n.read_at, n.created_at, n.edit_submission_id
 FROM notifications n
 WHERE n.user_id = $1::uuid
   AND n.dedupe_key = $6::text
@@ -256,6 +256,7 @@ type InsertNotificationDedupeRow struct {
 	DedupeKey        string             `json:"dedupeKey"`
 	ReadAt           pgtype.Timestamptz `json:"readAt"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	EditSubmissionID *uuid.UUID         `json:"editSubmissionId"`
 }
 
 // A repeated delivery attempt returns the canonical existing row without
@@ -296,6 +297,7 @@ func (q *Queries) InsertNotificationDedupe(ctx context.Context, arg InsertNotifi
 		&i.DedupeKey,
 		&i.ReadAt,
 		&i.CreatedAt,
+		&i.EditSubmissionID,
 	)
 	return i, err
 }
@@ -421,7 +423,7 @@ UPDATE notifications
 SET read_at = COALESCE(read_at, now())
 WHERE id = $1::uuid
   AND user_id = $2::uuid
-RETURNING id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at
+RETURNING id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at, edit_submission_id
 `
 
 func (q *Queries) MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error) {
@@ -437,6 +439,7 @@ func (q *Queries) MarkNotificationRead(ctx context.Context, notificationID uuid.
 		&i.DedupeKey,
 		&i.ReadAt,
 		&i.CreatedAt,
+		&i.EditSubmissionID,
 	)
 	return i, err
 }
