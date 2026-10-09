@@ -136,17 +136,25 @@ func (f *flow) do(method, path string, who *account, body any) (int, map[string]
 
 func (f *flow) doOn(router http.Handler, method, path string, who *account, body any) (int, map[string]any) {
 	f.t.Helper()
-	var reader *bytes.Reader
-	if s, ok := body.(string); ok {
-		reader = bytes.NewReader([]byte(s))
-	} else if body != nil {
-		raw, err := json.Marshal(body)
-		require.NoError(f.t, err)
-		reader = bytes.NewReader(raw)
-	} else {
-		reader = bytes.NewReader(nil)
+	if body == nil {
+		return f.send(router, method, path, who, "", nil)
 	}
-	req := httptest.NewRequest(method, path, reader)
+	raw, ok := body.(string)
+	if !ok {
+		b, err := json.Marshal(body)
+		require.NoError(f.t, err)
+		raw = string(b)
+	}
+	return f.send(router, method, path, who, "application/json", []byte(raw))
+}
+
+// send is a request with the body and Content-Type given as they are.
+func (f *flow) send(router http.Handler, method, path string, who *account, contentType string, body []byte) (int, map[string]any) {
+	f.t.Helper()
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 	if who != nil {
 		req.Header.Set("Authorization", "Bearer "+who.token)
 	}
@@ -309,6 +317,65 @@ func TestSubmit_OneInFlightPerPerson_PG(t *testing.T) {
 	close(f.fetcher.release)
 	assert.Equal(t, http.StatusCreated, <-first)
 	f.fetcher.entered = nil
+}
+
+// Only a JSON body is read, on both write endpoints.  A form, or a fetch
+// another site makes in no-cors mode, can carry a signed-in reader's or an
+// admin's cookie (SameSite=None in production) but not this Content-Type:
+// asking for it takes a CORS preflight, which only the site's own origin
+// passes.  Each refusal comes before anything is read or written.
+func TestEdits_OnlyJSONBodies_PG(t *testing.T) {
+	f := newFlow(t)
+	reader := f.user("reader-plain", false)
+	admin := f.user("admin-plain", true)
+	f.fetcher.body = pngBytes(t, 20, 30)
+	notJSON := []string{
+		"text/plain", "text/plain;charset=UTF-8", "application/x-www-form-urlencoded",
+		"multipart/form-data; boundary=x", "",
+	}
+
+	body, err := json.Marshal(submission(map[string]any{
+		"nameCn": "史塔克",
+		"image":  map[string]any{"url": "https://images.example.org/stark.png"},
+	}))
+	require.NoError(t, err)
+	for _, ct := range notJSON {
+		code, got := f.send(f.router, http.MethodPost, "/api/edits", &reader, ct, body)
+		assert.Equal(t, http.StatusUnsupportedMediaType, code, ct)
+		assert.Equal(t, msgNotJSON, errMessage(got), ct)
+	}
+	assert.Zero(t, f.count(`SELECT count(*) FROM edit_submissions`), "no submission")
+	assert.Empty(t, f.fetcher.got, "no photo fetched")
+	stored, _ := os.ReadDir(filepath.Join(f.root, "pending"))
+	assert.Empty(t, stored, "none stored")
+
+	// As JSON -- a charset is fine -- the same body is a submission.
+	code, got := f.send(f.router, http.MethodPost, "/api/edits", &reader, "application/json; charset=utf-8", body)
+	require.Equal(t, http.StatusCreated, code, "%v", got)
+	id := got["data"].(map[string]any)["id"].(string)
+
+	_, sub := f.do(http.MethodGet, "/api/admin/edits/"+id, &admin, nil)
+	var decisions []map[string]any
+	for _, it := range sub["data"].(map[string]any)["items"].([]any) {
+		decisions = append(decisions, map[string]any{"itemId": it.(map[string]any)["id"], "accept": true})
+	}
+	review, err := json.Marshal(map[string]any{"decisions": decisions})
+	require.NoError(t, err)
+	for _, ct := range notJSON {
+		code, got := f.send(f.router, http.MethodPost, "/api/admin/edits/"+id+"/review", &admin, ct, review)
+		assert.Equal(t, http.StatusUnsupportedMediaType, code, ct)
+		assert.Equal(t, msgNotJSON, errMessage(got), ct)
+	}
+	assert.Equal(t, 1, f.count(`SELECT count(*) FROM edit_submissions WHERE status = 'pending'`), "not reviewed")
+	assert.Zero(t, f.count(`SELECT count(*) FROM edit_items WHERE status <> 'pending'`))
+	assert.Zero(t, f.count(`SELECT count(*) FROM entity_overlays`))
+	assert.Zero(t, f.count(`SELECT count(*) FROM notifications`))
+	stored, _ = os.ReadDir(filepath.Join(f.root, "pending"))
+	assert.Len(t, stored, 1, "the photo still waits")
+
+	code, got = f.send(f.router, http.MethodPost, "/api/admin/edits/"+id+"/review", &admin, "application/json; charset=utf-8", review)
+	require.Equal(t, http.StatusOK, code, "%v", got)
+	assert.Equal(t, "reviewed", got["data"].(map[string]any)["status"])
 }
 
 func TestEditFlow_PG(t *testing.T) {

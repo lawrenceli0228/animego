@@ -284,11 +284,16 @@ type reviewRequest struct {
 // submission marked, and the submitter notified (not when they reviewed
 // it themselves).  After it, rejected photos are deleted and every title
 // crediting the page is dropped from the detail cache.  Answers the
-// submission as Get does.  409 when someone reviewed it first.
+// submission as Get does.  415 for a body that is not application/json (see
+// isJSON); 409 when someone reviewed it first.
 func (h *Handlers) Review(w http.ResponseWriter, r *http.Request) {
 	claims, ok := jwtx.ClaimsFrom(r.Context())
 	if !ok || claims == nil {
 		fail(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "Authentication required")
+		return
+	}
+	if !isJSON(r) {
+		fail(w, http.StatusUnsupportedMediaType, httpx.CodeBadRequest, msgNotJSON)
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))

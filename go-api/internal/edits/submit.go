@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"mime"
 	"net/http"
 	"slices"
 	"sync"
@@ -43,6 +44,7 @@ const (
 	msgImageUnreadable = "The image could not be read"
 	msgPendingExists   = "This page already has a submission of yours waiting for review"
 	msgTooMany         = "Too many submissions, try again later"
+	msgNotJSON         = "The body must be JSON"
 )
 
 var (
@@ -96,6 +98,15 @@ func NewHandlers(pool *pgxpool.Pool, images *ImageStore, forget ForgetFunc) *Han
 	return &Handlers{pool: pool, q: dbgen.New(pool), images: images, forget: forget, now: time.Now}
 }
 
+// isJSON reports whether a request says its body is JSON.  Only such a
+// body is read: a form or a no-cors fetch from another site can carry a
+// reader's cookie but not this Content-Type, which takes a CORS preflight
+// that only the site's own origin passes.
+func isJSON(r *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mediaType == "application/json"
+}
+
 // submitRequest is the body of POST /api/edits.
 type submitRequest struct {
 	Kind      string    `json:"kind"`
@@ -122,15 +133,20 @@ func fail(w http.ResponseWriter, status int, code, message string) {
 //	{"kind":"character","entityId":184313,"sourceUrl":"https://…","note":"…",
 //	 "changes":{"nameCn":"…","image":{"url":"https://…"},"roles":[{"animeId":154587,"role":"MAIN"}]}}
 //
-// 201 {"data":{"id","status":"pending","itemCount","createdAt"}}.  400 for a
-// body, field, link or photo it refuses -- including a submission that
-// changes nothing on the page as it is shown now; 404 for a page that does
-// not exist; 409 when the submitter already has one waiting on this page;
-// 429 past the limits above.
+// 201 {"data":{"id","status":"pending","itemCount","createdAt"}}.  415 for a
+// body that is not application/json; 400 for a body, field, link or photo
+// it refuses -- including a submission that changes nothing on the page as
+// it is shown now; 404 for a page that does not exist; 409 when the
+// submitter already has one waiting on this page; 429 past the limits
+// above.
 func (h *Handlers) Submit(w http.ResponseWriter, r *http.Request) {
 	claims, ok := jwtx.ClaimsFrom(r.Context())
 	if !ok || claims == nil {
 		fail(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "Authentication required")
+		return
+	}
+	if !isJSON(r) {
+		fail(w, http.StatusUnsupportedMediaType, httpx.CodeBadRequest, msgNotJSON)
 		return
 	}
 	if _, busy := h.inflight.LoadOrStore(claims.UserID, struct{}{}); busy {
