@@ -2,12 +2,13 @@ import { test, expect, type Page } from "@playwright/test";
 import { closePg } from "../../fixtures/pg";
 import { waitForHydration } from "../../fixtures/hydration";
 import {
-  STARK,
+  EDIT_ANIME_TITLE,
+  EDIT_CHARACTER,
+  EDIT_VOICE,
   createEditUsers,
   deleteEditUsers,
-  restoreOverlay,
-  takeOverlay,
-  type SavedOverlay,
+  removeEditFixture,
+  seedEditFixture,
 } from "../../fixtures/edits";
 import type { TestUser } from "../../fixtures/users";
 
@@ -18,8 +19,12 @@ import type { TestUser } from "../../fixtures/users";
 // with a note, the public page shows the new name and the old photo, and the
 // reader is told -- then the phone's edit state and the 404s.
 //
+// Stark, his voice and his title are the spec's own (fixtures/edits.ts
+// seedEditFixture): a fresh sandbox database has no real character with a
+// Bangumi name to lean on.
+//
 // Serial, in one worker: the steps build on each other, and the fixtures
-// (two users, Stark's overlay set aside) are made once and undone once.
+// (the title and its credits, two users) are made once and undone once.
 //
 // The photo link is fetched by go-api at submission, so this spec needs the
 // network: E2E_EDIT_IMAGE_URL overrides the public https image it uses.
@@ -38,16 +43,19 @@ const REJECT_NOTE = "这张图不是角色本人";
 
 let reader: TestUser;
 let admin: TestUser;
-let savedOverlay: SavedOverlay | null = null;
+
+const STARK = EDIT_CHARACTER;
 
 test.beforeAll(async () => {
-  savedOverlay = await takeOverlay("character", STARK);
+  // A run that died before its afterAll leaves the fixture behind.
+  await removeEditFixture();
+  await seedEditFixture();
   ({ reader, admin } = await createEditUsers());
 });
 
 test.afterAll(async () => {
   await deleteEditUsers([reader, admin].filter(Boolean));
-  await restoreOverlay("character", STARK, savedOverlay);
+  await removeEditFixture();
   await closePg();
 });
 
@@ -110,7 +118,7 @@ test.describe("desktop", () => {
     // In place: the same header, voices and titles, each value in a field.
     await expect(page.getByRole("textbox", { name: "日文名" })).toHaveValue("シュタルク");
     await expect(page.getByRole("textbox", { name: "配音备注" }).first()).toHaveValue("日配");
-    await expect(page.getByRole("combobox", { name: /葬送的芙莉莲/ }).first()).toHaveValue("MAIN");
+    await expect(page.getByRole("combobox", { name: new RegExp(EDIT_ANIME_TITLE) }).first()).toHaveValue("MAIN");
     const submit = page.getByRole("button", { name: "提交审核" });
     await expect(submit).toBeDisabled();
 
@@ -196,11 +204,11 @@ test.describe("phone (390px)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   test("signed out, 编辑 goes to log in and back", async ({ page }) => {
-    await page.goto(`/person/133507`);
+    await page.goto(`/person/${EDIT_VOICE}`);
     await page.getByRole("link", { name: "编辑" }).click();
     await page.waitForURL((url) => url.pathname === "/login");
     await signIn(page, reader);
-    await page.waitForURL((url) => url.pathname === "/person/133507/edit");
+    await page.waitForURL((url) => url.pathname === `/person/${EDIT_VOICE}/edit`);
   });
 
   test("the edit state has exactly one submit, in the top bar, and fits", async ({ page }) => {
@@ -224,7 +232,7 @@ test.describe("phone (390px)", () => {
 
   test("the person page's edit state too", async ({ page }) => {
     await login(page, reader);
-    await page.goto(`/person/133507/edit`);
+    await page.goto(`/person/${EDIT_VOICE}/edit`);
     await waitForHydration(page, "#edit-name");
     await expect(page.getByRole("button", { name: /提交/ })).toHaveCount(1);
     await expect(page.getByRole("textbox", { name: "出生年" })).toBeVisible();

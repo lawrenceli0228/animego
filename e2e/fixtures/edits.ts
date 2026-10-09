@@ -1,18 +1,80 @@
 // Fixtures for the edit flow (specs/sandbox/people-edit).
 //
-// The spec edits a real character the sandbox database already holds --
-// Stark (AniList 184313), whose page, voices and Bangumi name come from the
-// credits and profile sweeps -- so what it proves runs over real rows. It
-// owns nothing of Stark's except his accepted-edit overlay, which it sets
-// aside before it starts and puts back when it is done, and its own two
-// users, whose submissions and notifications go with them (ON DELETE
-// CASCADE).
+// The spec edits a title, a character and a voice of its own, written here
+// the way the credit writers store them (seedDetailCredits): a fresh sandbox
+// database holds no real character with a Bangumi name -- those come only
+// from the offline cmd/bgmnames -- and a spec that leaned on one passed only
+// where a developer had run it. The character is called Stark and voiced by
+// Chiaki Kobayashi, with Stark's AniList portrait, so the pages read like the
+// real ones. Its two users' submissions and notifications go with them (ON
+// DELETE CASCADE); the overlay an accepted edit leaves is removed with the
+// rest.
+//
+// takeOverlay / restoreOverlay set a real page's overlay aside and put it
+// back exactly (edits-fixtures.spec.ts holds them to that).
 
 import type { JSONValue } from "postgres";
-import { getSql } from "./pg";
+import { ensureAnimeDetail, getSql, removeAnimeFixture, removeDetailCredits, seedDetailCredits } from "./pg";
 import { makeUser, type TestUser } from "./users";
 
 export const STARK = 184313;
+
+/** The title, character and voice the edit spec owns; ids no other spec uses. */
+export const EDIT_ANIME = 990_530_001;
+export const EDIT_CHARACTER = 990_530_101;
+export const EDIT_VOICE = 990_530_201;
+export const EDIT_ANIME_TITLE = "E2E 修改用番";
+/** The character's portrait: a public image, so the page has an old photo to keep. */
+export const EDIT_PORTRAIT = "https://s4.anilist.co/file/anilistcdn/character/large/b184313-CQl6GSt4RSny.jpg";
+
+/** Write the title, its lead and the lead's Japanese voice, with Bangumi names. */
+export async function seedEditFixture(): Promise<void> {
+  await ensureAnimeDetail({
+    anilistId: EDIT_ANIME,
+    titleRomaji: "E2E Edit Title",
+    titleChinese: EDIT_ANIME_TITLE,
+    episodes: 12,
+  });
+  await seedDetailCredits(
+    EDIT_ANIME,
+    [
+      {
+        characterId: EDIT_CHARACTER,
+        role: "MAIN",
+        nameEn: "Stark",
+        nameJa: "シュタルク",
+        nameCn: "修塔尔克",
+        voices: [
+          {
+            staffId: EDIT_VOICE,
+            language: "Japanese",
+            nameFull: "Chiaki Kobayashi",
+            nameNative: "小林千晃",
+            nameCn: "小林千晃",
+          },
+        ],
+      },
+    ],
+    [],
+  );
+  const sql = getSql();
+  await sql`
+    UPDATE anime_characters SET image_url = ${EDIT_PORTRAIT}
+    WHERE anime_id = ${EDIT_ANIME} AND character_id = ${EDIT_CHARACTER}
+  `;
+}
+
+/** Everything seedEditFixture wrote, and any overlay an accepted edit left on it. */
+export async function removeEditFixture(): Promise<void> {
+  const sql = getSql();
+  await sql`
+    DELETE FROM entity_overlays
+    WHERE (kind = 'character' AND entity_id = ${EDIT_CHARACTER})
+       OR (kind = 'person' AND entity_id = ${EDIT_VOICE})
+  `;
+  await removeDetailCredits([EDIT_CHARACTER], [EDIT_VOICE]);
+  await removeAnimeFixture(EDIT_ANIME);
+}
 
 /** An overlay row as it was, to put back exactly. */
 export interface SavedOverlay {
