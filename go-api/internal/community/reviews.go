@@ -2,7 +2,6 @@ package community
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -16,7 +15,10 @@ import (
 
 // pgUniqueViolation is the SQLSTATE a second live review trips on
 // (anime_reviews_one_live_per_user).
-const pgUniqueViolation = "23505"
+const (
+	pgUniqueViolation     = "23505"
+	pgForeignKeyViolation = "23503"
+)
 
 type reviewRequest struct {
 	Summary   string `json:"summary"`
@@ -340,8 +342,7 @@ func (h *Handlers) setHelpful(w http.ResponseWriter, r *http.Request, voted bool
 // decodeReview reads and validates a review body, answering 400 itself.
 func decodeReview(w http.ResponseWriter, r *http.Request) (reviewInput, bool) {
 	var req reviewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, msgInvalidBody))
+	if !decodeJSON(w, r, &req) {
 		return reviewInput{}, false
 	}
 	input, msg := validateReview(req.Summary, req.Body, req.IsSpoiler, req.IsPrivate)

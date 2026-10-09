@@ -3,6 +3,7 @@ package community
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,71 @@ func TestUnknownAnimeIs404AndBadIDIs400_EverywhereOnTheTab(t *testing.T) {
 func TestMountDoesNotShadowTheDetailRoute(t *testing.T) {
 	e := newEnv(t, generous())
 	assert.Equal(t, http.StatusTeapot, e.call(anonymous, http.MethodGet, "/api/anime/154587", nil).Code)
+}
+
+// A read made with a session can carry that reader's own private review,
+// votes and likes, so no shared cache may keep it; an anonymous read is the
+// same for everyone and stays cacheable.
+func TestReadsWithASessionAreNeverSharedCacheable(t *testing.T) {
+	e := newEnv(t, generous())
+	e.anime(154587)
+	alice := e.user("alice")
+	for _, path := range []string{base, base + "/reviews", base + "/threads", base + "/activity", base + "/watchers"} {
+		signedIn := e.call(alice, http.MethodGet, path, nil)
+		require.Equal(t, http.StatusOK, signedIn.Code, path)
+		assert.Equal(t, "private, no-store", signedIn.Header().Get("Cache-Control"), path)
+
+		anon := e.call(anonymous, http.MethodGet, path, nil)
+		require.Equal(t, http.StatusOK, anon.Code, path)
+		assert.NotContains(t, anon.Header().Get("Cache-Control"), "private", path)
+	}
+	mine := e.call(alice, http.MethodGet, base+"/reviews/mine", nil)
+	assert.Equal(t, "private, no-store", mine.Header().Get("Cache-Control"), "even a 404 for her own review")
+}
+
+// Only JSON bodies are read.  A form on another site can POST text/plain
+// with the visitor's cookies and no preflight, and text/plain can be made to
+// parse as JSON ({"title":"…","body":"…","p":"=" from one form field); it
+// cannot send application/json without the browser asking first, and CORS
+// answers that question no.
+func TestWritesReadOnlyJSONBodies(t *testing.T) {
+	e := newEnv(t, generous())
+	e.anime(154587)
+	alice, bob := e.user("alice"), e.user("bob")
+	th := e.thread(bob, "第五集的回忆杀", "说说看", false)
+	event := e.statusEvent(bob, 154587, "completed", time.Now())
+	review := data[wireReview](t, e.call(alice, http.MethodPost, base+"/reviews", map[string]any{
+		"summary": "一部关于时间与告别的作品", "body": strings.Repeat("好", reviewBodyMin),
+	}), http.StatusCreated)
+
+	formBody := `{"summary":"一部关于时间与告别的作品","title":"表单冒名的帖子","body":"` + strings.Repeat("好", reviewBodyMin) + `","p":"="}`
+	for _, tc := range []struct{ method, path, contentType string }{
+		{http.MethodPost, base + "/reviews", "text/plain"},
+		{http.MethodPatch, base + "/reviews/" + review.ID.String(), "text/plain;charset=UTF-8"},
+		{http.MethodPost, base + "/threads", "application/x-www-form-urlencoded"},
+		{http.MethodPost, base + "/threads/" + th.Thread.ID.String() + "/replies", "multipart/form-data; boundary=x"},
+		{http.MethodPost, base + "/activity/" + event.String() + "/replies", ""},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(formBody))
+		if tc.contentType != "" {
+			req.Header.Set("Content-Type", tc.contentType)
+		}
+		req.Header.Set("Authorization", "Bearer "+alice.token)
+		rec := httptest.NewRecorder()
+		e.router.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code, "%s %s (%q): %s", tc.method, tc.path, tc.contentType, rec.Body.String())
+	}
+	assert.Zero(t, e.count(`SELECT count(*) FROM anime_threads WHERE title = '表单冒名的帖子'`), "no thread was written")
+	assert.Zero(t, e.count(`SELECT count(*) FROM community_replies`), "nor a reply")
+
+	ok := e.call(alice, http.MethodPost, base+"/threads", map[string]any{"title": "正常的帖子", "body": "说说看"})
+	assert.Equal(t, http.StatusCreated, ok.Code, "application/json is read")
+	req := httptest.NewRequest(http.MethodPost, base+"/threads", strings.NewReader(`{"title":"带字符集的帖子","body":"说说看"}`))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+alice.token)
+	rec := httptest.NewRecorder()
+	e.router.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusCreated, rec.Code, "with a charset too: %s", rec.Body.String())
 }
 
 func TestWritesRequireASession(t *testing.T) {

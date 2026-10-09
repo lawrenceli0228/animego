@@ -82,10 +82,12 @@ func TestThreads_CreateListView(t *testing.T) {
 	assert.Empty(t, created.Replies)
 
 	spoiler := e.thread(bob, "结局到底什么意思", "最后那一幕其实是……", true)
+	// Not a spoiler thread, but with a spoiler inside: the list shows it closed.
+	inline := e.thread(bob, "第十集的那段对白", "**名场面**：~!辛美尔的雕像!~ 那里，[原作](https://example.com/x) 也有", false)
 
 	list := data[wirePage[wireThreadSummary]](t, e.call(anonymous, http.MethodGet, base+"/threads", nil), http.StatusOK)
-	require.Len(t, list.Items, 2)
-	assert.Equal(t, int64(2), list.Total)
+	require.Len(t, list.Items, 3)
+	assert.Equal(t, int64(3), list.Total)
 	byID := map[uuid.UUID]wireThreadSummary{}
 	for _, item := range list.Items {
 		byID[item.ID] = item
@@ -93,7 +95,10 @@ func TestThreads_CreateListView(t *testing.T) {
 	assert.Equal(t, "大家怎么看 辛美尔那段？", byID[created.Thread.ID].Excerpt)
 	assert.Empty(t, byID[spoiler.Thread.ID].Excerpt, "a spoiler thread's body stays off the list")
 	assert.True(t, byID[spoiler.Thread.ID].IsSpoiler)
-	assert.NotContains(t, e.call(anonymous, http.MethodGet, base, nil).Body.String(), "最后那一幕")
+	assert.Equal(t, "名场面：▇▇ 那里，原作 也有", byID[inline.Thread.ID].Excerpt)
+	summary := e.call(anonymous, http.MethodGet, base, nil).Body.String()
+	assert.NotContains(t, summary, "最后那一幕")
+	assert.NotContains(t, summary, "辛美尔的雕像")
 
 	view := data[wireThreadView](t, e.call(anonymous, http.MethodGet, base+"/threads/"+spoiler.Thread.ID.String(), nil), http.StatusOK)
 	assert.Equal(t, "最后那一幕其实是……", view.Thread.Body)

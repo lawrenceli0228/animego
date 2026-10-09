@@ -56,6 +56,31 @@ func TestIsBlank(t *testing.T) {
 	}
 }
 
+// Characters that draw as blank are not writing either: the Hangul fillers,
+// the Braille blank, and marks with nothing to sit on (a combining accent,
+// a variation selector).  A mark after a letter belongs to the letter, so it
+// adds nothing to the count there either.
+func TestVisibleLength_FillersAndMarks(t *testing.T) {
+	ch := func(r rune) string { return string(r) }
+	for _, s := range []string{
+		strings.Repeat(ch(0x3164), 4),
+		ch(0xFFA0),
+		ch(0x115F) + ch(0x1160),
+		ch(0x2800) + " " + ch(0x2800),
+		ch(0x0301),
+		ch(0xFE0F) + ch(0xFE0E),
+	} {
+		assert.True(t, isBlank(s), "%q", s)
+	}
+	assert.Equal(t, 1, visibleLength("e"+ch(0x0301)))
+	assert.Equal(t, 2, visibleLength(ch(0x3164)+"好"+ch(0x2800)+"好"))
+
+	_, _, msg := validateThread(strings.Repeat(ch(0x3164), 4), "正文")
+	assert.Equal(t, msgTitleLength, msg, "four Hangul fillers are not a title")
+	_, msg = validateReply(ch(0x3164))
+	assert.Equal(t, msgContentRequired, msg)
+}
+
 func TestValidateReview(t *testing.T) {
 	ok := strings.Repeat("好", reviewBodyMin)
 	cases := []struct {
@@ -139,6 +164,28 @@ func TestExcerptOf(t *testing.T) {
 	assert.Equal(t, "一行 两行", excerptOf("一行\n\n两行", 10))
 	assert.Equal(t, "一二三…", excerptOf("一二三四五", 3))
 	assert.Equal(t, "一二三", excerptOf("一二三", 3))
+}
+
+// The thread list shows the start of a thread as plain text. A spoiler in it
+// must stay closed there as it does on the thread's page (the client's
+// plainText marks it the same way), including one the 200-character cut
+// leaves without its closing mark.
+func TestPlainMarkup(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"inline spoiler", "大家怎么看 ~!芙莉莲的结局!~ 这段", "大家怎么看 ▇▇ 这段"},
+		{"two spoilers", "~!一!~ 和 ~!二!~", "▇▇ 和 ▇▇"},
+		{"spoiler across lines", "前面\n~!第一行\n第二行!~\n后面", "前面\n▇▇\n后面"},
+		{"unclosed spoiler runs to the end", "开头 ~!没有闭合的剧透一直到结尾", "开头 ▇▇"},
+		{"bold markers go", "**很好看**，真的", "很好看，真的"},
+		{"a link becomes its text", "看 [这篇](https://example.com/a) 吧", "看 这篇 吧"},
+		{"quote markers go", "> 引用一句\n>紧贴的引用\n正文", "引用一句\n紧贴的引用\n正文"},
+		{"plain text is unchanged", "辛美尔那段真的好戳我。", "辛美尔那段真的好戳我。"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, plainMarkup(tc.in))
+		})
+	}
 }
 
 func TestPageOffsetAndPageOf(t *testing.T) {

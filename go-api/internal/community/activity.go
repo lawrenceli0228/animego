@@ -176,8 +176,9 @@ func (h *Handlers) CreateActivityReply(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := h.db.CreateActivityReply(ctx, eventID, claims.UserID, req.ParentID, body)
 	if err != nil {
-		// ErrNoRows: the event went away, or its owner went private, after
-		// the check above.
+		// ErrNoRows or a foreign key violation: the event went away (its
+		// owner changed status again, or took the title off their list), or
+		// its owner went private, after the check above.
 		failLookup(w, err, msgActivityNotFound)
 		return
 	}
@@ -229,7 +230,9 @@ func (h *Handlers) setLike(w http.ResponseWriter, r *http.Request, liked bool) {
 		count, err = h.db.RemoveActivityLike(ctx, eventID, claims.UserID)
 	}
 	if err != nil {
-		failServer(w, err, "activity like failed")
+		// A foreign key violation: the card was replaced by its owner's next
+		// status change after the check above.
+		failLookup(w, err, msgActivityNotFound)
 		return
 	}
 	httpx.Data(w, http.StatusOK, likeDTO{Liked: liked, LikeCount: count})

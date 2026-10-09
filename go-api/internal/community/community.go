@@ -39,7 +39,9 @@ package community
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
 	"strconv"
 	"time"
@@ -47,6 +49,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
@@ -121,10 +124,12 @@ func (h *Handlers) Stop() { h.limits.stop() }
 // Mount registers the tab's routes on the /api/anime router, under
 // /{anilistId}/community.  Reads take the session when there is one
 // (OptionalAuth) so a reader sees their own private review and votes;
-// writes require it.
+// writes require it.  Either way, a request with a session is answered as
+// private (privateForViewer).
 func (h *Handlers) Mount(r chi.Router, signer *jwtx.Signer) {
-	optional := jwtx.OptionalAuth(signer)
-	required := jwtx.RequireAuth(signer)
+	optionalAuth, requireAuth := jwtx.OptionalAuth(signer), jwtx.RequireAuth(signer)
+	optional := func(next http.Handler) http.Handler { return optionalAuth(privateForViewer(next)) }
+	required := func(next http.Handler) http.Handler { return requireAuth(privateForViewer(next)) }
 	r.Route("/{anilistId}/community", func(r chi.Router) {
 		r.With(optional).Get("/", h.Summary)
 
@@ -162,6 +167,40 @@ func (h *Handlers) MountAdmin(r chi.Router) {
 	r.Delete("/community/reviews/{reviewId}", h.AdminRemoveReview)
 	r.Delete("/community/threads/{threadId}", h.AdminRemoveThread)
 	r.Delete("/community/replies/{replyId}", h.AdminRemoveReply)
+}
+
+// decodeJSON reads a JSON request body into dst, answering itself when it
+// cannot: 415 unless the body is declared application/json, 400 when it does
+// not parse.  The content type is the cross-site guard.  A form on another
+// site can POST text/plain, urlencoded or multipart with the visitor's
+// cookies and no preflight, and text/plain can be made to parse as JSON; a
+// cross-origin application/json request needs a preflight, which CORS
+// refuses.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		httpx.Fail(w, httpx.NewError(http.StatusUnsupportedMediaType, httpx.CodeBadRequest, msgJSONOnly))
+		return false
+	}
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, msgInvalidBody))
+		return false
+	}
+	return true
+}
+
+// privateForViewer marks the answer to a request made with a session as
+// private: it can hold that reader's own private review, votes and likes,
+// so no shared cache — a CDN rule on /api/anime/*, a proxy — may keep it.
+// Anonymous answers are the same for everyone and are left as they are.
+// It runs after the auth middleware, which is what puts the claims there.
+func privateForViewer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if viewerID(r) != nil {
+			w.Header().Set("Cache-Control", "private, no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -221,10 +260,13 @@ func uuidFromPath(w http.ResponseWriter, r *http.Request, name string) (uuid.UUI
 	return id, true
 }
 
-// failLookup turns a meta lookup error into the response: ErrNoRows is the
-// 404 for that kind of thing, anything else a 500.
+// failLookup turns a lookup or write error into the response: the thing is
+// gone — no rows, or a foreign key that no longer resolves because the row
+// was deleted while this write was checking it — is the 404 for that kind
+// of thing; anything else a 500.
 func failLookup(w http.ResponseWriter, err error, notFound string) {
-	if errors.Is(err, pgx.ErrNoRows) {
+	var pgErr *pgconn.PgError
+	if errors.Is(err, pgx.ErrNoRows) || (errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation) {
 		httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, notFound))
 		return
 	}

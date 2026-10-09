@@ -24,6 +24,7 @@ const (
 	msgReviewTooLong          = "Review is too long"
 	msgTitleLength            = "Title must be 4-80 characters"
 	msgContentRequired        = "Content is required"
+	msgJSONOnly               = "Content-Type must be application/json"
 	msgContentTooLong         = "Content too long"
 	msgAlreadyReviewed        = "You have already reviewed this anime"
 	msgNotYourReview          = "Not your review"
@@ -77,8 +78,8 @@ func normalizeLine(s string) string {
 func isBlank(s string) bool { return visibleLength(s) == 0 }
 
 // visibleLength is what the minimums are measured in: characters a reader
-// can see, with each run of whitespace counted once and invisible format
-// characters (unicode.Cf) not at all.  "好", four hundred spaces and "好"
+// can see, with each run of whitespace counted once and characters that
+// draw nothing (see invisible) not at all.  "好", four hundred spaces and "好"
 // is three characters, not 402 -- padding is not writing.  Ordinary prose
 // is unaffected: a space between words or the break between two paragraphs
 // counts as one character, the way a writer expects.  The page's counter
@@ -88,7 +89,7 @@ func visibleLength(s string) int {
 	pendingSpace := false
 	for _, r := range s {
 		switch {
-		case unicode.Is(unicode.Cf, r):
+		case invisible(r):
 			continue
 		case unicode.IsSpace(r):
 			pendingSpace = n > 0
@@ -101,6 +102,19 @@ func visibleLength(s string) int {
 		}
 	}
 	return n
+}
+
+// invisible is a character that draws nothing a reader would count: format
+// characters (unicode.Cf: zero-width spaces and joiners, the BOM), marks
+// (Mn, Me: combining accents and variation selectors, which belong to the
+// character before them), and the fillers fonts draw as blank — the Hangul
+// fillers and the Braille blank.  textLimits.ts skips the same set.
+func invisible(r rune) bool {
+	switch r {
+	case 0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800:
+		return true
+	}
+	return unicode.In(r, unicode.Cf, unicode.Mn, unicode.Me)
 }
 
 // runeCount is what the maximums are measured in: the stored length, the

@@ -2,7 +2,6 @@ package community
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -109,8 +108,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req threadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, msgInvalidBody))
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	title, body, msg := validateThread(req.Title, req.Body)
@@ -284,8 +282,7 @@ func (h *Handlers) DeleteReply(w http.ResponseWriter, r *http.Request) {
 // decodeReply reads and validates a reply body, answering 400 itself.
 func decodeReply(w http.ResponseWriter, r *http.Request) (replyRequest, string, bool) {
 	var req replyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, msgInvalidBody))
+	if !decodeJSON(w, r, &req) {
 		return replyRequest{}, "", false
 	}
 	body, msg := validateReply(req.Body)

@@ -1,6 +1,7 @@
 package community
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -97,7 +98,7 @@ type threadSummaryDTO struct {
 func toThreadSummary(row dbgen.ListAnimeThreadsRow, viewer *uuid.UUID) threadSummaryDTO {
 	excerpt := ""
 	if !row.IsSpoiler {
-		excerpt = excerptOf(row.BodyExcerpt, threadExcerptRunes)
+		excerpt = excerptOf(plainMarkup(row.BodyExcerpt), threadExcerptRunes)
 	}
 	return threadSummaryDTO{
 		ID:             row.ID,
@@ -111,6 +112,30 @@ func toThreadSummary(row dbgen.ListAnimeThreadsRow, viewer *uuid.UUID) threadSum
 		CreatedAt:      row.CreatedAt,
 		LastActivityAt: row.LastActivityAt,
 	}
+}
+
+// The markup a review or thread is written in (the client's
+// lib/community/reviewMarkup.ts parses it): ~!spoiler!~, **bold**,
+// [text](https://…) and "> " quote lines.
+var (
+	markupSpoiler     = regexp.MustCompile(`(?s)~!.*?!~`)
+	markupSpoilerTail = regexp.MustCompile(`(?s)~!.*$`)
+	markupLink        = regexp.MustCompile(`\[([^\]\n]+)\]\(https?://[^\s)]+\)`)
+	markupQuote       = regexp.MustCompile(`(?m)^>[ \t]?`)
+)
+
+// spoilerMark stands in for a closed spoiler, as plainText does on the client.
+const spoilerMark = "▇▇"
+
+// plainMarkup is markup as a reader sees it with every spoiler closed:
+// spoilers become spoilerMark (one left unclosed, as a cut can leave it,
+// runs to the end), links their text, and bold and quote markers go.
+func plainMarkup(s string) string {
+	s = markupSpoiler.ReplaceAllLiteralString(s, spoilerMark)
+	s = markupSpoilerTail.ReplaceAllLiteralString(s, spoilerMark)
+	s = markupLink.ReplaceAllString(s, "$1")
+	s = strings.ReplaceAll(s, "**", "")
+	return markupQuote.ReplaceAllLiteralString(s, "")
 }
 
 // excerptOf collapses s onto one line and cuts it to max characters, adding
