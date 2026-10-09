@@ -1262,6 +1262,17 @@ type Querier interface {
 	// on title_chinese IS NULL so a concurrent enrichment that already filled CN
 	// is never clobbered.
 	HealCnTitle(ctx context.Context, anilistID int32, titleChinese *string) error
+	// image_mirror.sql — the image warm job (queue/image_warm.go): which
+	// AniList images to ask nginx to store next, and what each answer was.
+	//
+	// The referenced set is the image_refs view and only that (migration 0049
+	// says why).  image_manager holds one row per URL the job has had an answer
+	// for; a URL with no row has never been asked about.
+	// Whether a pass must not run: AniList answered 429 and the time it asked
+	// us to wait (next_attempt_at) has not passed yet.  Checked before
+	// anything else a pass does, so a throttle window stops every pass that
+	// starts inside it, not just the one that met the 429.
+	ImageWarmBlocked(ctx context.Context) (bool, error)
 	// Bulk-load via pgx CopyFrom; updated_at takes its column DEFAULT now().
 	InsertAnidbIdMapCopy(ctx context.Context, arg []InsertAnidbIdMapCopyParams) (int64, error)
 	InsertAnimeExternalLink(ctx context.Context, animeID int32, site string, url string, type_ *string) error
@@ -1810,6 +1821,20 @@ type Querier interface {
 	// precisely because the bgm_id is map-confirmed — we never heal a fuzzy or
 	// uncertain bind (whose dandanplay title could belong to the wrong subject).
 	ListIdMapRowsMissingCn(ctx context.Context) ([]ListIdMapRowsMissingCnRow, error)
+	// The URLs one pass asks for, at most row_limit, in three tiers:
+	//
+	//   1. never asked about (no row), by URL;
+	//   2. due again: a 'missing' or 'throttled' row whose next_attempt_at has
+	//      passed, longest due first;
+	//   3. the monthly re-check: a 'warmed' row warmed longer ago than
+	//      recheck_after, oldest first.  nginx answers it with a conditional
+	//      request to AniList, so an unchanged image costs AniList no body.
+	//
+	// Driven from image_refs, so a URL nothing references any more is never
+	// asked for again, whatever its row says.  The cost is the view's: it reads
+	// every referencing column once.  Each referenced URL then looks its row up
+	// through the primary key.
+	ListImageWarmBatch(ctx context.Context, recheckAfter pgtype.Interval, rowLimit int32) ([]string, error)
 	// Signups per day, bucketed on the same +08 boundary so the "new" series and
 	// the "active" series above line up bar for bar.  Bucketing these two
 	// differently is the kind of mistake that produces a chart where a cohort
@@ -2290,6 +2315,19 @@ type Querier interface {
 	// neither claims a viewing that did not happen nor reorders the home page's
 	// continue-watching row.
 	MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (MarkEpisodesWatchedRow, error)
+	// AniList has no such file (a 4xx other than 401, 403 and 429, which the job
+	// treats as being refused or throttled), or the path is outside
+	// the ones nginx will store, in which case no request was sent and
+	// last_http_status is NULL.  Asked again after retry_after.  warmed_at is
+	// left as it was: when the image was last held is still true.
+	MarkImageMissing(ctx context.Context, url string, retryAfter pgtype.Interval, lastHttpStatus *int32) error
+	// AniList answered 429.  next_attempt_at is when it asked us to come back,
+	// and until then ImageWarmBlocked stops every pass.  The URL itself is due
+	// again from that time, as a retry.
+	MarkImageThrottled(ctx context.Context, url string, retryAfter pgtype.Interval) error
+	// nginx answered 200: it holds the original.  The row is due for a
+	// re-check once warmed_at is older than the job's re-check interval.
+	MarkImageWarmed(ctx context.Context, url string) error
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.

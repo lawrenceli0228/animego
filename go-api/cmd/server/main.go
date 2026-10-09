@@ -1329,6 +1329,13 @@ func buildWorkers(d workerDeps) *river.Workers {
 	// on that client's limiter -- and the pool for its one-transaction-
 	// per-batch writes.  Gated at work time by PROFILES_SWEEP_ENABLED.
 	queue.AddProfilesWorker(workers, d.anilist, d.pool, d.db)
+
+	// The image warm job: has nginx store the original of every AniList
+	// image the database references.  No AniList client -- it only ever
+	// talks to nginx's internal warm endpoint -- and no pool, because every
+	// answer is one statement.  Gated at work time by IMAGE_WARM_BASE_URL:
+	// empty, which is how dev and CI run, every pass does nothing.
+	queue.AddImageWarmWorker(workers, d.db)
 	return workers
 }
 
@@ -1365,7 +1372,7 @@ func newRootLogger(out io.Writer) *slog.Logger {
 //
 // Extracted for the same reason as newRootLogger.  Dropping
 // Queues or PeriodicJobs here fails silently and severely: queue.Boot falls
-// back to {default: 1}, so eight dedicated queues get no producer and their
+// back to {default: 1}, so no dedicated queue gets a producer and their
 // jobs sit `available` forever, and no sweep is ever scheduled.  Neither
 // produces an error, a log line, or a failed request — the same shape as the
 // incident that prompted the registry.

@@ -355,14 +355,14 @@ func TestPauseQueue_RefusesUnknownName(t *testing.T) {
 	}
 }
 
-// TestPauseQueue_AcceptsEveryDedicatedQueue asserts the whole point: the eight
+// TestPauseQueue_AcceptsEveryDedicatedQueue asserts the whole point: the nine
 // queues that were given their own pool precisely so they could be stopped
 // independently are all reachable.
 func TestPauseQueue_AcceptsEveryDedicatedQueue(t *testing.T) {
 	t.Parallel()
 
 	names := PausableQueues()
-	require.Len(t, names, 8)
+	require.Len(t, names, 9)
 
 	for _, name := range names {
 		f := &fakeQueueController{}
@@ -444,7 +444,7 @@ func TestStatusAll_ReportsEveryPausableQueue(t *testing.T) {
 	got, err := StatusAll(context.Background(), f)
 	require.NoError(t, err)
 
-	assert.Len(t, got.Paused, 8, "every pausable queue must be reported")
+	assert.Len(t, got.Paused, 9, "every pausable queue must be reported")
 	assert.True(t, got.Paused[BangumiV3QueueName])
 	assert.True(t, got.Paused[RatingsQueueName])
 	assert.False(t, got.Paused[HantBackfillQueueName])
@@ -474,7 +474,7 @@ func TestStatusAll_OmitsQueuesRiverHasNoRowFor(t *testing.T) {
 	require.NoError(t, err, "a queue river has no row for is not an error")
 	assert.NotContains(t, got.Paused, HantBackfillQueueName,
 		"absent, not false — the two are different claims")
-	assert.Len(t, got.Paused, 7)
+	assert.Len(t, got.Paused, 8)
 }
 
 // TestStatusAll_PropagatesRealErrors — a status surface that hides failures is

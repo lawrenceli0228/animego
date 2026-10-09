@@ -101,6 +101,9 @@ var allTables = []string{
 	"ddp_bgm_title",
 	// AniList->AniDB pairs, split out of bgm_id_map (migration 0041).
 	"anidb_id_map",
+	// What the image warm job has asked nginx for (migration 0049).  Keyed
+	// by URL, so nothing cascades into it.
+	"image_manager",
 	// river queue tables (migrations 0007/0008).
 	"river_client",
 	"river_client_queue",

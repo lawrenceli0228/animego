@@ -497,6 +497,7 @@ func TestDefaultRegistry_QueueNames(t *testing.T) {
 		EpisodeTitlesQueueName,
 		EpisodesBgmQueueName,
 		HantBackfillQueueName,
+		ImageWarmQueueName,
 		RatingsQueueName,
 	}, Default().Names())
 }
@@ -536,12 +537,13 @@ func TestDefaultRegistry_EveryKindIsDeclared(t *testing.T) {
 		AnimeFactsArgs{},
 		AnimeCreditsArgs{},
 		ProfilesArgs{},
+		ImageWarmArgs{},
 	} {
 		assert.True(t, declared[args.Kind()],
 			"kind %q implements river.JobArgs but is not in the registry: it would get "+
 				"no queue configuration and no schedule", args.Kind())
 	}
-	assert.Len(t, Default().Kinds(), 19,
+	assert.Len(t, Default().Kinds(), 20,
 		"a kind was added to or removed from the registry without updating this list")
 }
 
@@ -576,6 +578,7 @@ func TestDefaultRegistry_RunOnStartSplit(t *testing.T) {
 		"anime_facts":                   true,
 		"anime_credits":                 true,
 		"profiles":                      true,
+		"image_warm":                    true,
 
 		// Not boot-fired: main.go enqueues these two by hand at boot with
 		// payloads the single-payload schedule cannot express...
@@ -617,6 +620,7 @@ func TestDefaultRegistry_Intervals(t *testing.T) {
 		"anime_facts":                   time.Hour,
 		"anime_credits":                 5 * time.Minute,
 		"profiles":                      5 * time.Minute,
+		"image_warm":                    time.Hour,
 	}, intervals)
 }
 
@@ -627,7 +631,7 @@ func TestDefaultRegistry_PeriodicJobsMatchDeclarations(t *testing.T) {
 	t.Parallel()
 
 	jobs := Default().PeriodicJobs()
-	require.Len(t, jobs, 13, "thirteen scheduled kinds")
+	require.Len(t, jobs, 14, "fourteen scheduled kinds")
 
 	var want []Entry
 	for _, e := range Default().Entries() {
@@ -733,7 +737,38 @@ func TestDefaultRegistry_MaxWorkersUnchanged(t *testing.T) {
 		EpisodeTitlesQueueName:       {MaxWorkers: 1},
 		BgmBindQueueName:             {MaxWorkers: 1},
 		RatingsQueueName:             {MaxWorkers: 1},
+		ImageWarmQueueName:           {MaxWorkers: 1},
 	}, cfgs)
+}
+
+// TestDefaultRegistry_ImageWarmHasASlotOfItsOwn pins why the image warm job
+// has a queue at all.  A pass runs for most of an hour; on the ratings
+// queue's single slot it would hold the ratings, facts, credits and profiles
+// sweeps for that long.  So: nothing else rides its queue, it rides no other,
+// and the queue has exactly one slot, fixed -- a second would be a second
+// pass at twice the rate against AniList.
+func TestDefaultRegistry_ImageWarmHasASlotOfItsOwn(t *testing.T) {
+	t.Parallel()
+
+	kind := ImageWarmArgs{}.Kind()
+	var onQueue []string
+	for _, e := range Default().Entries() {
+		if e.Queue == ImageWarmQueueName {
+			onQueue = append(onQueue, e.Kind())
+		}
+		if e.Kind() == kind {
+			assert.Equal(t, ImageWarmQueueName, e.Queue)
+		}
+	}
+	assert.Equal(t, []string{kind}, onQueue, "the image warm queue carries the image warm job and nothing else")
+	assert.Equal(t, ImageWarmQueueName, ImageWarmArgs{}.InsertOpts().Queue, "and river routes it there")
+	assert.NotEqual(t, RatingsQueueName, ImageWarmQueueName)
+
+	c, ok := Default().Concurrency(ImageWarmQueueName)
+	require.True(t, ok)
+	assert.Equal(t, 1, c.Max())
+	assert.True(t, c.Fixed(), "one slot is load-bearing, not a knob")
+	assert.True(t, Default().Pausable(ImageWarmQueueName), "pausing the queue is the job's kill switch")
 }
 
 // TestDefaultRegistry_DefaultQueueIsNotPausable is the production instance of
@@ -745,8 +780,8 @@ func TestDefaultRegistry_DefaultQueueIsNotPausable(t *testing.T) {
 
 	assert.False(t, Default().Pausable(river.QueueDefault))
 	assert.NotContains(t, Default().PausableNames(), river.QueueDefault)
-	assert.Len(t, Default().PausableNames(), 8,
-		"eight dedicated queues are pausable; default is the ninth and stays out")
+	assert.Len(t, Default().PausableNames(), 9,
+		"nine dedicated queues are pausable; default is the tenth and stays out")
 }
 
 // ---------------------------------------------------------------------------
