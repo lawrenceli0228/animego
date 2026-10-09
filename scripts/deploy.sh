@@ -102,10 +102,10 @@ curl -sk -o /dev/null -w "HTTP %{http_code} from /\n" https://localhost/
 curl -sk -o /dev/null -w "HTTP %{http_code} from /anime/154587\n" https://localhost/anime/154587
 # /_next/image is served by the next-image container, not next-app.
 curl -sk -o /dev/null -w "HTTP %{http_code} from /_next/image (next-image)\n" "https://localhost/_next/image?url=%2Fcommunity-guide.jpg&w=640&q=85"
-# The AniList mirror, both halves; each should say 200 image/*. The first is
-# nginx serving an original (from its store once the warm job has run, from
-# AniList until then). The second is next-image fetching that same original
-# through the public domain, which is the source every page image uses.
+# The AniList mirror; each line should say 200 image/* (or OK). First, nginx
+# serving an original: from its store once the warm job has run, from
+# AniList until then. Second, a /_next/image request shaped like a page's,
+# whose source is the mirror.
 MIRROR_PATH="media/anime/cover/medium/bx154587-qQTzQnEJJ3oB.jpg"
 curl -sk -o /dev/null -w "HTTP %{http_code} %{content_type} from /img/anilist/ (mirror original)\n" "https://localhost/img/anilist/$MIRROR_PATH"
 curl -sk -o /dev/null -w "HTTP %{http_code} %{content_type} from /_next/image (mirror source)\n" "https://localhost/_next/image?url=https%3A%2F%2Fanimegoclub.com%2Fimg%2Fanilist%2F${MIRROR_PATH//\//%2F}&w=640&q=85"
