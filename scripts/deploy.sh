@@ -73,6 +73,16 @@ echo "==> Building Docker images..."
 # every reader to refresh for nothing.
 GIT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
 export GIT_SHA
+# BuildKit attaches a provenance attestation, stamped with the build time, to
+# every image it builds, so even a build whose every layer was cached produced
+# a new image ID, and `up -d` then recreated every service with a build:
+# section. Postgres was one of them: the database restarted on every deploy,
+# and go-api, recreated right after it, shut down with no database to record
+# its running jobs in, which left the image warm pass stranded as 'running'
+# for an hour (queue.Shutdown). These images never leave this machine, so the
+# attestation buys nothing. Without it an unchanged service keeps its image ID,
+# and its container keeps running.
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
 echo "    build id: ${GIT_SHA:-<timestamp fallback>}"
 $COMPOSE build
 
