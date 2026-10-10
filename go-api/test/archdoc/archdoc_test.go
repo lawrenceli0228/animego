@@ -46,7 +46,7 @@ import (
 const moduleRoot = "../.."
 
 // repoRoot is the repository root, for the few paths the doc names from
-// there (go-api itself, .github/workflows, next-app).
+// there (go-api itself, .github/workflows, next-app, e2e, ws-server).
 const repoRoot = "../../.."
 
 // staleReferences are paths the doc names precisely because they do not
@@ -434,12 +434,16 @@ func TestEveryNamedPathExists(t *testing.T) {
 				if staleReferences[p] {
 					continue
 				}
-				root := moduleRoot
-				if strings.HasPrefix(p, ".github/") || p == "next-app" || p == "go-api" ||
-					strings.HasPrefix(p, "next-app/") || strings.HasPrefix(p, "go-api/") {
-					root = repoRoot
+				if strings.Contains(p, "://") {
+					continue // a URL, not a path
 				}
-				if _, err := os.Stat(filepath.Join(root, p)); err != nil {
+				// Paths are go-api-relative, except the ones the doc writes
+				// from the repository root (go-api/, .github/, e2e/,
+				// ws-server/).  No go-api directory shares a name with a
+				// top-level one, so trying both cannot hide a missing path.
+				_, errModule := os.Stat(filepath.Join(moduleRoot, p))
+				_, errRepo := os.Stat(filepath.Join(repoRoot, p))
+				if errModule != nil && errRepo != nil {
 					t.Errorf("ARCHITECTURE.md names %s, which does not exist", tok)
 				}
 			case base != "" && bareFile.MatchString(tok):
