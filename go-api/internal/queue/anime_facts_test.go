@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -217,6 +218,38 @@ func TestAnimeFacts_FailedBatchLeavesRowsUnstamped(t *testing.T) {
 
 	assert.Empty(t, db.written)
 	assert.Empty(t, db.stamped)
+}
+
+// TestAnimeFacts_AnAnswerNamingNoneOfTheBatchIsAFailure — the facts half
+// of the ratings guard (batchEmptyAnswerFloor).  A FINISHED row is read
+// only while facts_checked_at is NULL, so stamping a whole batch on
+// `{"Page": null}` would freeze fifty finished titles with whatever facts
+// they had.  And an answer holding only an id nobody asked about must not
+// rewrite that row's facts, synonyms, tags or links either.
+func TestAnimeFacts_AnAnswerNamingNoneOfTheBatchIsAFailure(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, body string }{
+		{"Page null", `{"Page": null}`},
+		{"only an id nobody asked about", `{"Page": {"media": [{"id": 9999, "synonyms": ["x"]}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var answer anilist.MediaFactsResponse
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &answer))
+
+			db := newFakeFactsDB(idRun(1, anilist.MaxRatingIDs)...)
+			al := &fakeFactsFetcher{respond: func([]int) (*anilist.MediaFactsResponse, error) {
+				return &answer, nil
+			}}
+
+			require.NoError(t, NewAnimeFactsWorker(al, db).Work(context.Background(), factsJob()))
+
+			assert.Empty(t, db.stamped, "the batch stays a candidate")
+			assert.Empty(t, db.written)
+			assert.Zero(t, db.synDeletes, "no synonym set replaced")
+			assert.Empty(t, db.tagDeletes)
+		})
+	}
 }
 
 // TestAnimeFacts_NothingDueMakesNoRequest — an empty candidate list is

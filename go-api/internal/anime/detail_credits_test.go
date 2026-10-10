@@ -106,6 +106,64 @@ func TestDetail_RefetchWritesCreditsByPageInfo(t *testing.T) {
 	}
 }
 
+// TestDetail_EmptyCreditPageIsNotWritten — an empty characters or staff
+// page says nothing about what is stored, whatever its pageInfo says.
+// Written as the whole list it would prune every row of the title, the
+// credits sweep's included, and record has_more false, which takes the
+// title out of the sweep.  So the refresh writes neither the empty list
+// nor its flag, and the list that did arrive is written as usual.
+func TestDetail_EmptyCreditPageIsNotWritten(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		chars     []int
+		staff     []int
+		want      []string
+		castFlag  bool
+		staffFlag bool
+	}{
+		{name: "both empty"},
+		{name: "characters empty", staff: idRange(101, 110),
+			want: []string{"prune staff keep=10 whole=true"}, staffFlag: true},
+		{name: "staff empty", chars: idRange(1, 10),
+			want: []string{"prune characters keep=10 whole=true", "prune voices of 10"}, castFlag: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reads atomic.Int32
+			db := &detailFakeDB{
+				getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+					if reads.Add(1) == 1 {
+						return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+					}
+					return dbgen.GetAnimeMainByIDRow{AnilistID: 7, CachedAt: freshTimestamp()}, nil
+				},
+			}
+			// hasNext=false: the page AniList calls the last, which is
+			// what would have made an empty one a whole-list delete.
+			media := creditsMedia(7, tc.chars, tc.staff, 1000, false)
+			al := &fakeAniListDetailer{detailFn: func(context.Context, anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+				return &anilist.AnimeDetailResponse{Media: media}, nil
+			}}
+			svc := newDetailServiceWithAniList(t, db, al)
+
+			rec := serveDetail(t, svc, "/api/anime/7")
+			require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+			db.mu.Lock()
+			defer db.mu.Unlock()
+			assert.Equal(t, tc.want, db.creditCalls, "no prune for an empty list")
+			if !tc.castFlag && !tc.staffFlag {
+				assert.Empty(t, db.hasMoreSets, "no flag to record")
+				return
+			}
+			require.Len(t, db.hasMoreSets, 1)
+			assert.Equal(t, tc.castFlag, db.hasMoreSets[0][0] != nil, "cast flag")
+			assert.Equal(t, tc.staffFlag, db.hasMoreSets[0][1] != nil, "staff flag")
+		})
+	}
+}
+
 // TestDetail_RefreshKeepsTheSweepsCredits_PG is the property this change
 // exists for, through the real refresh path and the real read: the sweep
 // has stored a title's whole cast and staff, then the 24h refresh reads
@@ -159,6 +217,16 @@ func TestDetail_RefreshKeepsTheSweepsCredits_PG(t *testing.T) {
 		assert.Equal(t, int32(page1[i]), *c.CharacterID, "position %d", i)
 	}
 	assert.Equal(t, "V3099", *detail.Characters[24].VoiceActorEn)
+
+	// A refresh whose pages come back empty, the last saying there is no
+	// more, keeps every row and both flags: an empty answer is not the
+	// whole list.
+	require.NoError(t, svc.upsertFromMedia(ctx, id, creditsMedia(id, nil, nil, 1000, false)))
+	assert.Equal(t, 88, count(`SELECT count(*) FROM anime_characters WHERE anime_id = $1`), "an empty page deletes nothing")
+	assert.Equal(t, 60, count(`SELECT count(*) FROM anime_staff WHERE anime_id = $1`))
+	assert.Equal(t, 88, count(`SELECT count(*) FROM anime_character_voices WHERE anime_id = $1`))
+	assert.Equal(t, 1, count(`SELECT count(*) FROM anime_cache WHERE anilist_id = $1 AND cast_has_more AND staff_has_more`),
+		"the title stays a credits-sweep candidate")
 
 	// AniList now lists three characters and says that is all.
 	require.NoError(t, svc.upsertFromMedia(ctx, id, creditsMedia(id, []int{5, 6, 7}, []int{101}, 1000, false)))
