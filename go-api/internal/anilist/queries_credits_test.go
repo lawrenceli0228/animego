@@ -79,16 +79,24 @@ func TestCreditDocuments_SelectNodeIDBeforeVoiceRoles(t *testing.T) {
 	}
 }
 
-// TestCreditDocuments_VoiceRolesAreEveryLanguage — the StaffLanguage enum
-// has no Chinese, so any language argument at all puts a donghua's cast
-// out of reach.  The roles are asked for unfiltered, with the language
-// label, the role notes that tell a childhood voice from the main one,
-// and both image sizes.
-func TestCreditDocuments_VoiceRolesAreEveryLanguage(t *testing.T) {
-	const roles = "voiceActorRoles(sort: [RELEVANCE, ID]) { roleNotes dubGroup voiceActor { id name { full native } image { large medium } languageV2 } }"
+// TestCreditDocuments_VoiceRolesAreJapaneseOnly — the voices are filtered
+// where they are downloaded: every characters page of every document asks
+// AniList for Japanese voice roles alone.  Left out, AniList answers with
+// every dub it lists (eight languages a character on a popular title).
+// The roles still carry the language label the store checks again, the
+// role notes that tell a childhood voice from the main one, and both
+// image sizes.
+func TestCreditDocuments_VoiceRolesAreJapaneseOnly(t *testing.T) {
+	const roles = "voiceActorRoles(language: JAPANESE, sort: [RELEVANCE, ID]) { roleNotes dubGroup voiceActor { id name { full native } image { large medium } languageV2 } }"
 	for name, doc := range characterDocuments(t) {
-		assert.Contains(t, doc, roles, name)
-		assert.NotContains(t, doc, "language:", "%s: a language argument filters out every cast the enum cannot name", name)
+		pages := connectionBlocks(t, doc, "characters")
+		require.NotEmpty(t, pages, name)
+		for i, b := range pages {
+			assert.Contains(t, b, "voiceActorRoles(language: JAPANESE", "%s page %d", name, i+1)
+			assert.Contains(t, b, roles, "%s page %d", name, i+1)
+		}
+		assert.Equal(t, len(pages), strings.Count(doc, "language:"),
+			"%s: the one language argument is the voice roles' Japanese, once per page", name)
 		assert.NotContains(t, doc, "voiceActors(", "%s: the old field cannot say which voice is the main one", name)
 	}
 }
@@ -124,13 +132,11 @@ func TestCreditDocuments_SortOrdersAreTotal(t *testing.T) {
 }
 
 // TestCharacterPagesQuery_AliasesEachPage — one alias per page, named by
-// the page it fetches, on a single Media, with countryOfOrigin beside
-// them (it picks the primary voice).
+// the page it fetches, on a single Media.
 func TestCharacterPagesQuery_AliasesEachPage(t *testing.T) {
 	doc, err := CharacterPagesQuery(1, 8)
 	require.NoError(t, err)
 	assert.Equal(t, 1, strings.Count(doc, "Media(id: $id, type: ANIME)"), "all pages ride one Media")
-	assert.Contains(t, doc, "countryOfOrigin")
 	assert.Len(t, connectionBlocks(t, doc, "characters"), 8)
 	for page := 1; page <= 8; page++ {
 		assert.Contains(t, doc, fmt.Sprintf("p%d: characters(sort: [ROLE, RELEVANCE, ID], page: %d, perPage: 25)", page, page))

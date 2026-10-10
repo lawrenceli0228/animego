@@ -368,10 +368,10 @@ type CharacterNode struct {
 }
 
 // VoiceActor is the person behind one voice role.  LanguageV2 is
-// AniList's free-text language label ("Japanese", "Chinese", "Korean",
-// "English", ...) -- free text rather than the StaffLanguage enum,
-// because the enum has no Chinese and the label is the only place a
-// Chinese dub is named at all.
+// AniList's free-text language label ("Japanese", "Korean", "English",
+// ...).  The credit documents ask for Japanese voices only; the label is
+// what lets credits.keptLanguage check that again rather than trust the
+// argument.
 type VoiceActor struct {
 	ID         int         `json:"id"`
 	Name       *PersonName `json:"name"`
@@ -391,15 +391,15 @@ type VoiceActorRole struct {
 }
 
 // CharacterEdge carries the role string (MAIN, SUPPORTING, BACKGROUND)
-// plus the embedded character node and every voice role, in every
-// language.
+// plus the embedded character node and its Japanese voice roles (the
+// documents pass language: JAPANESE; see characterCreditsSelection).
 //
-// voiceActorRoles replaced `voiceActors(language: JAPANESE)` for two
-// reasons that are both about what the old field could not say: the
-// language argument has no Chinese value, so a donghua's Chinese cast
-// was unaskable, and a plain voice actor list cannot tell a character's
-// main voice from their childhood voice.  See credits.CastFromEdges for
-// how one of these is chosen for the voice_actor_* columns.
+// voiceActorRoles replaced `voiceActors(language: JAPANESE)` because a
+// plain voice actor list cannot tell a character's main voice from their
+// childhood voice: a role carries AniList's notes ("Childhood", "eps
+// 553-") and the dub group.  It takes the same language argument.  See
+// credits.CastFromEdges for how one of these is chosen for the
+// voice_actor_* columns.
 //
 // ★ AniList returns voiceActorRoles (and voiceActors) as an empty list,
 // without an error, when the document does not also select `node { id }`
@@ -718,18 +718,15 @@ type MediaFactsResponse struct {
 }
 
 // CharacterPages is one aliased character-pages request decoded: the
-// pages FirstPage..LastPage of CreditPagesVars, in page order, plus the
-// title's country of origin (which decides whose voice goes in the
-// voice_actor_* columns -- see credits.PrimaryLanguage).
+// pages FirstPage..LastPage of CreditPagesVars, in page order.
 //
 // Pages has exactly one entry per requested page.  A page past the end
 // of the list comes back as an empty connection with HasNextPage false,
 // so the caller reads pages until the first one that says there is no
 // next, and ignores the rest.
 type CharacterPages struct {
-	MediaID         int
-	CountryOfOrigin *string
-	Pages           []CharacterConnection
+	MediaID int
+	Pages   []CharacterConnection
 }
 
 // StaffPages is CharacterPages for the staff connection.

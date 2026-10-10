@@ -147,13 +147,20 @@ const (
 //
 // `node { id ... }` is load-bearing beyond the id it stores: AniList
 // answers voiceActorRoles with an empty list, and no error, on an edge
-// whose node id was not selected.  voiceActorRoles takes no language
-// argument, so every language comes back with its languageV2 label --
-// the StaffLanguage enum the old `voiceActors(language:)` filter took has
-// no Chinese value at all.
+// whose node id was not selected.
+//
+// voiceActorRoles takes a StaffLanguage argument, as voiceActors does, and
+// Japanese is the only language the site keeps (credits.keptLanguage).
+// Asking for it here is what filters at download time: without it AniList
+// answers with every dub it lists -- eight languages a character on a
+// popular title -- all of it to be thrown away after the download.  The
+// filtered roles keep roleNotes and dubGroup, so a childhood voice is
+// still told from the main one, and a replacement by its episodes.
+// languageV2 stays selected so the store can check the language again
+// rather than trust the argument.
 const characterCreditsSelection = `pageInfo { hasNextPage }
         edges { role node { id name { full native } image { large medium } }
-          voiceActorRoles(sort: [RELEVANCE, ID]) { roleNotes dubGroup voiceActor { id name { full native } image { large medium } languageV2 } } }`
+          voiceActorRoles(language: JAPANESE, sort: [RELEVANCE, ID]) { roleNotes dubGroup voiceActor { id name { full native } image { large medium } languageV2 } } }`
 
 // staffCreditsSelection is characterCreditsSelection for staff.
 const staffCreditsSelection = `pageInfo { hasNextPage }
@@ -353,8 +360,7 @@ func CreditPageAlias(page int) string { return "p" + strconv.Itoa(page) }
 // CharacterPagesQuery returns the document that fetches pages
 // first..last of one title's characters in a single request: each page
 // is the same characters(...) connection under its own alias on one
-// Media.  It also selects countryOfOrigin, which decides whose voice is
-// the primary one (see credits.PrimaryLanguage).
+// Media.
 //
 // A document per range rather than one with page variables, because
 // GraphQL has no way to repeat a field a variable number of times; the
@@ -362,29 +368,25 @@ func CreditPageAlias(page int) string { return "p" + strconv.Itoa(page) }
 //
 // The selection inside each page is the constant AnimeDetailQuery uses,
 // so a row the sweep writes and a row the detail path writes are made of
-// the same fields.
+// the same fields -- the Japanese-only voice filter included.
 func CharacterPagesQuery(first, last int) (string, error) {
 	return creditPagesQuery("MediaCharacterPages", "characters", characterCreditsSort,
-		characterCreditsSelection, "countryOfOrigin", first, last)
+		characterCreditsSelection, first, last)
 }
 
 // StaffPagesQuery is CharacterPagesQuery for the staff connection.
 func StaffPagesQuery(first, last int) (string, error) {
 	return creditPagesQuery("MediaStaffPages", "staff", staffCreditsSort,
-		staffCreditsSelection, "", first, last)
+		staffCreditsSelection, first, last)
 }
 
-// creditPagesQuery assembles one aliased credit document.  extra is an
-// optional Media scalar selected beside the pages.
-func creditPagesQuery(name, connection, sort, selection, extra string, first, last int) (string, error) {
+// creditPagesQuery assembles one aliased credit document.
+func creditPagesQuery(name, connection, sort, selection string, first, last int) (string, error) {
 	if first < 1 || last < first || last-first+1 > MaxCreditPagesPerRequest {
 		return "", fmt.Errorf("%w: pages %d..%d", ErrCreditPageRange, first, last)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n  query %s($id: Int) {\n    Media(id: $id, type: ANIME) {\n      id\n", name)
-	if extra != "" {
-		fmt.Fprintf(&b, "      %s\n", extra)
-	}
 	for page := first; page <= last; page++ {
 		fmt.Fprintf(&b, "      %s: %s(sort: %s, page: %d, perPage: %d) {\n        %s\n      }\n",
 			CreditPageAlias(page), connection, sort, page, CreditsPerPage, selection)

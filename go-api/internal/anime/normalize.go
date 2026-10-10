@@ -257,9 +257,9 @@ type RelationRow struct {
 // credits sweep (internal/queue) writes the same rows and cannot import
 // this package -- the reason TagsFromMedia defers to anilist's TagSet.
 //
-// The voice_actor_* fields carry the title's primary voice, chosen by
-// country of origin (credits.PrimaryLanguage); every voice of the
-// character goes to anime_character_voices (credits.Cast.Voices).
+// The voice_actor_* fields carry the character's primary Japanese voice,
+// or none (credits.CastFromEdges); every Japanese voice of the character
+// goes to anime_character_voices (credits.Cast.Voices).
 type CharacterRow = credits.Character
 
 // StaffRow is one child-row payload for anime_staff.  See CharacterRow.
@@ -390,15 +390,15 @@ func RelationsFromMedia(m anilist.Media) []RelationRow {
 }
 
 // CastFromMedia maps Media.Characters to the character rows and voice
-// rows the detail refresh writes: credits.CastFromEdges over the page,
-// with the title's country of origin deciding the primary voice.
-// DisplayOrder is the position on the page, so the relational re-read
-// preserves AniList's order.
+// rows the detail refresh writes: credits.CastFromEdges over the page.
+// The title's country of origin has no say in the voices: they are
+// Japanese whatever the country.  DisplayOrder is the position on the
+// page, so the relational re-read preserves AniList's order.
 func CastFromMedia(m anilist.Media) credits.Cast {
 	if m.Characters == nil {
-		return credits.CastFromEdges(nil, m.CountryOfOrigin)
+		return credits.CastFromEdges(nil)
 	}
-	return credits.CastFromEdges(m.Characters.Edges, m.CountryOfOrigin)
+	return credits.CastFromEdges(m.Characters.Edges)
 }
 
 // CharactersFromMedia maps Media.Characters to []CharacterRow -- the

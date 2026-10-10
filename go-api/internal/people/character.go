@@ -144,10 +144,9 @@ func editedVoices(base []CharacterVoice, ov pageOverlays) []CharacterVoice {
 // version is a second.
 //
 // Order: the languages in the order the most popular title lists them --
-// which is the original language first, since a title's cast is written
-// with its original-language voice at display_order 0 -- and within a
-// language the main voice before the noted ones (童年 and the like), then
-// as the titles list them.  Never nil.
+// the credits keep Japanese voices only (internal/credits), so in practice
+// there is one -- and within a language the main voice before the noted
+// ones (童年 and the like), then as the titles list them.  Never nil.
 func characterVoices(rows []dbgen.ListCharacterVoicesRow) []CharacterVoice {
 	ordered := slices.Clone(rows)
 	slices.SortStableFunc(ordered, func(a, b dbgen.ListCharacterVoicesRow) int {

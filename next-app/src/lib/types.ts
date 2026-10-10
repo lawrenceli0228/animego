@@ -507,7 +507,9 @@ export interface CastRoleCounts {
  *
  * `total` counts the characters matching role + q; `counts.roles` counts each
  * role over the characters matching q; `counts.languages` lists only the dubs
- * the title has, over the whole title, in the order ja, zh, ko.
+ * the title has, over the whole title. The credits keep Japanese voices only,
+ * so that is `ja` or nothing, and `language` is always `ja`; `lang=zh` and
+ * `lang=ko` are still accepted and answered as `ja`.
  */
 export interface CharactersResponse {
   data: CastCharacter[];

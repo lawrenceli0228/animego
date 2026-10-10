@@ -318,7 +318,7 @@ func TestCharactersFromMedia(t *testing.T) {
 						Name: &anilist.PersonName{Full: sptr("X")},
 					},
 					VoiceActorRoles: []anilist.VoiceActorRole{
-						{VoiceActor: &anilist.VoiceActor{ID: 6, Name: &anilist.PersonName{Full: sptr("VA")}, Image: nil}},
+						{VoiceActor: &anilist.VoiceActor{ID: 6, Name: &anilist.PersonName{Full: sptr("VA")}, Image: nil, LanguageV2: sptr("Japanese")}},
 					},
 				},
 			}},

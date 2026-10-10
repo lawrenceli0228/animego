@@ -166,6 +166,19 @@ describe("CharacterBrowser — the edges", () => {
     expect(buttons(html)).toContain("再显示 7 位");
   });
 
+  test("one dub is no choice: no switch is drawn, and each card still names its dub", () => {
+    // What the API answers now that the credits keep Japanese voices only.
+    const html = render({
+      ...FIRST_PAGE,
+      counts: { ...FIRST_PAGE.counts, languages: [{ language: "ja", count: 98 }] },
+    });
+    expect(html).not.toContain("配音语言");
+    expect(buttons(html).some((b) => b.startsWith("日配"))).toBe(false);
+    expect(buttons(html).slice(0, 4)).toEqual(["全部 100", "主角 3", "配角 40", "客串 57"]);
+    expect(cards(html)[0]).toContain("日配");
+    expect(html).toContain('placeholder="搜角色或声优"');
+  });
+
   test("a title with no characters says so, and no dub switch is drawn", () => {
     const html = render({
       ...FIRST_PAGE,

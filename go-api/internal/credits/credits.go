@@ -22,15 +22,15 @@
 //
 // A character row carries one voice in its voice_actor_* columns -- the
 // columns /api/anime/:id has always returned and its consumers decode --
-// and every voice the character has goes to anime_character_voices.  Which
-// voice is the one is the title's call, not AniList's order: a donghua's
-// characters are voiced in Chinese first and dubbed into Japanese later,
-// and AniList lists whichever was entered first.  See PrimaryLanguage and
-// CastFromEdges.
+// and every voice the character has goes to anime_character_voices.  Only
+// Japanese voices are stored, whatever the title's country of origin: the
+// documents ask AniList for Japanese voices alone, and this package checks
+// the language again before it builds a row, so a dub AniList sends anyway
+// is never written.  A character AniList lists no Japanese voice for has
+// no voice here.  See CastFromEdges.
 package credits
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
@@ -38,56 +38,34 @@ import (
 
 // MaxVoicesPerCharacter caps the voice rows kept per character.
 //
-// Only Japanese, Chinese and Korean voices are kept at all (see
-// keptLanguage), so the cap is reached by alternate casts -- childhood and
-// young versions, replacements -- rather than by dubs.  It bounds a
-// 400-character title at 3,200 rows.
+// Only Japanese voices are kept (see keptLanguage), so the cap is reached
+// by alternate casts -- childhood and young versions, replacements over a
+// long run -- not by dubs.  It bounds a 400-character title at 3,200 rows.
 const MaxVoicesPerCharacter = 8
 
-// AniList's languageV2 labels for the three languages a primary voice is
-// chosen from.  Compared case-insensitively; the label is free text.
-const (
-	LanguageJapanese = "Japanese"
-	LanguageChinese  = "Chinese"
-	LanguageKorean   = "Korean"
-)
+// LanguageJapanese is AniList's languageV2 label for the one language a
+// voice is stored in.  Compared case-insensitively; the label is free text.
+const LanguageJapanese = "Japanese"
 
 // keptLanguage reports whether a voice in this language is stored at all:
-// Japanese, Chinese or Korean, the three a primary voice is chosen from.
-// The English, European and South-East Asian dubs AniList lists for a
-// popular title are not shown anywhere on the site.
+// Japanese only.
+//
+// The documents already ask AniList for Japanese voices alone
+// (anilist.characterCreditsSelection); this is the second guard, for a
+// response that ignores the argument.  Without the argument AniList sends
+// every dub it lists -- eight languages a character on a popular title --
+// and every one of them would be stored and shown.  A voice with no label
+// is not known to be Japanese, so it is not kept either.
 func keptLanguage(lang string) bool {
-	return strings.EqualFold(lang, LanguageJapanese) ||
-		strings.EqualFold(lang, LanguageChinese) ||
-		strings.EqualFold(lang, LanguageKorean)
-}
-
-// PrimaryLanguage is the language whose voice a title's character rows
-// carry: Chinese for a Chinese or Taiwanese production, Korean for a
-// Korean one, Japanese for everything else -- including a title with no
-// country recorded, which on AniList is overwhelmingly Japanese.
-func PrimaryLanguage(countryOfOrigin *string) string {
-	if countryOfOrigin == nil {
-		return LanguageJapanese
-	}
-	switch strings.ToUpper(strings.TrimSpace(*countryOfOrigin)) {
-	case "CN", "TW":
-		return LanguageChinese
-	case "KR":
-		return LanguageKorean
-	default:
-		return LanguageJapanese
-	}
+	return strings.EqualFold(lang, LanguageJapanese)
 }
 
 // Character is one anime_characters row.  DisplayOrder is the position in
 // the list the row was built from (the caller's page or whole list).
 //
-// The voice_actor_* fields name the primary voice (see CastFromEdges).
-// VoiceActorJa holds that person's native-script name: Japanese for a
-// Japanese actor, Chinese for a Chinese one -- the column was named when
-// only Japanese voices were stored.  NameCn is always nil: no source
-// fills it yet.
+// The voice_actor_* fields name the primary voice (see CastFromEdges),
+// which is always a Japanese one; VoiceActorJa holds that person's
+// native-script name.  NameCn is always nil: no source fills it yet.
 //
 // The json tags are the column definition list of UpsertAnimeCharacters,
 // which takes a whole list as one jsonb array (see WriteCast); a field
@@ -117,7 +95,7 @@ type Voice struct {
 	CharacterID  int32   `json:"character_id"`
 	StaffID      int32   `json:"staff_id"`
 	DisplayOrder int32   `json:"display_order"`
-	Language     *string `json:"language"`   // languageV2: "Japanese", "Chinese", ...
+	Language     *string `json:"language"`   // languageV2: "Japanese", the only language kept
 	RoleNotes    *string `json:"role_notes"` // "Childhood", "Young", ...; nil for a main voice
 	DubGroup     *string `json:"dub_group"`
 	NameFull     *string `json:"name_full"`
@@ -151,21 +129,18 @@ type Staff struct {
 // first position; positions are renumbered over what is kept, so
 // DisplayOrder is always 0..n-1.
 //
-// The primary voice -- the one the character row carries -- is chosen in
-// this order:
+// Only Japanese voices are kept (keptLanguage).  The primary voice -- the
+// one the character row carries -- is the first Japanese voice with no
+// role notes, i.e. the main voice rather than "Childhood" or "Young"; else
+// the first Japanese voice; else none, and a character AniList lists only
+// dubs for has no voice at all.  "First" is AniList's order ([RELEVANCE,
+// ID]).  The port took voiceActors(language: JAPANESE)[0]; for a title
+// with one voice per character this chooses the same person.
 //
-//  1. a voice in the title's own language (PrimaryLanguage) with no role
-//     notes, i.e. the main voice rather than "Childhood" or "Young";
-//  2. any voice in that language;
-//  3. the same two steps in Japanese, for a donghua that AniList only has
-//     a Japanese cast for;
-//  4. the same two steps in any language.
-//
-// Within each step AniList's order ([RELEVANCE, ID]) breaks ties.  The
-// port took voiceActors(language: JAPANESE)[0]; for a Japanese title with
-// one voice per character this chooses the same person.
-func CastFromEdges(edges []anilist.CharacterEdge, countryOfOrigin *string) Cast {
-	want := PrimaryLanguage(countryOfOrigin)
+// The title's country of origin plays no part.  A Chinese or Korean
+// production shows its Japanese voice when AniList lists one, and no voice
+// when it does not.
+func CastFromEdges(edges []anilist.CharacterEdge) Cast {
 	cast := Cast{Characters: make([]Character, 0, len(edges)), Voices: []Voice{}}
 	seen := make(map[int]struct{}, len(edges))
 
@@ -187,7 +162,7 @@ func CastFromEdges(edges []anilist.CharacterEdge, countryOfOrigin *string) Cast 
 			c.NameEn, c.NameJa = e.Node.Name.Full, e.Node.Name.Native
 		}
 
-		voices := orderVoices(e.VoiceActorRoles, want)
+		voices := orderVoices(e.VoiceActorRoles)
 		if len(voices) > 0 {
 			primary := voices[0].VoiceActor
 			if primary.Name != nil {
@@ -223,51 +198,32 @@ func CastFromEdges(edges []anilist.CharacterEdge, countryOfOrigin *string) Cast 
 	return cast
 }
 
-// orderVoices returns the character's usable voice roles in stored
-// order: the primary voice first (see CastFromEdges), then the rest of
-// the title's language, then Japanese, Chinese and Korean, each group in
+// orderVoices returns the character's Japanese voice roles in stored
+// order: the primary voice first (see CastFromEdges), then the rest in
 // AniList's order; one entry per person; at most MaxVoicesPerCharacter.
-// Voices in any other language are dropped, except that the primary
-// itself may be one when a character has nothing else.
-//
-// Dropping before the cap is what keeps a Japanese title's Chinese dub:
-// AniList lists it after the Portuguese, Italian and German casts, and
-// with every language kept those filled the eight places first.
-func orderVoices(roles []anilist.VoiceActorRole, want string) []anilist.VoiceActorRole {
-	usable := make([]anilist.VoiceActorRole, 0, len(roles))
+// A role in any other language, or one with no usable voice actor, is
+// dropped before anything is chosen or counted, so a dub can neither
+// become the primary nor take a place under the cap.
+func orderVoices(roles []anilist.VoiceActorRole) []anilist.VoiceActorRole {
+	japanese := make([]anilist.VoiceActorRole, 0, len(roles))
 	for _, r := range roles {
-		if r.VoiceActor != nil && r.VoiceActor.ID > 0 {
-			usable = append(usable, r)
+		if r.VoiceActor != nil && r.VoiceActor.ID > 0 && keptLanguage(language(r)) {
+			japanese = append(japanese, r)
 		}
 	}
-	if len(usable) == 0 {
+	if len(japanese) == 0 {
 		return nil
 	}
 
-	primary := pickPrimary(usable, want)
-	rest := make([]anilist.VoiceActorRole, 0, len(usable)-1)
-	for i, r := range usable {
-		if i != primary && keptLanguage(language(r)) {
-			rest = append(rest, r)
-		}
-	}
-	group := func(r anilist.VoiceActorRole) int {
-		switch lang := language(r); {
-		case strings.EqualFold(lang, want):
-			return 0
-		case strings.EqualFold(lang, LanguageJapanese):
-			return 1
-		case strings.EqualFold(lang, LanguageChinese):
-			return 2
-		default: // Korean, the only other language keptLanguage lets through
-			return 3
-		}
-	}
-	sort.SliceStable(rest, func(i, j int) bool { return group(rest[i]) < group(rest[j]) })
+	primary := mainVoice(japanese)
+	ordered := make([]anilist.VoiceActorRole, 0, len(japanese))
+	ordered = append(ordered, japanese[primary])
+	ordered = append(ordered, japanese[:primary]...)
+	ordered = append(ordered, japanese[primary+1:]...)
 
-	out := make([]anilist.VoiceActorRole, 0, min(len(usable), MaxVoicesPerCharacter))
-	people := make(map[int]struct{}, len(usable))
-	for _, r := range append([]anilist.VoiceActorRole{usable[primary]}, rest...) {
+	out := make([]anilist.VoiceActorRole, 0, min(len(ordered), MaxVoicesPerCharacter))
+	people := make(map[int]struct{}, len(ordered))
+	for _, r := range ordered {
 		if len(out) == MaxVoicesPerCharacter {
 			break
 		}
@@ -280,33 +236,16 @@ func orderVoices(roles []anilist.VoiceActorRole, want string) []anilist.VoiceAct
 	return out
 }
 
-// pickPrimary returns the index of the primary voice among usable roles
-// (non-empty), following the steps CastFromEdges documents.
-func pickPrimary(roles []anilist.VoiceActorRole, want string) int {
-	for _, lang := range []string{want, LanguageJapanese} {
-		if i := firstVoiceIn(roles, lang); i >= 0 {
-			return i
-		}
-	}
-	return firstVoiceIn(roles, "")
-}
-
-// firstVoiceIn returns the first role in lang ("" for any language) that
-// has no role notes, else the first role in lang at all, else -1.
-func firstVoiceIn(roles []anilist.VoiceActorRole, lang string) int {
-	fallback := -1
+// mainVoice returns the index of the primary voice among a character's
+// Japanese roles (non-empty): the first with no role notes, else the
+// first.
+func mainVoice(roles []anilist.VoiceActorRole) int {
 	for i, r := range roles {
-		if lang != "" && !strings.EqualFold(language(r), lang) {
-			continue
-		}
 		if trimmed(r.RoleNotes) == nil {
 			return i
 		}
-		if fallback < 0 {
-			fallback = i
-		}
 	}
-	return fallback
+	return 0
 }
 
 // StaffFromEdges builds the staff rows for a list of staff edges.  A

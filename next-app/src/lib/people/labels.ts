@@ -35,10 +35,9 @@ export function characterRoleLabel(role: string | null | undefined, lang: Lang):
 
 /**
  * AniList's languageV2 labels as a dub is named in Chinese: 日配, 中配. The
- * credits keep Japanese, Chinese and Korean voices (and a title's primary
- * voice in whatever language it is), so the first three cover nearly every
- * row; the rest are here so an English or French primary voice does not
- * print in English on a Chinese page.
+ * credits keep Japanese voices only, so 日配 is the one a page shows; the
+ * others stay so a voice in another language, should one ever reach a page,
+ * still reads as a dub name rather than in English on a Chinese page.
  */
 const DUB_LANGUAGE_LABEL: Labels = {
   zh: {

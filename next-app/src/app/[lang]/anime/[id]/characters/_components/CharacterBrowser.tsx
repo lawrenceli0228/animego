@@ -1,8 +1,14 @@
 "use client";
 
 // The 角色 tab's list: the role filter (全部 / 主角 / 配角 / 客串), the dub
-// switch (日配 / 中配 / 韩配, only the ones the title has), a search over
-// character and voice-actor names, and the card grid with 「再显示 N 位」.
+// switch, a search over character and voice-actor names, and the card grid
+// with 「再显示 N 位」.
+//
+// The switch is drawn only when the title has more than one dub to switch
+// between. The credits keep Japanese voices only (go-api internal/credits),
+// so the API counts one language at most and the switch stays hidden: a
+// group with a single, always-pressed button would offer no choice. Each
+// card still names its dub under the voice (日配).
 //
 // The server renders the first page with the default filters into the
 // cached HTML, which is what a crawler and a first paint see. Every change
@@ -237,7 +243,7 @@ export default function CharacterBrowser({
           ))}
         </div>
 
-        {languages.length > 0 ? (
+        {languages.length > 1 ? (
           <div className={s.seg} role="group" aria-label={t("detail.dubFilterAria")}>
             {languages.map(({ language, count }) => (
               <button

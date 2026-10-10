@@ -45,57 +45,40 @@ func voiceIDs(cast Cast, characterID int32) []int32 {
 	return out
 }
 
-func TestPrimaryLanguage(t *testing.T) {
-	for _, tc := range []struct {
-		country *string
-		want    string
-	}{
-		{sptr("CN"), LanguageChinese},
-		{sptr("TW"), LanguageChinese},
-		{sptr("cn"), LanguageChinese},
-		{sptr(" KR "), LanguageKorean},
-		{sptr("JP"), LanguageJapanese},
-		{sptr("HK"), LanguageJapanese},
-		{sptr(""), LanguageJapanese},
-		{nil, LanguageJapanese},
-	} {
-		assert.Equal(t, tc.want, PrimaryLanguage(tc.country), "%v", tc.country)
-	}
-}
-
 // TestCastFromEdges_PrimaryVoice — which voice lands in the voice_actor_*
-// columns, by the title's country of origin and the role notes.
+// columns: the first Japanese main voice, else the first Japanese voice,
+// else none.  No language but Japanese is ever a candidate, wherever
+// AniList lists it.
 func TestCastFromEdges_PrimaryVoice(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		country *string
-		roles   []anilist.VoiceActorRole
-		want    int // voice actor id, 0 for none
+		name  string
+		roles []anilist.VoiceActorRole
+		want  int // voice actor id, 0 for none
 	}{
-		{"japanese title: the Japanese voice even when a dub is listed first", sptr("JP"),
+		{"the Japanese voice even when a dub is listed first",
 			[]anilist.VoiceActorRole{voice(1, "Jordan", "English", ""), voice(2, "Kobayashi", "Japanese", "")}, 2},
-		{"the main voice over the childhood voice", sptr("JP"),
+		{"the main voice over the childhood voice",
 			[]anilist.VoiceActorRole{voice(3, "Kiyoto", "Japanese", "Childhood"), voice(2, "Kobayashi", "Japanese", "")}, 2},
-		{"chinese title: the Chinese voice", sptr("CN"),
-			[]anilist.VoiceActorRole{voice(4, "Kimura", "Japanese", ""), voice(5, "Ajie", "Chinese", ""), voice(6, "Sim", "Korean", "")}, 5},
-		{"taiwanese title: the Chinese voice", sptr("TW"),
-			[]anilist.VoiceActorRole{voice(4, "Kimura", "Japanese", ""), voice(5, "Ajie", "chinese", "")}, 5},
-		{"korean title: the Korean voice", sptr("KR"),
-			[]anilist.VoiceActorRole{voice(4, "Kimura", "Japanese", ""), voice(6, "Sim", "Korean", "")}, 6},
-		{"chinese title with only a Japanese cast falls back to Japanese", sptr("CN"),
-			[]anilist.VoiceActorRole{voice(7, "Smith", "English", ""), voice(4, "Kimura", "Japanese", "")}, 4},
-		{"no Japanese either: any language, main voice first", sptr("CN"),
-			[]anilist.VoiceActorRole{voice(8, "Young Smith", "English", "Young"), voice(7, "Smith", "English", "")}, 7},
-		{"every voice in the language has notes: the first of them", sptr("JP"),
+		{"a donghua's cast, Chinese first: the Japanese voice",
+			[]anilist.VoiceActorRole{voice(5, "Ajie", "Chinese", ""), voice(4, "Kimura", "Japanese", ""), voice(6, "Sim", "Korean", "")}, 4},
+		{"the label is read in any case",
+			[]anilist.VoiceActorRole{voice(5, "Ajie", "Chinese", ""), voice(4, "Kimura", " japanese ", "")}, 4},
+		{"a Japanese voice with notes beats a dub's main voice",
+			[]anilist.VoiceActorRole{voice(6, "Sim", "Korean", ""), voice(3, "Kiyoto", "Japanese", "Childhood")}, 3},
+		{"only dubs: no voice",
+			[]anilist.VoiceActorRole{voice(7, "Smith", "English", ""), voice(5, "Ajie", "Chinese", ""), voice(6, "Sim", "Korean", "")}, 0},
+		{"a voice with no language label is not taken for Japanese",
+			[]anilist.VoiceActorRole{{VoiceActor: &anilist.VoiceActor{ID: 11, Name: &anilist.PersonName{Full: sptr("Unlabelled")}}}}, 0},
+		{"every Japanese voice has notes: the first of them",
 			[]anilist.VoiceActorRole{voice(9, "Old", "Japanese", "Old"), voice(3, "Kiyoto", "Japanese", "Childhood")}, 9},
-		{"blank notes count as none", sptr("JP"),
+		{"blank notes count as none",
 			[]anilist.VoiceActorRole{voice(3, "Kiyoto", "Japanese", "Childhood"), voice(10, "Blank", "Japanese", "   ")}, 10},
-		{"unusable roles are skipped", nil,
+		{"unusable roles are skipped",
 			[]anilist.VoiceActorRole{{VoiceActor: nil}, {VoiceActor: &anilist.VoiceActor{ID: 0}}, voice(2, "Kobayashi", "Japanese", "")}, 2},
-		{"no voice at all", sptr("JP"), nil, 0},
+		{"no voice at all", nil, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cast := CastFromEdges([]anilist.CharacterEdge{character(100, "Stark", tc.roles...)}, tc.country)
+			cast := CastFromEdges([]anilist.CharacterEdge{character(100, "Stark", tc.roles...)})
 			require.Len(t, cast.Characters, 1)
 			c := cast.Characters[0]
 			if tc.want == 0 {
@@ -114,10 +97,10 @@ func TestCastFromEdges_PrimaryVoice(t *testing.T) {
 }
 
 // TestCastFromEdges_VoiceOrderAndCap — the shape measured on AniList for
-// Stark (Frieren): thirteen roles in ten languages, plus a Chinese dub
-// listed after all of them.  The title's language comes first (main
-// voice, then the childhood voice), then Chinese, then Korean; the other
-// dubs are dropped, and what is left is cut at eight.
+// Stark (Frieren) when the roles are asked for in every language:
+// thirteen roles in ten languages, plus a Chinese dub listed after all of
+// them.  Only the two Japanese voices are kept, the main voice first and
+// the childhood voice after it.
 func TestCastFromEdges_VoiceOrderAndCap(t *testing.T) {
 	stark := character(100, "Stark",
 		voice(1, "Kobayashi", "Japanese", ""),
@@ -135,12 +118,9 @@ func TestCastFromEdges_VoiceOrderAndCap(t *testing.T) {
 		voice(13, "Kim", "Korean", ""),
 		voice(14, "Zhang", "Chinese", ""),
 	)
-	cast := CastFromEdges([]anilist.CharacterEdge{stark}, sptr("JP"))
+	cast := CastFromEdges([]anilist.CharacterEdge{stark})
 
-	// Japanese first, then the Chinese dub AniList listed last, then
-	// Korean; the European and South-East Asian dubs are not kept at all,
-	// so they can no longer push the Chinese voice past the cap.
-	assert.Equal(t, []int32{1, 8, 14, 12, 13}, voiceIDs(cast, 100))
+	assert.Equal(t, []int32{1, 8}, voiceIDs(cast, 100))
 	for i, v := range cast.Voices {
 		assert.Equal(t, int32(i), v.DisplayOrder)
 	}
@@ -153,34 +133,68 @@ func TestCastFromEdges_VoiceOrderAndCap(t *testing.T) {
 	assert.Equal(t, "Kobayashi (native)", *cast.Voices[0].NameNative)
 	assert.Equal(t, "https://img/Kobayashi", *cast.Voices[0].ImageUrl)
 
-	// A donghua: Chinese voices first, Japanese next, Korean after; the
-	// English dub is dropped.
-	wei := character(200, "Wei Wuxian",
-		voice(21, "Kimura", "Japanese", ""),
-		voice(22, "Ajie", "Chinese", ""),
-		voice(23, "Smith", "English", ""),
-		voice(24, "Young Ajie", "Chinese", "Childhood"),
-		voice(25, "Sim", "Korean", ""),
+	// The main voice moves ahead of a noted one AniList listed first; the
+	// rest keep AniList's order.
+	conan := character(150, "Kogorou",
+		voice(51, "Koyama", "Japanese", "eps 553-"),
+		voice(52, "Kamiya", "Japanese", ""),
+		voice(53, "Yanada", "Japanese", "Young"),
 	)
-	cast = CastFromEdges([]anilist.CharacterEdge{wei}, sptr("CN"))
-	assert.Equal(t, []int32{22, 24, 21, 25}, voiceIDs(cast, 200))
-	c := cast.Characters[0]
-	assert.Equal(t, "Ajie", *c.VoiceActorEn)
-	assert.Equal(t, "Ajie (native)", *c.VoiceActorJa, "the native-script name, whatever the language")
+	cast = CastFromEdges([]anilist.CharacterEdge{conan})
+	assert.Equal(t, []int32{52, 51, 53}, voiceIDs(cast, 150))
+	assert.Equal(t, "eps 553-", *cast.Voices[1].RoleNotes)
 
-	// The cap still applies once only kept languages remain.
+	// The cap applies to Japanese voices alone.
 	many := make([]anilist.VoiceActorRole, 0, 10)
 	for i := 1; i <= 10; i++ {
 		many = append(many, voice(300+i, fmt.Sprintf("Cast %d", i), "Japanese", "Young"))
 	}
-	cast = CastFromEdges([]anilist.CharacterEdge{character(300, "Crowd", many...)}, sptr("JP"))
+	cast = CastFromEdges([]anilist.CharacterEdge{character(300, "Crowd", many...)})
 	require.Len(t, cast.Voices, MaxVoicesPerCharacter)
+}
 
-	// A character whose only voice is in another language keeps it as the
-	// primary, as before; it is the extra dubs that are dropped.
-	solo := character(400, "Solo", voice(41, "Only", "English", ""))
-	cast = CastFromEdges([]anilist.CharacterEdge{solo}, sptr("JP"))
-	assert.Equal(t, []int32{41}, voiceIDs(cast, 400))
+// TestCastFromEdges_StoresJapaneseVoicesOnly — the guard behind the
+// document's language filter.  AniList answering every language anyway
+// stores none of the dubs: not as voice rows, not on the character row,
+// and not as a primary of last resort.  A character voiced only in other
+// languages has no voice at all.
+func TestCastFromEdges_StoresJapaneseVoicesOnly(t *testing.T) {
+	cast := CastFromEdges([]anilist.CharacterEdge{
+		// A donghua's lead as AniList lists it: the Chinese cast first.
+		character(200, "Wei Wuxian",
+			voice(22, "Ajie", "Chinese", ""),
+			voice(23, "Smith", "English", ""),
+			voice(21, "Kimura", "Japanese", ""),
+			voice(24, "Young Ajie", "Chinese", "Childhood"),
+			voice(25, "Sim", "Korean", ""),
+		),
+		// A Korean production with no Japanese dub.
+		character(300, "Jinwoo", voice(31, "Taek", "Korean", ""), voice(32, "Reed", "English", "")),
+		character(400, "Solo", voice(41, "Only", "English", "")),
+	})
+
+	require.Len(t, cast.Characters, 3)
+	wei := cast.Characters[0]
+	require.NotNil(t, wei.VoiceActorID)
+	assert.Equal(t, int32(21), *wei.VoiceActorID)
+	assert.Equal(t, "Kimura", *wei.VoiceActorEn)
+	assert.Equal(t, "Kimura (native)", *wei.VoiceActorJa)
+	assert.Equal(t, []int32{21}, voiceIDs(cast, 200))
+
+	for _, c := range cast.Characters[1:] {
+		assert.Nil(t, c.VoiceActorID, "%s", *c.NameEn)
+		assert.Nil(t, c.VoiceActorEn)
+		assert.Nil(t, c.VoiceActorJa)
+		assert.Nil(t, c.VoiceActorImageUrl)
+	}
+	assert.Empty(t, voiceIDs(cast, 300))
+	assert.Empty(t, voiceIDs(cast, 400))
+
+	require.Len(t, cast.Voices, 1)
+	for _, v := range cast.Voices {
+		require.NotNil(t, v.Language)
+		assert.Equal(t, LanguageJapanese, *v.Language)
+	}
 }
 
 // TestCastFromEdges_Dedupes — a character listed twice is kept at its
@@ -192,7 +206,7 @@ func TestCastFromEdges_Dedupes(t *testing.T) {
 		character(2, "B"),
 		character(1, "A again"),
 		character(3, "C"),
-	}, sptr("JP"))
+	})
 
 	require.Len(t, cast.Characters, 3)
 	assert.Equal(t, "A", *cast.Characters[0].NameEn)
@@ -211,7 +225,7 @@ func TestCastFromEdges_IDlessNode(t *testing.T) {
 	cast := CastFromEdges([]anilist.CharacterEdge{
 		character(0, "nameless", voice(10, "X", "Japanese", "")),
 		character(0, "nameless too"),
-	}, nil)
+	})
 	require.Len(t, cast.Characters, 2)
 	assert.Nil(t, cast.Characters[0].CharacterID)
 	require.NotNil(t, cast.Characters[0].VoiceActorID)
@@ -224,15 +238,15 @@ func TestCastFromEdges_IDlessNode(t *testing.T) {
 func TestCastFromEdges_Images(t *testing.T) {
 	edge := character(1, "A")
 	edge.Node.Image = &anilist.Image{Large: sptr("L"), Medium: sptr("")}
-	cast := CastFromEdges([]anilist.CharacterEdge{edge}, nil)
+	cast := CastFromEdges([]anilist.CharacterEdge{edge})
 	assert.Equal(t, "L", *cast.Characters[0].ImageUrl)
 
 	edge.Node.Image = &anilist.Image{Large: sptr("L"), Medium: sptr("M")}
-	cast = CastFromEdges([]anilist.CharacterEdge{edge}, nil)
+	cast = CastFromEdges([]anilist.CharacterEdge{edge})
 	assert.Equal(t, "M", *cast.Characters[0].ImageUrl)
 
 	edge.Node.Image = nil
-	cast = CastFromEdges([]anilist.CharacterEdge{edge}, nil)
+	cast = CastFromEdges([]anilist.CharacterEdge{edge})
 	assert.Nil(t, cast.Characters[0].ImageUrl)
 }
 
