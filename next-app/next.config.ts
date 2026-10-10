@@ -38,6 +38,26 @@ const nextConfig: NextConfig = {
   // node_modules) to ~120MB. Required for the multi-stage Dockerfile.
   output: "standalone",
 
+  // Pages generated at runtime are cached in memory only, never on disk.
+  // By default Next writes every ISR page it renders (HTML, RSC payload and
+  // segment data) under .next/server/app, and its fetch cache under
+  // .next/cache, in the container's writable layer, with no limit and
+  // nothing ever deleted until the container is recreated. With every title,
+  // its tabs, every character and every person page crawled in three
+  // languages, that grew without bound and would fill the server's disk --
+  // the disk the database is on -- in well under a day.
+  //
+  // The disk copy only ever bought serving a stale page instead of rendering
+  // one: these routes revalidate every 60 seconds, and the CDN caches them. A
+  // page evicted from memory now renders on its next request. Pages
+  // prerendered at build time are still read from the image (the flag only
+  // stops writes, and the fetch cache's reads). 128 MB of memory cache, from
+  // the default 50: next-app itself uses a small part of its 1 GB limit.
+  cacheMaxMemorySize: 128 * 1024 * 1024,
+  experimental: {
+    isrFlushToDisk: false,
+  },
+
   turbopack: {
     root: path.resolve(__dirname),
   },
