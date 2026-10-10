@@ -329,7 +329,7 @@ func (p *creditsPass) sweepCast(ctx context.Context, id int32) {
 		return
 	}
 	hasMore, _ := pages[0].NextPage()
-	cast := credits.CastFromEdges(edges, first.CountryOfOrigin)
+	cast := credits.CastFromEdges(edges)
 	if err := p.w.store.ReplaceCast(ctx, id, cast, hasMore, p.w.clock()); err != nil {
 		p.titleFailed(ctx, "cast", id, err, p.w.store.StampAnimeCastChecked)
 		return

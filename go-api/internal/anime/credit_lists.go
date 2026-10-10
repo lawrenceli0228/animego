@@ -99,7 +99,7 @@ func creditListsCachePolicy(settled bool) string {
 
 // CreditListsDB is the sqlc subset the three endpoints read.
 type CreditListsDB interface {
-	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (dbgen.GetAnimeCreditsHeadRow, error)
+	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (bool, error)
 	GetAnimeCreditCounts(ctx context.Context, anilistID int32) (dbgen.GetAnimeCreditCountsRow, error)
 	ListAnimeCastCharacters(ctx context.Context, animeID int32) ([]dbgen.ListAnimeCastCharactersRow, error)
 	ListAnimeCastVoices(ctx context.Context, animeID int32) ([]dbgen.ListAnimeCastVoicesRow, error)
@@ -172,11 +172,15 @@ func (s *CreditListsService) Close() {
 //	          them)
 //	offset    as asked (clamped at 0); limit as applied
 //	hasMore   whether a later page has more of them
-//	language  the dub the voices are in: the one asked for, else the
-//	          title's (see defaultCastLang)
+//	language  the dub the voices are in: "ja", whatever was asked -- the
+//	          store keeps Japanese voices only (see castLangs)
 //	counts    roles: per role, over the characters matching q (any role);
-//	          languages: characters with a voice in each language over the
-//	          whole title, only those with any, in the order ja, zh, ko
+//	          languages: [{"language":"ja","count":n}], n the characters
+//	          with a Japanese voice over the whole title, or [] when none
+//	          has one
+//
+// The shape is the one the ja / zh / ko switch was built on; only the
+// values narrowed when the voices did.
 type charactersResponse struct {
 	Data     []castCharacter `json:"data"`
 	Total    int             `json:"total"`
@@ -208,9 +212,10 @@ type creditCounts struct {
 // Query parameters (all optional):
 //
 //	role    main | supporting | background | all (any case)    else 400
-//	lang    ja | zh | ko (any case)                             else 400
+//	lang    ja | zh | ko (any case); zh and ko, the retired
+//	        中配 and 韩配, are answered as ja                    else 400
 //	q       up to castMaxQueryRunes characters, matched against the
-//	        character's names and the names of its voices in `lang`
+//	        character's names and the names of its Japanese voices
 //	        after bgmnames.Normalize                            else 400
 //	offset  default 0; negative or unparseable reads as 0
 //	limit   default castDefaultLimit, at most castMaxLimit
@@ -375,7 +380,7 @@ func (s *CreditListsService) loadCast(ctx context.Context, id int32) (*castList,
 		return hit, true, nil
 	}
 	v, err := s.shared(ctx, "cast:"+key, func(lctx context.Context) (any, error) {
-		head, err := s.head(lctx, id)
+		fetched, err := s.head(lctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -387,11 +392,11 @@ func (s *CreditListsService) loadCast(ctx context.Context, id int32) (*castList,
 		if err != nil {
 			return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 		}
-		list := buildCastList(head.CountryOfOrigin, chars, voices)
-		if head.DetailFetched {
+		list := buildCastList(chars, voices)
+		if fetched {
 			remember(s.cast, key, list, len(list.entries) == 0, s.emptyTTL)
 		}
-		return loaded[*castList]{list: list, settled: head.DetailFetched}, nil
+		return loaded[*castList]{list: list, settled: fetched}, nil
 	})
 	if err != nil {
 		return nil, false, err
@@ -408,7 +413,7 @@ func (s *CreditListsService) loadStaff(ctx context.Context, id int32) (*staffLis
 		return hit, true, nil
 	}
 	v, err := s.shared(ctx, "staff:"+key, func(lctx context.Context) (any, error) {
-		head, err := s.head(lctx, id)
+		fetched, err := s.head(lctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -417,10 +422,10 @@ func (s *CreditListsService) loadStaff(ctx context.Context, id int32) (*staffLis
 			return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 		}
 		list := buildStaffList(rows)
-		if head.DetailFetched {
+		if fetched {
 			remember(s.staff, key, list, len(list.credits) == 0, s.emptyTTL)
 		}
-		return loaded[*staffList]{list: list, settled: head.DetailFetched}, nil
+		return loaded[*staffList]{list: list, settled: fetched}, nil
 	})
 	if err != nil {
 		return nil, false, err
@@ -443,19 +448,20 @@ func remember[V any](c *cache.Cache[V], key string, list V, empty bool, emptyTTL
 	}
 }
 
-// head is the existence check every load starts with: the title's row,
-// or the 404 /api/anime/:id gives for an id we do not hold.  Only a hit
-// is ever cached (inside the list it was read for), so a title that
-// appears later is listed as soon as it does.
-func (s *CreditListsService) head(ctx context.Context, id int32) (dbgen.GetAnimeCreditsHeadRow, error) {
-	head, err := s.db.GetAnimeCreditsHead(ctx, id)
+// head is the existence check every load starts with: whether the title's
+// detail has been fetched (see the package comment), or the 404
+// /api/anime/:id gives for an id we do not hold.  Only a hit is ever
+// cached (inside the list it was read for), so a title that appears later
+// is listed as soon as it does.
+func (s *CreditListsService) head(ctx context.Context, id int32) (fetched bool, err error) {
+	fetched, err = s.db.GetAnimeCreditsHead(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return head, errAnimeNotFound()
+		return false, errAnimeNotFound()
 	}
 	if err != nil {
-		return head, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
+		return false, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 	}
-	return head, nil
+	return fetched, nil
 }
 
 // shared runs load once for every concurrent caller of the same key.

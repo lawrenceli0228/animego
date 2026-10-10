@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -37,7 +38,6 @@ func TestClient_CharacterPagesNoWait_DecodesEachAliasInOrder(t *testing.T) {
 
 	const body = `{"data":{"Media":{
 	  "id": 154587,
-	  "countryOfOrigin": "JP",
 	  "p2": {"pageInfo":{"hasNextPage":false},"edges":[
 	    {"role":"BACKGROUND","node":{"id":3,"name":{"full":"Third"}},"voiceActorRoles":[]}
 	  ]},
@@ -65,11 +65,11 @@ func TestClient_CharacterPagesNoWait_DecodesEachAliasInOrder(t *testing.T) {
 	assert.Contains(t, got.Query, "p1: characters(")
 	assert.Contains(t, got.Query, "p2: characters(")
 	assert.NotContains(t, got.Query, "p3:")
+	assert.Equal(t, 2, strings.Count(got.Query, "voiceActorRoles(language: JAPANESE"),
+		"what goes over the wire asks for Japanese voices on every page")
 	assert.Equal(t, map[string]any{"id": float64(154587)}, got.Variables, "only the id travels as a variable")
 
 	assert.Equal(t, 154587, res.MediaID)
-	require.NotNil(t, res.CountryOfOrigin)
-	assert.Equal(t, "JP", *res.CountryOfOrigin)
 	require.Len(t, res.Pages, 2)
 
 	hasNext, known := res.Pages[0].NextPage()

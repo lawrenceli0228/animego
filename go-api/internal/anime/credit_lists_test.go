@@ -25,8 +25,7 @@ import (
 type fakeCreditListsDB struct {
 	mu sync.Mutex
 
-	missing bool    // GetAnimeCreditsHead and GetAnimeCreditCounts answer pgx.ErrNoRows
-	country *string // the title's country_of_origin
+	missing bool // GetAnimeCreditsHead and GetAnimeCreditCounts answer pgx.ErrNoRows
 	// unfetched is a title a listing wrote and no detail fetch has filled:
 	// detail_fetched_at NULL, its credit tables empty because nobody asked.
 	unfetched bool
@@ -57,15 +56,15 @@ func (f *fakeCreditListsDB) called(name string) int {
 	return f.calls[name]
 }
 
-func (f *fakeCreditListsDB) GetAnimeCreditsHead(_ context.Context, _ int32) (dbgen.GetAnimeCreditsHeadRow, error) {
+func (f *fakeCreditListsDB) GetAnimeCreditsHead(_ context.Context, _ int32) (bool, error) {
 	f.count("head")
 	if f.headErr != nil {
-		return dbgen.GetAnimeCreditsHeadRow{}, f.headErr
+		return false, f.headErr
 	}
 	if f.missing {
-		return dbgen.GetAnimeCreditsHeadRow{}, pgx.ErrNoRows
+		return false, pgx.ErrNoRows
 	}
-	return dbgen.GetAnimeCreditsHeadRow{CountryOfOrigin: f.country, DetailFetched: !f.unfetched}, nil
+	return !f.unfetched, nil
 }
 
 func (f *fakeCreditListsDB) GetAnimeCreditCounts(_ context.Context, _ int32) (dbgen.GetAnimeCreditCountsRow, error) {
@@ -99,8 +98,9 @@ func (f *fakeCreditListsDB) ListAnimeStaffCredits(_ context.Context, _ int32) ([
 	return f.staff, f.staffErr
 }
 
-// fixtureCreditsDB holds the fixtureCast title plus three staff credits
-// for two people.
+// fixtureCreditsDB holds a four-character title -- with one Chinese voice
+// row left over from before the store kept Japanese only, which no answer
+// may show -- plus three staff credits for two people.
 func fixtureCreditsDB() *fakeCreditListsDB {
 	list := []dbgen.ListAnimeCastCharactersRow{
 		castChar(1, "MAIN", "Frieren", "フリーレン"),
@@ -111,9 +111,8 @@ func fixtureCreditsDB() *fakeCreditListsDB {
 	list[0].NameCn = sptr("芙莉莲")
 	list[0].ImageUrl = sptr("https://s4.anilist.co/file/anilistcdn/character/large/1.png")
 	return &fakeCreditListsDB{
-		country: sptr("JP"),
-		counts:  dbgen.GetAnimeCreditCountsRow{Characters: 4, Staff: 2},
-		chars:   list,
+		counts: dbgen.GetAnimeCreditCountsRow{Characters: 4, Staff: 2},
+		chars:  list,
 		voices: []dbgen.ListAnimeCastVoicesRow{
 			castVoiceRow(1, 11, "Japanese", "", "Atsumi Tanezaki", "種崎敦美"),
 			castVoiceRow(1, 12, "Chinese", "", "Zhong Pei", "中配一"),
@@ -202,12 +201,12 @@ func TestCharacters_EnvelopeShape(t *testing.T) {
 		"language": "ja",
 		"counts": {
 			"roles": {"all": 4, "main": 2, "supporting": 1, "background": 1},
-			"languages": [{"language": "ja", "count": 2}, {"language": "zh", "count": 1}]
+			"languages": [{"language": "ja", "count": 2}]
 		}
 	}`, rec.Body.String())
 	assert.True(t, strings.HasPrefix(rec.Body.String(), `{"data":[{"characterId":1,`),
 		"data first, the character's id first: the order the structs declare")
-	assert.True(t, strings.HasSuffix(rec.Body.String(), `"count":1}]}}`), "no trailing newline")
+	assert.True(t, strings.HasSuffix(rec.Body.String(), `"count":2}]}}`), "no trailing newline")
 }
 
 func TestCharacters_Defaults(t *testing.T) {
@@ -217,9 +216,40 @@ func TestCharacters_Defaults(t *testing.T) {
 	body := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters"))
 	assert.Equal(t, castDefaultLimit, body.Limit)
 	assert.Equal(t, 0, body.Offset)
-	assert.Equal(t, "ja", body.Language, "a Japanese title answers in Japanese")
+	assert.Equal(t, "ja", body.Language)
 	assert.Len(t, body.Data, 4)
 	assert.False(t, body.HasMore)
+}
+
+// TestCharacters_RetiredLanguagesAnswerAsJapanese — lang=zh and lang=ko,
+// the switch's 中配 and 韩配 before the store kept Japanese only, are still
+// accepted, in any case, so an old link or a cached page asking for one
+// gets a page rather than a 400.  The answer is the Japanese one, byte for
+// byte: Japanese is the only language listed and counted, and the Chinese
+// row the fixture holds shows nowhere.
+func TestCharacters_RetiredLanguagesAnswerAsJapanese(t *testing.T) {
+	t.Parallel()
+
+	h := creditListsRouter(t, newCreditListsService(t, fixtureCreditsDB()))
+	ja := getCredits(t, h, "/api/anime/154587/characters?lang=ja")
+	require.Equal(t, http.StatusOK, ja.Code, ja.Body.String())
+	assert.Equal(t, getCredits(t, h, "/api/anime/154587/characters").Body.String(), ja.Body.String(),
+		"naming Japanese is naming nothing")
+
+	for _, lang := range []string{"zh", "ko", "ZH", "Ko"} {
+		rec := getCredits(t, h, "/api/anime/154587/characters?lang="+lang)
+		require.Equal(t, http.StatusOK, rec.Code, "%s: %s", lang, rec.Body.String())
+		assert.Equal(t, ja.Body.String(), rec.Body.String(), lang)
+
+		body := decodeCharacters(t, rec)
+		assert.Equal(t, "ja", body.Language, lang)
+		assert.Equal(t, []castLangCount{{Language: "ja", Count: 2}}, body.Counts.Languages, lang)
+		require.Len(t, body.Data[0].Voices, 1, lang)
+		assert.Equal(t, int32(11), *body.Data[0].Voices[0].StaffID, "%s: Frieren's Japanese voice, not the Chinese row", lang)
+	}
+
+	found := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?lang=zh&q=%E4%B8%AD%E9%85%8D%E4%B8%80")) // 中配一
+	assert.Zero(t, found.Total, "the Chinese row's names are not searched, whatever lang says")
 }
 
 func TestCharacters_FiltersReachTheList(t *testing.T) {
@@ -236,11 +266,6 @@ func TestCharacters_FiltersReachTheList(t *testing.T) {
 
 	all := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?role=all"))
 	assert.Equal(t, 4, all.Total)
-
-	zh := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?lang=ZH"))
-	assert.Equal(t, "zh", zh.Language)
-	require.Len(t, zh.Data[0].Voices, 1)
-	assert.Equal(t, int32(12), *zh.Data[0].Voices[0].StaffID)
 
 	found := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?q=%E5%B2%A1%E6%9C%AC")) // 岡本
 	assert.Equal(t, 1, found.Total)

@@ -21,10 +21,11 @@ import (
 // voice on the row.
 //
 // What it pins: the lists go past the 25 /api/anime/:id stops at, in
-// display_order; voices come from anime_character_voices by language, the
-// row's own voice stands in only where the table has none; Bangumi's
-// Chinese names arrive through the 0045 maps; and /api/anime/:id's own
-// answer is untouched.
+// display_order; voices come from anime_character_voices, Japanese only --
+// a Chinese voice in AniList's answer is never stored -- and the row's own
+// voice stands in only where the table has none; Bangumi's Chinese names
+// arrive through the 0045 maps; and /api/anime/:id's own answer is
+// untouched.
 func TestCreditLists_ReadEverythingTheTablesHold_PG(t *testing.T) {
 	ctx := context.Background()
 	pool := testutil.NewWebPool(t, ctx, testutil.SetupPG(t))
@@ -71,7 +72,7 @@ func TestCreditLists_ReadEverythingTheTablesHold_PG(t *testing.T) {
 	t.Cleanup(svc.Close)
 	h := creditListsRouter(t, svc)
 
-	t.Run("characters: everything, in order, voices by language", func(t *testing.T) {
+	t.Run("characters: everything, in order, Japanese voices", func(t *testing.T) {
 		body := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?limit=100"))
 		require.Len(t, body.Data, 31)
 		assert.Equal(t, 31, body.Total)
@@ -97,16 +98,25 @@ func TestCreditLists_ReadEverythingTheTablesHold_PG(t *testing.T) {
 		assert.Equal(t, "旧声", *legacy.Voices[0].NameCn)
 
 		assert.Equal(t, castRoleCounts{All: 31, Main: 1, Supporting: 29, Background: 1}, body.Counts.Roles)
-		assert.Equal(t, []castLangCount{{Language: "ja", Count: 31}, {Language: "zh", Count: 1}}, body.Counts.Languages)
+		assert.Equal(t, []castLangCount{{Language: "ja", Count: 31}}, body.Counts.Languages)
 		assert.Equal(t, "ja", body.Language)
 	})
 
-	t.Run("characters: the Chinese switch and a search", func(t *testing.T) {
-		zh := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?lang=zh&limit=2"))
-		require.Len(t, zh.Data[0].Voices, 1)
-		assert.Equal(t, int32(2002), *zh.Data[0].Voices[0].StaffID)
-		assert.Empty(t, zh.Data[1].Voices)
-		assert.Equal(t, 31, zh.Total)
+	t.Run("characters: the Chinese voice AniList sent is not stored; lang=zh answers as ja; a search", func(t *testing.T) {
+		var stored int
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT count(*) FROM anime_character_voices WHERE anime_id = 154587 AND lower(language) <> 'japanese'`).Scan(&stored))
+		assert.Zero(t, stored, "the write keeps Japanese voices only")
+
+		ja := getCredits(t, h, "/api/anime/154587/characters?lang=ja&limit=2")
+		zh := getCredits(t, h, "/api/anime/154587/characters?lang=zh&limit=2")
+		require.Equal(t, http.StatusOK, zh.Code, zh.Body.String())
+		assert.Equal(t, ja.Body.String(), zh.Body.String(), "an old 中配 link is answered with the Japanese cast")
+		body := decodeCharacters(t, zh)
+		assert.Equal(t, "ja", body.Language)
+		require.Len(t, body.Data[0].Voices, 2)
+		assert.Equal(t, int32(1001), *body.Data[0].Voices[0].StaffID)
+		assert.Equal(t, 31, body.Total)
 
 		found := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?q=%E7%A7%8D%E5%B4%8E")) // 种崎
 		require.Equal(t, 1, found.Total)

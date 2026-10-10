@@ -23,9 +23,11 @@ import { SEED_USER_EMAIL } from "../../globalSetup";
 //
 // Own fixture ids, like every sandbox spec. The title has 30 characters with
 // AniList ids plus ensureAnimeDetail's protagonist (a row from before ids, no
-// voice), so 31; 25 voiced in Japanese, 3 in Chinese, one with a childhood
-// voice; and 49 people on the staff, 45 of them key animators — enough for
-// that department to list names only.
+// voice), so 31; 25 voiced in Japanese, one with a childhood voice; and 49
+// people on the staff, 45 of them key animators — enough for that department
+// to list names only. Three characters also have a Chinese voice row, as the
+// store held them before it kept Japanese voices only: the tab must show none
+// of them, and with one dub left it draws no dub switch.
 //
 // One worker for the whole file: the fixture is seeded in beforeAll and
 // removed in afterAll, and under fullyParallel a second worker's afterAll
@@ -237,7 +239,7 @@ test.describe("desktop", () => {
     await expect(page).toHaveURL(new RegExp(`/anime/${TITLE}/staff$`), NAVIGATION);
   });
 
-  test("characters: role filter, dub switch, search and 「再显示」", async ({ page }) => {
+  test("characters: role filter, Japanese voices only, search and 「再显示」", async ({ page }) => {
     await page.goto(`/anime/${TITLE}/characters`);
     const roles = page.getByRole("group", { name: "按定位筛选" });
     await waitForHydration(page, "input[type=search]");
@@ -255,22 +257,32 @@ test.describe("desktop", () => {
     await expect(frieren).toContainText("测试声优");
     await expect(frieren).toContainText("童年 · 童星测试");
 
-    // Only the dubs the title has: no 韩配 button at all.
-    const dubs = page.getByRole("group", { name: "配音语言" });
-    await expect(dubs.getByRole("button")).toHaveCount(2);
-    await expect(dubs.getByRole("button", { name: "日配 25" })).toHaveAttribute("aria-pressed", "true");
+    // Japanese voices only: the Chinese rows the fixture holds are neither
+    // shown nor counted, and one dub is no choice, so there is no switch.
+    await expect(page.getByRole("group", { name: "配音语言" })).toHaveCount(0);
+    await expect(frieren).not.toContainText("中配试验1");
+
+    // An old 中配 link still answers, in Japanese.
+    const zh = await page.request.get(`/api/anime/${TITLE}/characters?lang=zh&limit=100`);
+    expect(zh.status()).toBe(200);
+    const zhBody = (await zh.json()) as {
+      language: string;
+      counts: { languages: Array<{ language: string; count: number }> };
+      data: Array<{ voices: Array<{ nameNative: string | null }> }>;
+    };
+    expect(zhBody.language).toBe("ja");
+    expect(zhBody.counts.languages).toEqual([{ language: "ja", count: 25 }]);
+    const natives = zhBody.data.flatMap((c) => c.voices.map((v) => v.nameNative ?? ""));
+    expect(natives).toContain("試験声優1");
+    expect(natives.filter((n) => n.startsWith("中配试验"))).toEqual([]);
 
     await roles.getByRole("button", { name: "主角 3" }).click();
     await expect(cards(page)).toHaveCount(3);
     await expect(roles.getByRole("button", { name: "主角 3" })).toHaveAttribute("aria-pressed", "true");
+    for (let i = 1; i <= 3; i++) {
+      await expect(castRegion(page)).not.toContainText(`中配试验${i}`);
+    }
 
-    // 中配 swaps the voices, not the characters.
-    await dubs.getByRole("button", { name: "中配 3" }).click();
-    await expect(cards(page).filter({ hasText: "测试芙莉莲" })).toContainText("中配试验1");
-    await expect(cards(page).filter({ hasText: "测试芙莉莲" })).not.toContainText("测试声优");
-    await expect(cards(page)).toHaveCount(3);
-
-    await dubs.getByRole("button", { name: "日配 25" }).click();
     await roles.getByRole("button", { name: /^全部/ }).click();
     await expect(cards(page)).toHaveCount(24);
 

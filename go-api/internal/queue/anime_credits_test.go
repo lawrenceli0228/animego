@@ -96,7 +96,6 @@ func (f *fakeCreditsStore) ReplaceStaff(_ context.Context, id int32, staff []cre
 // it.  err, when it returns non-nil for a call, wins.
 type fakeCreditsAniList struct {
 	castLen, staffLen map[int]int
-	country           map[int]string
 	err               func(kind string, v anilist.CreditPagesVars, call int) error
 	calls             []string
 }
@@ -127,9 +126,6 @@ func (f *fakeCreditsAniList) CharacterPagesNoWait(_ context.Context, v anilist.C
 		return nil, err
 	}
 	out := &anilist.CharacterPages{MediaID: v.ID}
-	if c, ok := f.country[v.ID]; ok {
-		out.CountryOfOrigin = &c
-	}
 	for p := v.FirstPage; p <= v.LastPage; p++ {
 		count, more := pageSpan(f.castLen[v.ID], p)
 		conn := anilist.CharacterConnection{PageInfo: &anilist.PageInfo{HasNextPage: more}}
@@ -306,36 +302,51 @@ func TestAnimeCredits_ShortListIsWrittenAsComplete(t *testing.T) {
 	assert.False(t, store.castWrites[3].hasMore)
 }
 
-// TestAnimeCredits_CountryPicksTheVoice — the country AniList sends with
-// the pages reaches the voice choice: a Chinese title's row carries the
-// Chinese voice.
-func TestAnimeCredits_CountryPicksTheVoice(t *testing.T) {
+// TestAnimeCredits_StoresJapaneseVoicesOnly — the sweep writes what the
+// detail refresh writes: a donghua whose pages come back with every
+// language anyway (Chinese listed first) stores its Japanese voice as the
+// primary and nothing else, and a character with no Japanese voice is
+// written with none.
+func TestAnimeCredits_StoresJapaneseVoicesOnly(t *testing.T) {
 	store := newFakeCreditsStore()
 	store.castIDs = []int32{101972}
-	al := &fakeCreditsAniList{castLen: map[int]int{101972: 1}, country: map[int]string{101972: "CN"}}
-	// Swap in a two-language cast for the one character.
-	w, _ := newCreditsWorker(&countryFetcher{fakeCreditsAniList: al}, store)
+	al := &fakeCreditsAniList{castLen: map[int]int{101972: 2}}
+	w, _ := newCreditsWorker(&dubbedFetcher{fakeCreditsAniList: al}, store)
 
 	require.NoError(t, w.Work(context.Background(), creditsJob()))
 
 	got := store.castWrites[101972]
-	require.Len(t, got.cast.Characters, 1)
-	assert.Equal(t, int32(22), *got.cast.Characters[0].VoiceActorID, "the Chinese voice, though the Japanese one is listed first")
+	require.Len(t, got.cast.Characters, 2)
+	lead := got.cast.Characters[0]
+	require.NotNil(t, lead.VoiceActorID)
+	assert.Equal(t, int32(21), *lead.VoiceActorID, "the Japanese voice, though the Chinese one is listed first")
+	assert.Nil(t, got.cast.Characters[1].VoiceActorID, "no Japanese voice, no voice")
+	require.Len(t, got.cast.Voices, 1, "neither the Chinese nor the Korean voice is stored")
+	assert.Equal(t, int32(21), got.cast.Voices[0].StaffID)
+	assert.Equal(t, credits.LanguageJapanese, *got.cast.Voices[0].Language)
 }
 
-// countryFetcher answers one character voiced in Japanese (listed first)
-// and Chinese.
-type countryFetcher struct{ *fakeCreditsAniList }
+// dubbedFetcher answers two characters as AniList would if the language
+// argument were ignored: the first voiced in Chinese (listed first),
+// Japanese and Korean, the second in Korean only.
+type dubbedFetcher struct{ *fakeCreditsAniList }
 
-func (f *countryFetcher) CharacterPagesNoWait(ctx context.Context, v anilist.CreditPagesVars) (*anilist.CharacterPages, error) {
+func (f *dubbedFetcher) CharacterPagesNoWait(ctx context.Context, v anilist.CreditPagesVars) (*anilist.CharacterPages, error) {
 	res, err := f.fakeCreditsAniList.CharacterPagesNoWait(ctx, v)
 	if err != nil {
 		return nil, err
 	}
-	ja, zh := "Japanese", "Chinese"
+	if v.FirstPage != 1 {
+		return res, nil
+	}
+	ja, zh, ko := "Japanese", "Chinese", "Korean"
 	res.Pages[0].Edges[0].VoiceActorRoles = []anilist.VoiceActorRole{
-		{VoiceActor: &anilist.VoiceActor{ID: 21, LanguageV2: &ja}},
 		{VoiceActor: &anilist.VoiceActor{ID: 22, LanguageV2: &zh}},
+		{VoiceActor: &anilist.VoiceActor{ID: 21, LanguageV2: &ja}},
+		{VoiceActor: &anilist.VoiceActor{ID: 23, LanguageV2: &ko}},
+	}
+	res.Pages[0].Edges[1].VoiceActorRoles = []anilist.VoiceActorRole{
+		{VoiceActor: &anilist.VoiceActor{ID: 33, LanguageV2: &ko}},
 	}
 	return res, nil
 }

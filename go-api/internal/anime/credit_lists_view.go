@@ -15,59 +15,44 @@ import (
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
-// castLang is a dub language the characters tab can switch to.  The store
-// keeps Japanese, Chinese and Korean voices (credits.keptLanguage), and
-// those three are the whole switch: 日配 / 中配 / 韩配.
+// castLang is a dub language the characters tab answers in.  The store
+// keeps Japanese voices only (credits.keptLanguage), so there is one: 日配.
+// The type stays because the wire still names the language a response's
+// voices are in and counts the characters voiced in it, and those fields
+// keep their shape for the clients that decode them.
 type castLang string
 
-const (
-	castLangJa castLang = "ja"
-	castLangZh castLang = "zh"
-	castLangKo castLang = "ko"
-)
+const castLangJa castLang = "ja"
 
-// castLangs is the switch, in the order it is shown and counted.
-var castLangs = []castLang{castLangJa, castLangZh, castLangKo}
+// castLangs is what the tab offers and counts: Japanese alone.
+var castLangs = []castLang{castLangJa}
+
+// retiredCastLangs are the codes the dub switch offered while the store
+// kept Chinese and Korean voices too (中配 / 韩配).  A link, a cached page
+// or a client that still names one is answered in Japanese rather than
+// refused: a 400 would break a page that worked yesterday, for a choice
+// that no longer exists.
+var retiredCastLangs = []string{"zh", "ko"}
 
 // castLangFromLabel maps AniList's languageV2 label, which is free text
-// and compared case-insensitively everywhere else too, to its code.
+// and compared case-insensitively everywhere else too, to its code.  Only
+// Japanese has one.  A row in any other language -- one a binary older
+// than the Japanese-only rule wrote -- is not listed, counted or searched.
 func castLangFromLabel(label *string) (castLang, bool) {
-	if label == nil {
-		return "", false
-	}
-	switch strings.ToLower(strings.TrimSpace(*label)) {
-	case strings.ToLower(credits.LanguageJapanese):
+	if label != nil && strings.EqualFold(strings.TrimSpace(*label), credits.LanguageJapanese) {
 		return castLangJa, true
-	case strings.ToLower(credits.LanguageChinese):
-		return castLangZh, true
-	case strings.ToLower(credits.LanguageKorean):
-		return castLangKo, true
-	default:
-		return "", false
 	}
+	return "", false
 }
 
-// parseCastLang reads the `lang` query parameter: one of the three codes,
-// in any case.
+// parseCastLang reads the `lang` query parameter, in any case: ja, or one
+// of retiredCastLangs, which reads as ja.
 func parseCastLang(s string) (castLang, bool) {
-	switch castLang(strings.ToLower(strings.TrimSpace(s))) {
-	case castLangJa:
+	code := strings.ToLower(strings.TrimSpace(s))
+	if code == string(castLangJa) || slices.Contains(retiredCastLangs, code) {
 		return castLangJa, true
-	case castLangZh:
-		return castLangZh, true
-	case castLangKo:
-		return castLangKo, true
-	default:
-		return "", false
 	}
-}
-
-// primaryCastLang is the language a title's character rows carry their
-// voice in -- credits.PrimaryLanguage, as a code.
-func primaryCastLang(country *string) castLang {
-	label := credits.PrimaryLanguage(country)
-	lang, _ := castLangFromLabel(&label)
-	return lang
+	return "", false
 }
 
 // Character roles, as AniList spells them.
@@ -79,8 +64,10 @@ const (
 
 // castVoice is one person voicing one character, in the language the
 // response names.  NameFull / NameNative rather than the _en / _ja of the
-// older shapes for the reason anime_character_voices gives: a Chinese
-// voice actor's native name is not Japanese.  NameCn is Bangumi's.
+// older shapes because anime_character_voices names them so: the table
+// was built when it also held Chinese and Korean voices, whose native
+// names are not Japanese, and the wire keeps the names it shipped with.
+// NameCn is Bangumi's.
 type castVoice struct {
 	StaffID    *int32  `json:"staffId"`
 	NameFull   *string `json:"nameFull"`
@@ -129,8 +116,9 @@ func (c *castRoleCounts) add(role string) {
 	}
 }
 
-// castLangCount is one button of the dub switch: how many characters have
-// a voice in that language.
+// castLangCount is one entry of counts.languages, which the dub switch was
+// drawn from: how many characters have a voice in that language.  There
+// is at most one now, Japanese.
 type castLangCount struct {
 	Language string `json:"language"`
 	Count    int    `json:"count"`
@@ -167,14 +155,13 @@ func (e *castEntry) matches(lang castLang, needle string) bool {
 // so a caller that appends to one copies it rather than writing into the
 // cached array.
 type castList struct {
-	entries     []castEntry
-	langCounts  []castLangCount
-	defaultLang castLang
+	entries    []castEntry
+	langCounts []castLangCount
 }
 
 // castQuery is one request's view of the list.  role is "" or one of the
-// three role constants; lang "" means the title's default; needle is
-// already normalised.
+// three role constants; lang "" means Japanese, the only language there
+// is; needle is already normalised.
 type castQuery struct {
 	role   string
 	lang   castLang
@@ -197,25 +184,18 @@ type castPage struct {
 // buildCastList puts a title's character and voice rows together.
 //
 // A character's voices come from anime_character_voices.  When that table
-// names none for the character, the voice the character row itself
-// carries stands in, and which language it is depends on who wrote the
-// row:
-//
-//   - a title with nothing in the voice table was written before 0042,
-//     whose code stored voiceActors(language: JAPANESE)[0]: Japanese;
-//   - a title with voices in the table was written since 0042, whose rows
-//     carry the voice credits.PrimaryLanguage chose.  A character of it
-//     with none in the table is a row with no AniList id (the table cannot
-//     key it) or a refresh caught between pruning a character's voices and
-//     writing them again: the title's own language.
-func buildCastList(country *string, chars []dbgen.ListAnimeCastCharactersRow, voices []dbgen.ListAnimeCastVoicesRow) *castList {
+// names none for the character -- a title written before 0042, a row with
+// no AniList id (the table cannot key it), or a refresh caught between
+// pruning a character's voices and writing them again -- the voice the
+// character row itself carries stands in, filed as Japanese, which is
+// what every writer has put there: the code before 0042 stored
+// voiceActors(language: JAPANESE)[0], the code since 0050 stores the
+// Japanese primary or nothing, and 0050 moved the rows written in between
+// to their Japanese voice or to none.
+func buildCastList(chars []dbgen.ListAnimeCastCharactersRow, voices []dbgen.ListAnimeCastVoicesRow) *castList {
 	byCharacter := make(map[int32][]dbgen.ListAnimeCastVoicesRow, len(chars))
 	for _, v := range voices {
 		byCharacter[v.CharacterID] = append(byCharacter[v.CharacterID], v)
-	}
-	standIn := castLangJa
-	if len(voices) > 0 {
-		standIn = primaryCastLang(country)
 	}
 
 	entries := make([]castEntry, 0, len(chars))
@@ -224,7 +204,7 @@ func buildCastList(country *string, chars []dbgen.ListAnimeCastCharactersRow, vo
 		if c.CharacterID != nil {
 			rows = byCharacter[*c.CharacterID]
 		}
-		byLang := voicesByLanguage(c, rows, standIn)
+		byLang := voicesByLanguage(c, rows)
 		voiceNames := make(map[castLang]string, len(byLang))
 		for lang, vs := range byLang {
 			parts := make([]*string, 0, 3*len(vs))
@@ -262,25 +242,22 @@ func buildCastList(country *string, chars []dbgen.ListAnimeCastCharactersRow, vo
 		}
 	}
 	return &castList{
-		entries:     entries,
-		langCounts:  slices.Clip(langCounts),
-		defaultLang: defaultCastLang(primaryCastLang(country), langCounts),
+		entries:    entries,
+		langCounts: slices.Clip(langCounts),
 	}
 }
 
-// voicesByLanguage files one character's voices under the three languages,
-// keeping the stored order within each.  Voices in any other language
-// (the store keeps one only as a character's primary of last resort) are
-// left out: the switch has no button for them.  standIn is the language
-// the row's own voice is filed under when the table has none for it (see
-// buildCastList).
-func voicesByLanguage(c dbgen.ListAnimeCastCharactersRow, rows []dbgen.ListAnimeCastVoicesRow, standIn castLang) map[castLang][]castVoice {
+// voicesByLanguage files one character's voices by language, keeping the
+// stored order.  Japanese is the only language with a code; a voice in any
+// other is left out.  When the table has no voice for the character, the
+// row's own voice stands in as Japanese (see buildCastList).
+func voicesByLanguage(c dbgen.ListAnimeCastCharactersRow, rows []dbgen.ListAnimeCastVoicesRow) map[castLang][]castVoice {
 	out := make(map[castLang][]castVoice, len(castLangs))
 	if len(rows) == 0 {
 		if c.VoiceActorEn == nil && c.VoiceActorJa == nil {
 			return out
 		}
-		out[standIn] = []castVoice{{
+		out[castLangJa] = []castVoice{{
 			StaffID:    c.VoiceActorID,
 			NameFull:   c.VoiceActorEn,
 			NameNative: c.VoiceActorJa,
@@ -317,33 +294,16 @@ func voicesByLanguage(c dbgen.ListAnimeCastCharactersRow, rows []dbgen.ListAnime
 	return out
 }
 
-// defaultCastLang is the language a request that names none is answered
-// in: the title's own when anyone is voiced in it, else the language most
-// characters are voiced in (the switch's order breaks a tie), else the
-// title's own with nothing to list.
-func defaultCastLang(primary castLang, counts []castLangCount) castLang {
-	best, bestCount := primary, 0
-	for _, c := range counts {
-		if castLang(c.Language) == primary {
-			return primary
-		}
-		if c.Count > bestCount {
-			best, bestCount = castLang(c.Language), c.Count
-		}
-	}
-	return best
-}
-
 // page filters, counts and slices the list for one request.
 //
 // The role counts follow the search but not the role filter, so each
 // chip says how many characters choosing it would list.  The language
-// counts are the title's, whatever is asked: a search that matches nobody
-// in Korean must not make the 韩配 button disappear under the reader.
+// counts are the title's, whatever is asked: how many characters have a
+// Japanese voice does not change with the search box.
 func (l *castList) page(q castQuery) castPage {
 	lang := q.lang
 	if lang == "" {
-		lang = l.defaultLang
+		lang = castLangJa
 	}
 
 	var roles castRoleCounts

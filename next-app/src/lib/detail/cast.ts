@@ -25,7 +25,12 @@ export function characterRoleLabel(role: string | null | undefined, lang: Lang):
   return CHARACTER_ROLE_LABEL[lang][key] ?? key;
 }
 
-/** The dub switch: 日配 / 中配 / 韩配. */
+/**
+ * A dub's name: 日配 / 中配 / 韩配. The credits keep Japanese voices only, so
+ * 日配 is the one shown (under each voice, and on the switch, which is drawn
+ * only when a title has more than one dub); the other two stay for the codes
+ * the API still accepts.
+ */
 export const DUB_LABEL: Record<Lang, Record<DubLanguage, string>> = {
   zh: { ja: "日配", zh: "中配", ko: "韩配" },
   en: { ja: "Japanese", zh: "Chinese", ko: "Korean" },
@@ -151,7 +156,7 @@ export const CAST_MORE_PAGE = 48;
 
 /**
  * The query string for /api/anime/:id/characters, naming only what differs
- * from the endpoint's defaults (all roles, the title's own dub, no search,
+ * from the endpoint's defaults (all roles, the default dub, no search,
  * offset 0). `limit` is always sent: the endpoint's default is a server
  * constant this module should not have to agree with.
  */

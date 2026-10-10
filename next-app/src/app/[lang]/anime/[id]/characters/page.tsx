@@ -52,7 +52,7 @@ export async function generateStaticParams(): Promise<Array<{ lang: string; id: 
 
 type CharactersPageProps = PageProps<"/[lang]/anime/[id]/characters">;
 
-/** The page the server renders: all roles, the title's own dub, no search. */
+/** The page the server renders: all roles, the default dub (日配, the only one), no search. */
 const FIRST_PAGE = charactersQuery({ role: "all", dub: null, q: "", offset: 0, limit: CAST_FIRST_PAGE });
 
 /** Everything the page needs, or null for a title the catalogue does not hold. */

@@ -45,15 +45,10 @@ func (q *Queries) GetAnimeCreditCounts(ctx context.Context, anilistID int32) (Ge
 
 const getAnimeCreditsHead = `-- name: GetAnimeCreditsHead :one
 
-SELECT country_of_origin, (detail_fetched_at IS NOT NULL)::boolean AS detail_fetched
+SELECT (detail_fetched_at IS NOT NULL)::boolean AS detail_fetched
 FROM anime_cache
 WHERE anilist_id = $1
 `
-
-type GetAnimeCreditsHeadRow struct {
-	CountryOfOrigin *string `json:"countryOfOrigin"`
-	DetailFetched   bool    `json:"detailFetched"`
-}
 
 // credit_lists.sql — the detail page's 角色 and 制作 tabs: every character,
 // voice and staff credit a title stores, for /api/anime/:id/characters,
@@ -69,18 +64,16 @@ type GetAnimeCreditsHeadRow struct {
 // into the search box re-reads a cached copy rather than the tables.  The
 // LIMITs are a ceiling on a table no writer is meant to fill past that,
 // not a page size.
-// The title's existence and two facts about it.  The country of origin
-// picks the default dub language, the same way credits.PrimaryLanguage
-// picks the voice the character rows carry.  detail_fetched says whether
-// the credit tables have been filled at all: a row a listing wrote
-// (seasonal, search, warm_season) has none of them until the next
+// The title's existence (ErrNoRows for a title we do not hold), and
+// whether its credit tables have been filled at all: a row a listing
+// wrote (seasonal, search, warm_season) has none of them until the next
 // /api/anime/:id fetches its detail, so its empty lists are "not yet",
 // not "nobody" -- the same distinction isStale draws (detail.go).
-func (q *Queries) GetAnimeCreditsHead(ctx context.Context, anilistID int32) (GetAnimeCreditsHeadRow, error) {
+func (q *Queries) GetAnimeCreditsHead(ctx context.Context, anilistID int32) (bool, error) {
 	row := q.db.QueryRow(ctx, getAnimeCreditsHead, anilistID)
-	var i GetAnimeCreditsHeadRow
-	err := row.Scan(&i.CountryOfOrigin, &i.DetailFetched)
-	return i, err
+	var detail_fetched bool
+	err := row.Scan(&detail_fetched)
+	return detail_fetched, err
 }
 
 const listAnimeCastCharacters = `-- name: ListAnimeCastCharacters :many
@@ -195,7 +188,9 @@ type ListAnimeCastVoicesRow struct {
 
 // Every voice the title stores (0042), each character's in its stored
 // order: display_order 0 is the voice its character row carries, the
-// title's own language comes next, then Japanese, Chinese and Korean.
+// rest follow in AniList's order.  The store keeps Japanese voices only
+// (0050); the language rides along so the handler can leave out a row in
+// any other, should one be written by a binary older than that rule.
 // The person's names and image are an accepted edit's (0047) where there
 // is one; name_cn otherwise Bangumi's, by the person's AniList id.
 // staff_id breaks a tie, which the detail refresh and the credits sweep

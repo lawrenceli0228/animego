@@ -71,7 +71,7 @@ func TestAnimeCredits_PG(t *testing.T) {
 		al := &fakeCreditsAniList{castLen: map[int]int{154587: 100}, staffLen: map[int]int{154587: 205}}
 		first, err := al.CharacterPagesNoWait(ctx, anilist.CreditPagesVars{ID: 154587, FirstPage: 1, LastPage: 1})
 		require.NoError(t, err)
-		require.NoError(t, credits.WriteCast(ctx, q, 154587, credits.CastFromEdges(first.Pages[0].Edges, nil), credits.FirstPage))
+		require.NoError(t, credits.WriteCast(ctx, q, 154587, credits.CastFromEdges(first.Pages[0].Edges), credits.FirstPage))
 
 		w := NewAnimeCreditsWorker(al, pgCreditsStore{Queries: q, pool: pool})
 		w.enabled = func() bool { return true }

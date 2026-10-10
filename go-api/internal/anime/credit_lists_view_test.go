@@ -64,29 +64,29 @@ func pageIDs(p castPage) []int32 {
 	return out
 }
 
-func TestBuildCastList_SortsEachCharactersVoicesByLanguage(t *testing.T) {
+func TestBuildCastList_ListsJapaneseVoicesOnly(t *testing.T) {
 	t.Parallel()
 
 	chars := []dbgen.ListAnimeCastCharactersRow{castChar(1, "MAIN", "Frieren", "フリーレン")}
 	voices := []dbgen.ListAnimeCastVoicesRow{
 		castVoiceRow(1, 11, "Japanese", "", "Atsumi Tanezaki", "種﨑敦美"),
 		castVoiceRow(1, 12, "japanese", "Childhood", "Child Voice", "子役"),
+		// The store keeps Japanese voices only; rows in any other language
+		// can only be ones a binary older than that rule wrote, and the tab
+		// shows none of them.
 		castVoiceRow(1, 13, "Chinese", "", "Zh Voice", "中配"),
 		castVoiceRow(1, 14, "Korean", "", "Ko Voice", "한국"),
-		// The store keeps one voice outside the three languages only as a
-		// character's primary of last resort; the tabs have no switch for it.
 		castVoiceRow(1, 15, "English", "", "En Voice", "En Voice"),
 		castVoiceRow(1, 16, "", "", "No Language", "No Language"),
 	}
 
-	list := buildCastList(nil, chars, voices)
+	list := buildCastList(chars, voices)
 	require.Len(t, list.entries, 1)
 	got := list.entries[0].voices
-	assert.Equal(t, []int32{11, 12}, voiceIDs(got[castLangJa]), "stored order within a language")
-	assert.Equal(t, []int32{13}, voiceIDs(got[castLangZh]))
-	assert.Equal(t, []int32{14}, voiceIDs(got[castLangKo]))
-	assert.Len(t, got, 3, "no bucket for English or for a voice with no language")
+	assert.Equal(t, []int32{11, 12}, voiceIDs(got[castLangJa]), "stored order, the label read in any case")
+	assert.Len(t, got, 1, "nothing filed under any other language")
 	assert.Equal(t, "Childhood", *got[castLangJa][1].RoleNotes)
+	assert.Equal(t, []castLangCount{{Language: "ja", Count: 1}}, list.langCounts)
 }
 
 func TestBuildCastList_TheRowsOwnVoiceStandsInOnlyWhenTheTableHasNone(t *testing.T) {
@@ -109,7 +109,7 @@ func TestBuildCastList_TheRowsOwnVoiceStandsInOnlyWhenTheTableHasNone(t *testing
 
 	voices := []dbgen.ListAnimeCastVoicesRow{castVoiceRow(3, 31, "Japanese", "", "Table Voice", "表の声")}
 
-	list := buildCastList(nil, []dbgen.ListAnimeCastCharactersRow{legacy, beforeVoices, both, silent}, voices)
+	list := buildCastList([]dbgen.ListAnimeCastCharactersRow{legacy, beforeVoices, both, silent}, voices)
 	require.Len(t, list.entries, 4)
 
 	// The deployed code before 0042 stored voiceActors(language: JAPANESE)[0]
@@ -144,7 +144,7 @@ func TestBuildCastList_ThePrimaryVoiceKeepsTheRowsChineseName(t *testing.T) {
 	matched := castVoiceRow(1, 12, "Japanese", "Childhood", "B", "び")
 	matched.NameCn = sptr("班固米的名字")
 
-	list := buildCastList(nil, []dbgen.ListAnimeCastCharactersRow{row}, []dbgen.ListAnimeCastVoicesRow{
+	list := buildCastList([]dbgen.ListAnimeCastCharactersRow{row}, []dbgen.ListAnimeCastVoicesRow{
 		castVoiceRow(1, 11, "Japanese", "", "A Voice", "あの声"),
 		matched,
 	})
@@ -156,7 +156,7 @@ func TestBuildCastList_ThePrimaryVoiceKeepsTheRowsChineseName(t *testing.T) {
 	other := castChar(2, "MAIN", "C", "し")
 	other.VoiceActorID = i32(99) // a different person from the voice below
 	other.VoiceActorCn = sptr("别人")
-	list = buildCastList(nil, []dbgen.ListAnimeCastCharactersRow{other}, []dbgen.ListAnimeCastVoicesRow{
+	list = buildCastList([]dbgen.ListAnimeCastCharactersRow{other}, []dbgen.ListAnimeCastVoicesRow{
 		castVoiceRow(2, 21, "Japanese", "", "C Voice", "しの声"),
 	})
 	assert.Nil(t, list.entries[0].voices[castLangJa][0].NameCn, "another person's name is not borrowed")
@@ -165,7 +165,7 @@ func TestBuildCastList_ThePrimaryVoiceKeepsTheRowsChineseName(t *testing.T) {
 func TestBuildCastList_RoleIsReadCaseInsensitively(t *testing.T) {
 	t.Parallel()
 
-	list := buildCastList(nil, []dbgen.ListAnimeCastCharactersRow{
+	list := buildCastList([]dbgen.ListAnimeCastCharactersRow{
 		castChar(1, "main", "A", "あ"),
 		castChar(2, "", "B", "い"),
 	}, nil)
@@ -175,9 +175,10 @@ func TestBuildCastList_RoleIsReadCaseInsensitively(t *testing.T) {
 }
 
 // fixtureCast is a small title: three main characters, two supporting, one
-// background and one row with no role, voiced in Japanese, a little in
-// Chinese and not at all in Korean.
-func fixtureCast(country *string) *castList {
+// background and one row with no role, voiced in Japanese, with two
+// Chinese voice rows left over from before the store kept Japanese only.
+// Heiter's only voice is one of them.
+func fixtureCast() *castList {
 	chars := []dbgen.ListAnimeCastCharactersRow{
 		castChar(1, "MAIN", "Frieren", "フリーレン"),
 		castChar(2, "MAIN", "Fern", "フェルン"),
@@ -197,13 +198,13 @@ func fixtureCast(country *string) *castList {
 		castVoiceRow(4, 42, "Japanese", "Young", "Young Himmel", "若いヒンメル"),
 		castVoiceRow(5, 51, "Chinese", "", "Zhong Pei Er", "中配二"),
 	}
-	return buildCastList(country, chars, voices)
+	return buildCastList(chars, voices)
 }
 
 func TestCastPage_RoleFilterAndRoleCounts(t *testing.T) {
 	t.Parallel()
 
-	list := fixtureCast(nil)
+	list := fixtureCast()
 	all := list.page(castQuery{limit: 50})
 	assert.Equal(t, []int32{1, 2, 3, 4, 5, 6, 7}, pageIDs(all), "AniList's order, untouched")
 	assert.Equal(t, 7, all.Total)
@@ -219,39 +220,39 @@ func TestCastPage_RoleFilterAndRoleCounts(t *testing.T) {
 	assert.Equal(t, []int32{6}, pageIDs(bg))
 }
 
-func TestCastPage_VoicesAreTheSelectedLanguagesAndNeverNull(t *testing.T) {
+func TestCastPage_VoicesAreJapaneseAndNeverNull(t *testing.T) {
 	t.Parallel()
 
-	list := fixtureCast(nil)
+	list := fixtureCast()
 	ja := list.page(castQuery{lang: castLangJa, limit: 50})
 	assert.Equal(t, castLangJa, ja.Language)
+	assert.Equal(t, []int32{11}, voiceIDs(ja.Data[0].Voices), "Frieren's Japanese voice, and not the Chinese row beside it")
 	assert.Equal(t, []int32{41, 42}, voiceIDs(ja.Data[3].Voices), "Himmel's main voice, then his young one")
+	assert.Empty(t, ja.Data[4].Voices, "Heiter's only voice is Chinese: he is listed with none")
+	assert.Equal(t, 7, ja.Total, "every character is listed, voiced or not")
 	assert.NotNil(t, ja.Data[5].Voices, "a character with no voice answers [], not null")
 	assert.Empty(t, ja.Data[5].Voices)
 
-	zh := list.page(castQuery{lang: castLangZh, limit: 50})
-	assert.Equal(t, []int32{12}, voiceIDs(zh.Data[0].Voices))
-	assert.Empty(t, zh.Data[1].Voices, "Fern has no Chinese voice: she is still listed")
-	assert.Equal(t, 7, zh.Total, "the language switch changes the voices, not the characters")
-
-	body, err := json.Marshal(zh.Data[1])
+	body, err := json.Marshal(ja.Data[4])
 	require.NoError(t, err)
 	assert.Contains(t, string(body), `"voices":[]`)
+
+	assert.Equal(t, ja, list.page(castQuery{limit: 50}), "a request that names no language is answered in Japanese")
 }
 
-func TestCastPage_LanguageCountsAreTheTitlesInAFixedOrder(t *testing.T) {
+func TestCastPage_LanguageCountsAreJapaneseOnly(t *testing.T) {
 	t.Parallel()
 
-	list := fixtureCast(nil)
+	list := fixtureCast()
 	got := list.page(castQuery{role: "BACKGROUND", needle: "nothing-matches", limit: 10})
-	assert.Equal(t, []castLangCount{{Language: "ja", Count: 4}, {Language: "zh", Count: 2}}, got.Counts.Languages,
-		"characters with a voice in each language, over the whole title; no Korean entry at all")
+	assert.Equal(t, []castLangCount{{Language: "ja", Count: 4}}, got.Counts.Languages,
+		"characters with a Japanese voice, over the whole title; the Chinese rows count for nothing")
 }
 
 func TestCastPage_SearchReadsCharacterNamesAndTheSelectedLanguagesVoices(t *testing.T) {
 	t.Parallel()
 
-	list := fixtureCast(nil)
+	list := fixtureCast()
 	cases := []struct {
 		name string
 		lang castLang
@@ -264,8 +265,8 @@ func TestCastPage_SearchReadsCharacterNamesAndTheSelectedLanguagesVoices(t *test
 		{"a voice's romaji, spaces ignored", castLangJa, "chiakikobayashi", []int32{3}},
 		{"a voice's native name", castLangJa, "小林", []int32{3}},
 		{"a second voice of the character", castLangJa, "若い", []int32{4}},
-		{"a Chinese voice is not searched under 日配", castLangJa, "中配二", []int32{}},
-		{"but is under 中配", castLangZh, "中配二", []int32{5}},
+		{"a Chinese voice row is not searched", castLangJa, "中配二", []int32{}},
+		{"nor is one beside a Japanese voice", castLangJa, "zhongpei", []int32{}},
 		{"a substring of several", castLangJa, "ン", []int32{1, 2, 4}},
 		{"half-width katakana folds", castLangJa, "ﾌﾘｰﾚﾝ", []int32{1}},
 		{"variant kanji folds", castLangJa, "種﨑", []int32{1}},
@@ -282,7 +283,7 @@ func TestCastPage_SearchReadsCharacterNamesAndTheSelectedLanguagesVoices(t *test
 func TestCastPage_RoleCountsFollowTheSearch(t *testing.T) {
 	t.Parallel()
 
-	list := fixtureCast(nil)
+	list := fixtureCast()
 	got := list.page(castQuery{lang: castLangJa, needle: normalizeCastNeedle("ン"), limit: 50})
 	// フリーレン and フェルン (main), ヒンメル (supporting).
 	assert.Equal(t, castRoleCounts{All: 3, Main: 2, Supporting: 1}, got.Counts.Roles)
@@ -291,7 +292,7 @@ func TestCastPage_RoleCountsFollowTheSearch(t *testing.T) {
 func TestCastPage_Pagination(t *testing.T) {
 	t.Parallel()
 
-	list := fixtureCast(nil)
+	list := fixtureCast()
 	first := list.page(castQuery{limit: 3})
 	assert.Equal(t, []int32{1, 2, 3}, pageIDs(first))
 	assert.True(t, first.HasMore)
@@ -310,44 +311,51 @@ func TestCastPage_Pagination(t *testing.T) {
 	assert.Equal(t, 7, past.Total)
 }
 
-func TestCastPage_DefaultLanguage(t *testing.T) {
+func TestCastPage_JapaneseIsTheOnlyLanguage(t *testing.T) {
 	t.Parallel()
 
-	cn := sptr("CN")
-	jp := sptr("JP")
+	assert.Equal(t, castLangJa, fixtureCast().page(castQuery{limit: 1}).Language)
 
-	assert.Equal(t, castLangJa, fixtureCast(jp).page(castQuery{limit: 1}).Language, "a Japanese title: 日配")
-	assert.Equal(t, castLangJa, fixtureCast(nil).page(castQuery{limit: 1}).Language, "no country reads as Japanese")
-	assert.Equal(t, castLangZh, fixtureCast(cn).page(castQuery{limit: 1}).Language, "a donghua: 中配")
-
-	// A donghua AniList only has a Japanese cast for: the language that exists.
-	onlyJa := buildCastList(cn, []dbgen.ListAnimeCastCharactersRow{castChar(1, "MAIN", "A", "あ")},
-		[]dbgen.ListAnimeCastVoicesRow{castVoiceRow(1, 11, "Japanese", "", "V", "ぶい")})
-	assert.Equal(t, castLangJa, onlyJa.page(castQuery{limit: 1}).Language)
-
-	// The most-voiced language wins when the title's own has none.
-	kr := buildCastList(sptr("TW"), []dbgen.ListAnimeCastCharactersRow{
+	// Voices left in other languages, even more of them than Japanese ones,
+	// neither make another language the answer nor appear in the counts.
+	dubbed := buildCastList([]dbgen.ListAnimeCastCharactersRow{
 		castChar(1, "MAIN", "A", "あ"), castChar(2, "MAIN", "B", "い"),
 	}, []dbgen.ListAnimeCastVoicesRow{
 		castVoiceRow(1, 11, "Japanese", "", "V", "ぶい"),
 		castVoiceRow(1, 12, "Korean", "", "K1", "케이1"),
 		castVoiceRow(2, 21, "Korean", "", "K2", "케이2"),
 	})
-	assert.Equal(t, castLangKo, kr.page(castQuery{limit: 1}).Language)
+	got := dubbed.page(castQuery{limit: 10})
+	assert.Equal(t, castLangJa, got.Language)
+	assert.Equal(t, []castLangCount{{Language: "ja", Count: 1}}, got.Counts.Languages)
+	assert.Equal(t, []int32{11}, voiceIDs(got.Data[0].Voices))
+	assert.Empty(t, got.Data[1].Voices)
 
-	// Nothing voiced at all: the title's own language, with nothing to list.
-	none := buildCastList(cn, []dbgen.ListAnimeCastCharactersRow{castChar(1, "MAIN", "A", "あ")}, nil)
-	got := none.page(castQuery{limit: 1})
-	assert.Equal(t, castLangZh, got.Language)
+	// Nothing voiced in Japanese at all: still Japanese, with nothing to
+	// count -- an empty list, not null, which a client reads as "no switch".
+	none := buildCastList([]dbgen.ListAnimeCastCharactersRow{castChar(1, "MAIN", "A", "あ")},
+		[]dbgen.ListAnimeCastVoicesRow{castVoiceRow(1, 12, "Chinese", "", "Z", "中")})
+	got = none.page(castQuery{limit: 1})
+	assert.Equal(t, castLangJa, got.Language)
 	assert.NotNil(t, got.Counts.Languages)
 	assert.Empty(t, got.Counts.Languages)
+	assert.Empty(t, got.Data[0].Voices)
+}
 
-	// A language asked for by name is the one answered, even an empty one.
-	asked := fixtureCast(jp).page(castQuery{lang: castLangKo, limit: 50})
-	assert.Equal(t, castLangKo, asked.Language)
-	assert.Equal(t, 7, asked.Total)
-	for _, c := range asked.Data {
-		assert.Empty(t, c.Voices)
+// TestParseCastLang — ja is the language; zh and ko, the switch's retired
+// 中配 and 韩配, are read as ja so an old link is answered, not refused;
+// anything else is a client bug.
+func TestParseCastLang(t *testing.T) {
+	t.Parallel()
+
+	for _, in := range []string{"ja", "JA", " ja ", "zh", "ZH", "ko", "Ko"} {
+		got, ok := parseCastLang(in)
+		assert.True(t, ok, "%q", in)
+		assert.Equal(t, castLangJa, got, "%q", in)
+	}
+	for _, in := range []string{"en", "zh-Hant", "cn", "kr", "jp", "japanese"} {
+		_, ok := parseCastLang(in)
+		assert.False(t, ok, "%q", in)
 	}
 }
 
@@ -383,28 +391,27 @@ func TestBuildStaffList_KeepsTheOrderAndCountsPeople(t *testing.T) {
 	assert.NotNil(t, buildStaffList(nil).credits)
 }
 
-func TestBuildCastList_TheStandInVoiceTakesTheTitlesLanguageOnceTheTitleHasVoiceRows(t *testing.T) {
+func TestBuildCastList_TheStandInVoiceIsJapanese(t *testing.T) {
 	t.Parallel()
 
-	// A donghua written since 0042: its character rows carry the Chinese
-	// voice (credits.PrimaryLanguage), and a character the voice table has
-	// nothing for -- one with no AniList id, or a refresh caught between
-	// pruning and rewriting its voices -- is standing in a Chinese voice.
-	noID := castChar(0, "SUPPORTING", "No Id", "无号")
-	noID.VoiceActorEn = sptr("Zh Voice")
-	noID.VoiceActorJa = sptr("中文声优")
+	// A character the voice table has nothing for -- one with no AniList id,
+	// or a refresh caught between pruning and rewriting its voices -- shows
+	// the voice its row carries, as Japanese, whether or not the title has
+	// other voice rows: every writer has stored a Japanese voice there.
+	noID := castChar(0, "SUPPORTING", "No Id", "番号なし")
+	noID.VoiceActorEn = sptr("Row Voice")
+	noID.VoiceActorJa = sptr("行の声優")
 	chars := []dbgen.ListAnimeCastCharactersRow{castChar(1, "MAIN", "Wei Ying", "魏婴"), noID}
-	voices := []dbgen.ListAnimeCastVoicesRow{castVoiceRow(1, 11, "Chinese", "", "Ajie", "阿杰")}
 
-	cn := buildCastList(sptr("CN"), chars, voices)
-	assert.Equal(t, "中文声优", *cn.entries[1].voices[castLangZh][0].NameNative)
-	assert.Empty(t, cn.entries[1].voices[castLangJa])
+	withRows := buildCastList(chars, []dbgen.ListAnimeCastVoicesRow{castVoiceRow(1, 11, "Japanese", "", "Kimura", "木村")})
+	assert.Equal(t, "行の声優", *withRows.entries[1].voices[castLangJa][0].NameNative)
+	assert.Equal(t, []castLangCount{{Language: "ja", Count: 2}}, withRows.langCounts)
 
-	// The same donghua before 0042, with nothing in the voice table: the
+	// The same title before 0042, with nothing in the voice table: the
 	// deployed code stored voiceActors(language: JAPANESE)[0] on the row.
-	old := buildCastList(sptr("CN"), chars, nil)
-	assert.Equal(t, "中文声优", *old.entries[1].voices[castLangJa][0].NameNative)
-	assert.Empty(t, old.entries[1].voices[castLangZh])
+	old := buildCastList(chars, nil)
+	assert.Equal(t, "行の声優", *old.entries[1].voices[castLangJa][0].NameNative)
+	assert.Empty(t, old.entries[0].voices, "the lead's row names no voice, and the table has none")
 }
 
 func TestBuildCastList_SharedSlicesHaveNoSpareCapacity(t *testing.T) {
@@ -412,7 +419,7 @@ func TestBuildCastList_SharedSlicesHaveNoSpareCapacity(t *testing.T) {
 
 	// The list is cached and every request hands its slices to the encoder;
 	// an append on one of them must copy rather than write into the cache.
-	list := fixtureCast(nil)
+	list := fixtureCast()
 	for _, e := range list.entries {
 		for _, vs := range e.voices {
 			assert.Equal(t, len(vs), cap(vs))

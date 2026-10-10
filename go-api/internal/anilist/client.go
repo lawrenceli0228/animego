@@ -549,9 +549,6 @@ func (c *Client) CharacterPagesNoWait(ctx context.Context, v CreditPagesVars) (*
 	if err := decodeCreditScalar(media, "id", &out.MediaID); err != nil {
 		return nil, err
 	}
-	if err := decodeCreditScalar(media, "countryOfOrigin", &out.CountryOfOrigin); err != nil {
-		return nil, err
-	}
 	return out, nil
 }
 

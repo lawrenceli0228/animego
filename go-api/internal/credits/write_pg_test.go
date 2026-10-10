@@ -29,7 +29,7 @@ func castOf(ids []int, voiceBase int) Cast {
 		edges = append(edges, character(id, fmt.Sprintf("C%d", id),
 			voice(voiceBase+id, fmt.Sprintf("V%d", voiceBase+id), "Japanese", "")))
 	}
-	return CastFromEdges(edges, sptr("JP"))
+	return CastFromEdges(edges)
 }
 
 func seq(from, to int) []int {
@@ -157,8 +157,8 @@ func TestWriteCast_PG(t *testing.T) {
 		const anime = 4
 		seedTitle(t, ctx, pool, anime)
 		edges := []anilist.CharacterEdge{character(1, "A"), character(0, "nameless")}
-		require.NoError(t, WriteCast(ctx, q, anime, CastFromEdges(edges, nil), FirstPage))
-		require.NoError(t, WriteCast(ctx, q, anime, CastFromEdges(edges, nil), FirstPage))
+		require.NoError(t, WriteCast(ctx, q, anime, CastFromEdges(edges), FirstPage))
+		require.NoError(t, WriteCast(ctx, q, anime, CastFromEdges(edges), FirstPage))
 		ids, _ := storedCharacters(t, ctx, pool, anime)
 		assert.Equal(t, []int{1, 0}, ids)
 	})

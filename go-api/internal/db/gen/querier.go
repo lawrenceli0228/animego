@@ -755,14 +755,12 @@ type Querier interface {
 	// into the search box re-reads a cached copy rather than the tables.  The
 	// LIMITs are a ceiling on a table no writer is meant to fill past that,
 	// not a page size.
-	// The title's existence and two facts about it.  The country of origin
-	// picks the default dub language, the same way credits.PrimaryLanguage
-	// picks the voice the character rows carry.  detail_fetched says whether
-	// the credit tables have been filled at all: a row a listing wrote
-	// (seasonal, search, warm_season) has none of them until the next
+	// The title's existence (ErrNoRows for a title we do not hold), and
+	// whether its credit tables have been filled at all: a row a listing
+	// wrote (seasonal, search, warm_season) has none of them until the next
 	// /api/anime/:id fetches its detail, so its empty lists are "not yet",
 	// not "nobody" -- the same distinction isStale draws (detail.go).
-	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (GetAnimeCreditsHeadRow, error)
+	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (bool, error)
 	// Authoritative total-episode count for one title, used by
 	// PATCH /api/subscriptions/:anilistId as the upper bound on currentEpisode.
 	//
@@ -1424,7 +1422,9 @@ type Querier interface {
 	ListAnimeCastCharacters(ctx context.Context, animeID int32) ([]ListAnimeCastCharactersRow, error)
 	// Every voice the title stores (0042), each character's in its stored
 	// order: display_order 0 is the voice its character row carries, the
-	// title's own language comes next, then Japanese, Chinese and Korean.
+	// rest follow in AniList's order.  The store keeps Japanese voices only
+	// (0050); the language rides along so the handler can leave out a row in
+	// any other, should one be written by a binary older than that rule.
 	// The person's names and image are an accepted edit's (0047) where there
 	// is one; name_cn otherwise Bangumi's, by the person's AniList id.
 	// staff_id breaks a tie, which the detail refresh and the credits sweep

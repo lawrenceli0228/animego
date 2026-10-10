@@ -1,0 +1,12 @@
+-- 0050 down: nothing is restored.
+--
+-- The up migration deleted every voice that was not Japanese, moved the
+-- character rows those voices headed to a Japanese voice or to none, and
+-- deleted the AniList profiles of the people it left uncredited.  None of
+-- it can be rebuilt from what is left, and none of it is needed back: the
+-- tables and columns are as they were, so the binary before 0050 runs as
+-- it did.  Each title's cast is downloaded again by its next detail
+-- refresh or credits sweep, under the rule of whichever binary is running
+-- -- every language before 0050, Japanese only since -- and the profiles
+-- sweep fetches the profiles of whoever that credits.
+SELECT 1;
