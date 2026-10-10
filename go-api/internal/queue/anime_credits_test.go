@@ -488,6 +488,43 @@ func TestAnimeCredits_FailureIsRetriedTomorrowAndEndsThePass(t *testing.T) {
 	}
 }
 
+// TestAnimeCredits_EmptyListIsAFailureNotAWholeList — a title is a
+// candidate only because its list runs past one page.  An answer whose
+// pages are all empty, the first saying there is no more, contradicts
+// that.  Taken as the whole list it would delete every stored row of the
+// title and record has_more false, which keeps it out of the sweep, so it
+// is a failure like any other: nothing written, has_more left as it was,
+// due again in a day, and the pass ends.
+func TestAnimeCredits_EmptyListIsAFailureNotAWholeList(t *testing.T) {
+	for _, list := range []string{"cast", "staff"} {
+		t.Run(list, func(t *testing.T) {
+			store := newFakeCreditsStore()
+			// Title 21 has no length, so every page comes back empty;
+			// title 2 is a healthy one behind it.
+			al := &fakeCreditsAniList{castLen: map[int]int{2: 30}, staffLen: map[int]int{2: 30}}
+			writes, stamps := &store.castWrites, &store.castStamps
+			if list == "cast" {
+				store.castIDs = []int32{21, 2}
+			} else {
+				store.staffIDs = []int32{21, 2}
+				writes, stamps = &store.staffWrites, &store.staffStamps
+			}
+			w, _ := newCreditsWorker(al, store)
+
+			require.NoError(t, w.Work(context.Background(), creditsJob()))
+
+			assert.Empty(t, *writes, "the empty list is not written, and the pass ends before title 2")
+			require.Len(t, *stamps, 1)
+			stamp := (*stamps)[0]
+			assert.Equal(t, int32(21), stamp.id)
+			assert.Nil(t, stamp.hasMore, "has_more is left as it was")
+			assert.Equal(t, creditsNow.Add(creditsRetryAfterFailure), stamp.at.Add(creditsStaleAfter),
+				"due again after the retry delay")
+			assert.Len(t, al.calls, 1, "one request for the empty title, none for the one behind it")
+		})
+	}
+}
+
 // TestAnimeCredits_HalfAListIsNotWritten — when the second request of a
 // long list cannot get a token, nothing is written (the stored rows are
 // no worse than they were, and a truncated list must not replace them),

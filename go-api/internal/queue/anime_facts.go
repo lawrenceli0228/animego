@@ -127,6 +127,13 @@ func (w *AnimeFactsWorker) Work(ctx context.Context, _ *river.Job[AnimeFactsArgs
 			}
 			continue
 		}
+		// So is an answer naming none of the batch: stamped, its FINISHED
+		// rows would never be offered again (batchEmptyAnswerFloor).
+		if emptyBatchAnswer(chunk, res.Page.Media) {
+			failed += len(chunk)
+			slog.WarnContext(ctx, "anime_facts batch failed", "ids", len(chunk), "err", errEmptyBatchAnswer)
+			continue
+		}
 		batches++
 		w.applyBatch(ctx, chunk, res.Page.Media, &written, &absent)
 	}

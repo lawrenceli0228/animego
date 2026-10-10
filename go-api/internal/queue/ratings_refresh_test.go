@@ -10,6 +10,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -176,6 +177,81 @@ func TestAnilistRatings_LeavesAFailedBatchUnstamped(t *testing.T) {
 
 	assert.Empty(t, db.stamped, "a batch that never reached AniList must stay a candidate")
 	assert.Empty(t, db.updated)
+}
+
+// idRun is n candidate ids counting up from first.
+func idRun(first, n int) []int32 {
+	ids := make([]int32, n)
+	for i := range ids {
+		ids[i] = int32(first + i)
+	}
+	return ids
+}
+
+// TestAnilistRatings_AnAnswerNamingNoneOfTheBatchIsAFailure is the other
+// side of StampsIdsAniListDidNotReturn.
+//
+// Stamping an omitted id is right when AniList has dropped that id.  It
+// is wrong when AniList dropped the whole answer: `{"Page": null}`
+// decodes to an empty page with no error, and stamping every id in it
+// marks fifty rows read with nothing collected.  The back catalogue is
+// read only while its stamp is NULL, so that one bad answer would take
+// fifty rows out of the sweep for good.  A batch answered with none of
+// its ids is a failed request, and must stay a candidate like one.
+//
+// The bodies are decoded the way the client decodes them, so the first
+// case also pins the premise: a null Page is not an error.
+func TestAnilistRatings_AnAnswerNamingNoneOfTheBatchIsAFailure(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"Page null", `{"Page": null}`},
+		{"empty media list", `{"Page": {"media": []}}`},
+		{"only an id nobody asked about", `{"Page": {"media": [
+			{"id": 7, "averageScore": 80, "stats": {"scoreDistribution": [{"score": 80, "amount": 3}]}}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var answer anilist.MediaRatingsResponse
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &answer))
+
+			db := newFakeAnilistRatingsDB(idRun(1000, anilist.MaxRatingIDs)...)
+			fetch := &fakeRatingsFetcher{respond: func(_ []int) (*anilist.MediaRatingsResponse, error) {
+				return &answer, nil
+			}}
+
+			runAnilistPass(t, NewAnilistRatingsWorker(fetch, db))
+
+			assert.Empty(t, db.stamped, "no id of the batch may be stamped on an answer that names none of them")
+			assert.Empty(t, db.updated, "nothing in the answer was asked about")
+		})
+	}
+}
+
+// TestAnilistRatings_EmptyAnswerGuardIsOnlyForWholeBatches pins how far
+// the guard reaches, so it cannot quietly undo the stamping that keeps
+// the sweep from wedging.
+//
+// A partial answer to a full batch is believed: its missing ids are
+// stamped as before.  So is an empty answer to a batch under
+// batchEmptyAnswerFloor -- the tail of a pass can be two ids AniList has
+// genuinely dropped, and those must not lead every later pass.
+func TestAnilistRatings_EmptyAnswerGuardIsOnlyForWholeBatches(t *testing.T) {
+	ids := idRun(1000, anilist.MaxRatingIDs+2) // a full batch, then a tail of 2
+	db := newFakeAnilistRatingsDB(ids...)
+	fetch := &fakeRatingsFetcher{respond: func(batch []int) (*anilist.MediaRatingsResponse, error) {
+		resp := &anilist.MediaRatingsResponse{}
+		if len(batch) == anilist.MaxRatingIDs {
+			resp.Page.Media = []anilist.Media{mediaWithVotes(batch[0], 70, 12)}
+		}
+		return resp, nil
+	}}
+
+	runAnilistPass(t, NewAnilistRatingsWorker(fetch, db))
+
+	require.Len(t, fetch.batches, 2)
+	require.Len(t, fetch.batches[1], 2)
+	require.Less(t, len(fetch.batches[1]), batchEmptyAnswerFloor)
+	assert.Len(t, db.updated, 1, "the one id the full batch answered")
+	assert.Len(t, db.stamped, anilist.MaxRatingIDs-1+2,
+		"49 omitted from the partial answer, plus the 2-id tail answered empty")
 }
 
 // TestAnilistRatings_SkipsMediaWithNoStats guards the boundary between

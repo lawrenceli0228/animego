@@ -1075,22 +1075,40 @@ func writeDetailChildren(ctx context.Context, w DetailWriter, anilistID int32, m
 	// and keeps every row beyond it -- unless AniList says the page is
 	// also the last, in which case it is the whole list and anything else
 	// stored for the title is stale.  See credits.WriteCast.
-	if m.Characters != nil {
+	//
+	// An empty list is not written at all, whatever its pageInfo says.
+	// Taken as the whole list it would delete every stored row of the
+	// title -- the sweep's included -- on the strength of one answer that
+	// is far likelier to be an upstream fault than a title losing its
+	// whole cast.  A title AniList genuinely lists nobody for has no rows
+	// to lose, so skipping costs it nothing.
+	cast, staff := CastFromMedia(m), StaffFromMedia(m)
+	writeCast := m.Characters != nil && len(cast.Characters) > 0
+	writeStaff := m.Staff != nil && len(staff) > 0
+	if writeCast {
 		mode := credits.ModeFor(m.Characters.NextPage())
-		if err := credits.WriteCast(ctx, w, anilistID, CastFromMedia(m), mode); err != nil {
+		if err := credits.WriteCast(ctx, w, anilistID, cast, mode); err != nil {
 			return fmt.Errorf("characters: %w", err)
 		}
 	}
-	if m.Staff != nil {
+	if writeStaff {
 		mode := credits.ModeFor(m.Staff.NextPage())
-		if err := credits.WriteStaff(ctx, w, anilistID, StaffFromMedia(m), mode); err != nil {
+		if err := credits.WriteStaff(ctx, w, anilistID, staff, mode); err != nil {
 			return fmt.Errorf("staff: %w", err)
 		}
 	}
 
 	// 6) Whether there is more than the first page: what puts the title
-	// in, or keeps it out of, the credits sweep's candidate list.
-	castHasMore, staffHasMore := hasMore(m.Characters.NextPage()), hasMore(m.Staff.NextPage())
+	// in, or keeps it out of, the credits sweep's candidate list.  Only
+	// for a list step 5 wrote: recording an empty page's "no more" would
+	// take the title whose rows step 5 just kept out of the sweep.
+	var castHasMore, staffHasMore *bool
+	if writeCast {
+		castHasMore = hasMore(m.Characters.NextPage())
+	}
+	if writeStaff {
+		staffHasMore = hasMore(m.Staff.NextPage())
+	}
 	if castHasMore != nil || staffHasMore != nil {
 		if err := w.SetAnimeCreditsHasMore(ctx, castHasMore, staffHasMore, anilistID); err != nil {
 			return fmt.Errorf("credits has-more: %w", err)

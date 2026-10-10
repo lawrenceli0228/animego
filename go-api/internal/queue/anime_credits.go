@@ -276,6 +276,16 @@ func (w *AnimeCreditsWorker) Work(ctx context.Context, _ *river.Job[AnimeCredits
 // list it cannot vouch for is never written as the whole list.
 var errShortCreditPages = errors.New("anime_credits: response does not carry every requested page")
 
+// errEmptyCreditList is a response whose pages hold no entry at all.  A
+// title is a candidate only because AniList said its list runs past one
+// page, or because a full first page of it is stored
+// (ListAnimeCastCandidates), so an empty list contradicts the reason the
+// title was asked about.  Written, it would be taken as the whole list:
+// every stored row of the title deleted, and has_more recorded false,
+// which keeps the title out of the candidates until a detail refresh
+// says otherwise.  It is a failure instead, and the stored rows stay.
+var errEmptyCreditList = errors.New("anime_credits: response holds no entry for a title that has some")
+
 // checkPages verifies a response carried a full request's pages.
 func checkPages(n int) error {
 	if n != anilist.MaxCreditPagesPerRequest {
@@ -314,6 +324,10 @@ func (p *creditsPass) sweepCast(ctx context.Context, id int32) {
 		more, _ := pages[i].NextPage()
 		return pages[i].Edges, more
 	})
+	if len(edges) == 0 {
+		p.titleFailed(ctx, "cast", id, errEmptyCreditList, p.w.store.StampAnimeCastChecked)
+		return
+	}
 	hasMore, _ := pages[0].NextPage()
 	cast := credits.CastFromEdges(edges, first.CountryOfOrigin)
 	if err := p.w.store.ReplaceCast(ctx, id, cast, hasMore, p.w.clock()); err != nil {
@@ -353,6 +367,10 @@ func (p *creditsPass) sweepStaff(ctx context.Context, id int32) {
 		more, _ := pages[i].NextPage()
 		return pages[i].Edges, more
 	})
+	if len(edges) == 0 {
+		p.titleFailed(ctx, "staff", id, errEmptyCreditList, p.w.store.StampAnimeStaffChecked)
+		return
+	}
 	hasMore, _ := pages[0].NextPage()
 	if err := p.w.store.ReplaceStaff(ctx, id, credits.StaffFromEdges(edges), hasMore, p.w.clock()); err != nil {
 		p.titleFailed(ctx, "staff", id, err, p.w.store.StampAnimeStaffChecked)

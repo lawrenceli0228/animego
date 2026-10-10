@@ -235,6 +235,13 @@ func (w *AnilistRatingsWorker) Work(ctx context.Context, _ *river.Job[AnilistRat
 			}
 			continue
 		}
+		// An answer naming none of the batch is a failed request too, and
+		// is left unstamped for the same reason (batchEmptyAnswerFloor).
+		if emptyBatchAnswer(chunk, res.Page.Media) {
+			failed += len(chunk)
+			slog.WarnContext(ctx, "anilist_ratings batch failed", "ids", len(chunk), "err", errEmptyBatchAnswer)
+			continue
+		}
 		batches++
 		w.applyBatch(ctx, chunk, res.Page.Media, &written, &absent)
 	}
@@ -452,6 +459,43 @@ func (w *BangumiRatingsWorker) clock() time.Time {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// batchEmptyAnswerFloor is the batch size from which an answer to an id
+// batch that names none of the ids asked about is not believed.  The rule
+// and the number are profilesEmptyAnswerFloor's, for the same reason.
+// AniList deletes and merges media rarely, so an answer missing every one
+// of ten or more ids is a broken answer -- `Page: null` decodes to an
+// empty list with no error, because anilist.MediaPage is a value -- and
+// not ten deletions.  Believing it would stamp the whole batch as read,
+// and each sweep reads part of the catalogue only while its stamp is NULL
+// -- the back catalogue's ratings (ListAnilistRatingCandidates), FINISHED
+// rows' facts (ListAnimeFactsCandidates) -- so those rows would never be
+// asked about again.  A smaller batch is believed: the tail of a pass can
+// legitimately be a few ids AniList has dropped.
+const batchEmptyAnswerFloor = 10
+
+// errEmptyBatchAnswer is an id-batch answer with none of the batch's ids
+// in it; see batchEmptyAnswerFloor.
+var errEmptyBatchAnswer = errors.New("AniList returned none of the ids asked about")
+
+// emptyBatchAnswer reports whether an answer to an id batch must be
+// treated as a failed request rather than applied: the batch holds at
+// least batchEmptyAnswerFloor ids and the answer names none of them.
+func emptyBatchAnswer(requested []int, media []anilist.Media) bool {
+	if len(requested) < batchEmptyAnswerFloor {
+		return false
+	}
+	asked := make(map[int]struct{}, len(requested))
+	for _, id := range requested {
+		asked[id] = struct{}{}
+	}
+	for _, m := range media {
+		if _, ok := asked[m.ID]; ok {
+			return false
+		}
+	}
+	return true
+}
 
 // chunkIDs splits ids into slices of at most size, yielding each in
 // order.  A range-over-func rather than a returned [][]int so the
