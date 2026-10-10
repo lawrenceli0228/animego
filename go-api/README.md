@@ -36,56 +36,10 @@ bash scripts/migrate-mongo-truncate-and-retry.sh
 
 ## Layout
 
-```
-go-api/
-├── cmd/
-│   ├── server/                 # chi HTTP entry — :8080/health  (P0)
-│   ├── migrate-mongo/          # Mongo → Postgres one-shot      (P1)
-│   ├── parity-check/           # 10×N field parity diff         (P1.E)
-│   ├── migrate/.gitkeep        # golang-migrate wrapper         (future)
-│   └── seed/.gitkeep           # dev fixture loader             (future)
-├── internal/
-│   ├── config/                 # env loader (PORT_GO, DATABASE_URL, CLIENT_ORIGIN, …)
-│   ├── db/
-│   │   ├── pool.go             # web-tier pgxpool, MaxConns=20  (P2.0.A)
-│   │   ├── pool_test.go        #   bad URL / unreachable host  (P2.0.A)
-│   │   ├── queries/            # sqlc input (P2.1 first query lands here)
-│   │   └── gen/                # sqlc output (P2.1 first generate)
-│   ├── httpx/                  # envelope + APIError + 14 codes  (P2.0.C)
-│   │   ├── codes.go            #   const list grep'd from Express
-│   │   ├── error.go            #   APIError + WithCause Option
-│   │   ├── envelope.go         #   Data + Page[T] + Fail (no HTML-escape, no trailing \n)
-│   │   ├── error_test.go       #   16+ case
-│   │   ├── envelope_test.go    #   15 case incl. 14 codes round-trip
-│   │   └── express_fixture_test.go #   6 byte-exact case
-│   ├── httpmw/                 # middleware (P2.0.D) — name avoids chi/v5/middleware collision
-│   │   ├── logger.go           #   RequestLog, /health verbatim skip
-│   │   ├── cors.go             #   go-chi/cors wrapper, AllowCredentials=true
-│   │   ├── recoverer.go        #   envelope-aware, honours http.ErrAbortHandler
-│   │   └── *_test.go           #   14+ case
-│   ├── migrate/                # migration orchestration package
-│   │   ├── orchestrator.go     #   topo-sort + batch UPSERT + JSONL fail log
-│   │   ├── transform.go        #   Transform interface + registry
-│   │   ├── mongo_conn.go       #   mongo-driver/v2 client helper
-│   │   ├── pg_conn.go          #   batch-tier pgxpool (MaxConns=10)
-│   │   └── transforms/         #   per-collection mappers (P1.C)
-│   │       ├── util.go         #     MongoIDToUUID (deterministic v5)
-│   │       ├── users.go        #     5 simple + 1 complex transform each
-│   │       ├── anime_cache.go  #     fan-out to 7 child tables
-│   │       └── *_test.go       #     testify, 91.2% coverage
-├── migrations/                 # golang-migrate input
-│   ├── 0001_init.up.sql            # 14 tables, FK CASCADE
-│   ├── 0002_indexes.up.sql         # 19 secondary indexes
-│   ├── 0003_defer_comment_self_fk  # episode_comments.parent_id DEFERRED
-│   ├── 0004_relax_bangumi_version  # CHECK 0-2 → ≥0 (prod has 3)
-│   ├── 0005_pg_cron_extension      # CREATE EXTENSION pg_cron
-│   └── 0006_danmaku_ttl_schedule   # 04:00 UTC daily TTL job
-├── docker/postgres/Dockerfile  # postgres:16-alpine + pg_cron 1.6.5
-├── test/integration/           # testcontainers-go (build tag: integration)
-├── .air.toml                   # hot reload config
-├── sqlc.yaml                   # SQL → Go codegen config
-└── go.mod
-```
+The code map — every directory, package, route, background job, SQL file and
+migration, and where to look to change a given thing — is
+[`ARCHITECTURE.md`](ARCHITECTURE.md).  `test/archdoc` fails CI when it falls
+behind the tree.
 
 ## Schema overview
 
