@@ -916,3 +916,19 @@
 **2026-10-08 更新** — 第 2 条已解除（migration 0042）：详情重拉和 `anime_credits` sweep 都按 `(anime_id, character_id)` upsert，`UpsertAnimeCharacter` 不写 `name_cn`，别处写进去的值能活过重拉；`voice_actor_cn` 只在 `voice_actor_id` 不变时保留。没有 character id 的旧行仍会在下一次重拉时删除。第 1 条（上游没有这个字段）仍在。
 
 **Depends on / blocked by** — 阶段 2.2（角色 id）。与 `## bangumi_version 是单向棘轮` 同属一根。
+
+---
+
+## 补全 sweep 跑完后重跑 bgmnames，并把它做成每周自动任务
+
+**What** — 等 `anime_credits` sweep（角色、职员）和 `profiles` sweep（人物、角色资料）的首轮回填跑完，用当时最新的 Bangumi Archive 数据包（<https://github.com/bangumi/Archive>，每周二 21:03 UTC 发布）重跑一次 `cmd/bgmnames`：先不带 `--apply` 跑一遍，看配对数、冲突和将要改动的行，确认后再加 `--apply` 写入。长期把它从手动工具改成定时任务：新数据包发布后自动下载、校验、应用，不再依赖人记得每周去跑。
+
+**Why** — 角色和人物的中文名（`bgm_character_map` / `bgm_person_map` 的 `name_cn`）以及角色简介（`bgm_character_map.summary`）只在 bgmnames 运行时写入，而它目前只在 #217 部署时跑过一次。之后两条 sweep 每小时都在往库里加角色和人物，这些新行在下一次运行之前都没有中文名，角色标签页、角色页、人物页上只显示 AniList 的名字。bgmnames 匹配的是库里当前的行，所以即使数据包没换，重跑也能补上这部分；一次写入是一个事务，跑完两张表正好等于这一轮的结果，重复运行是安全的。
+
+**Pros** — 中文名和角色简介重新和库里的角色、人物对齐；做成定时任务后每周的新数据包自动生效。
+
+**Cons** — 每次要下载约 440 MB 的数据包，解压其中 4 个 jsonlines 文件。做成定时任务要把工具放进镜像（现在不在镜像里），并处理下载失败、校验和与临时文件的磁盘占用。只有已绑定 Bangumi 的番，它的角色和人物才配得上，没绑定的不受益。
+
+**Context** — 2026-10-11 核对时，首轮回填预计还要 3–4 天：角色约 30 小时，人物资料约 1 天，角色资料约 3 天，职员约 4 天。判断跑完的办法：`ListAnimeCastCandidates` / `ListAnimeStaffCandidates` 里不再有从未扫过（`cast_checked_at` / `staff_checked_at` 为空）的行，`ListPeopleCandidates` / `ListCharacterCandidates` 不再返回缺资料的人物和角色。下一个数据包是 2026-10-13，届时用最新的那份。
+
+**Depends on / blocked by** — 两条 sweep 的首轮回填完成。
