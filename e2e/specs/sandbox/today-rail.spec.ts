@@ -96,10 +96,22 @@ async function expectAtAStop(rail: Locator, at: number) {
  * attached to the DOM, and on a dev server noticeably after. Acting before them
  * means the opening scroll lands in the middle of the test. The slider's spoken
  * value is written by that first measurement.
+ *
+ * "Noticeably" can be more than the 5s an expect waits by default. On a loaded
+ * CI runner the page sat on its server render for over 5s after the fibers were
+ * there: the clock still on server time, the slider never measured. The
+ * measurement then landed and was right. So the wait gets the same budget as
+ * waitForHydration's.
  */
+const SETTLE_TIMEOUT_MS = 15_000;
+
 async function railSettledIn(page: Page) {
   await waitForHydration(page, `${RAIL} a`);
-  await expect(page.getByRole("slider", { name: "横向滚动今日更新" })).toHaveAttribute("aria-valuetext", /\S/);
+  await expect(page.getByRole("slider", { name: "横向滚动今日更新" })).toHaveAttribute(
+    "aria-valuetext",
+    /\S/,
+    { timeout: SETTLE_TIMEOUT_MS },
+  );
 }
 
 async function openRail(page: Page): Promise<Locator | null> {
