@@ -265,7 +265,8 @@ describe("a file the library already holds", () => {
 });
 
 describe("two copies in one batch", () => {
-  test("are imported once, with the later one recorded as a copy", async () => {
+  test("in one cluster: imported once, the other recorded as a copy", async () => {
+    // Same parsed title, so both folders land in one cluster.
     const db = memoryDb();
     const first = "Re Zero/[Sub] Re Zero - 09.mkv";
     const second = "[Sub] Re Zero - 09.mkv";
@@ -283,10 +284,50 @@ describe("two copies in one batch", () => {
     expect(db.episodes.rows.size).toBe(1);
     expect(db.fileRefs.rows.size).toBe(1);
     const row = db.fileRefs.rows.get(REF);
-    expect(row.relPath).toBe(first);
-    expect(row.copies).toEqual([{ libraryId: "lib-1", relPath: second }]);
+    expect([row.relPath, ...row.copies.map((c) => c.relPath)].sort()).toEqual(
+      [first, second].sort(),
+    );
+    expect(row.copies).toHaveLength(1);
     // One file in two folders is not two folders merged into a card.
     expect(summary.crossFolderMerges).toEqual([]);
+  });
+
+  test("a stray copy outside the show's folder joins the show instead of starting a card", async () => {
+    // The folder's files take their title from the folder; the stray copy at
+    // the root takes its own from the file name, so it clusters alone. It
+    // comes first in the batch, which used to let it claim the episode.
+    const db = memoryDb();
+    const stray = "[Sub] Copies Smoke - 01.mkv";
+    const inFolder = `Copies Show/${stray}`;
+    const ep2 = "Copies Show/[Sub] Copies Smoke - 02.mkv";
+    const one = (relativePath, parsedTitle) =>
+      item(relativePath, { episode: 1, hash16M: "h1", parsedTitle });
+
+    await runImport(
+      {
+        items: [
+          one(stray, "Copies Smoke"),
+          one(inFolder, "Copies Show"),
+          item(ep2, {
+            episode: 2,
+            hash16M: "h2",
+            parsedTitle: "Copies Show",
+            file: { size: SIZE + 1, lastModified: 1_000 },
+          }),
+        ],
+        libraryId: "lib-1",
+        onDisk: new Map([
+          ["lib-1", new Set([baselineKey(stray, SIZE), baselineKey(inFolder, SIZE), baselineKey(ep2, SIZE + 1)])],
+        ]),
+      },
+      { db, dandan: recordingDandan() },
+    );
+
+    expect(db.series.rows.size).toBe(1);
+    expect(db.episodes.rows.size).toBe(2);
+    const row = db.fileRefs.rows.get(fileRefId(one(inFolder, "Copies Show")));
+    expect(row.relPath).toBe(inFolder);
+    expect(row.copies).toEqual([{ libraryId: "lib-1", relPath: stray }]);
   });
 
   test("files without a content hash are never taken for copies", async () => {

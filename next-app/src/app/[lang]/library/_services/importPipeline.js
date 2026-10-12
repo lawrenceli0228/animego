@@ -22,7 +22,7 @@ import {
   fileRefId,
 } from '@/lib/library/recordFactory.js';
 import { normalizeTokens } from '@/lib/library/normalize.js';
-import { batchOnDisk, relocateFileRef, separateCopies } from './fileRefCopies.js';
+import { batchOnDisk, dropCopiesWithin, relocateFileRef } from './fileRefCopies.js';
 // The one door in and out of `Series.anilistId`. Imported rather than
 // re-implemented: the guarantee that an automatic write can never stomp a
 // binding the user set by hand lives in that module, and an import is about as
@@ -84,15 +84,10 @@ export async function runImport(input, ctx) {
   const fileRefRepo = makeFileRefRepo(db);
   const cacheRepo = makeMatchCacheRepo(db);
 
-  // Two copies of the same bytes are one file to the library: import one,
-  // and once it has a row, list the others on it as copies (end of batch).
-  // Imported side by side they would share one row id but each mint an
-  // Episode, so the card would show the episode twice.
-  const { distinct, copies } = separateCopies(items);
   const onDisk = input.onDisk ?? batchOnDisk(items, libraryId);
 
   // Stage 1: group by folder
-  const groups = groupByFolder(distinct);
+  const groups = groupByFolder(items);
 
   // Stage 2: load prior seasons for animeIdHint resolution
   const priorSeasons = await db.seasons.toArray();
@@ -113,7 +108,21 @@ export async function runImport(input, ctx) {
   const userOverrides = new Map(overrideRows.map((o) => [o.seriesId, o]));
 
   // Stage 3: clusterize
-  const clusters = clusterize(groups, priorSeasons);
+  //
+  // Two copies of the same bytes are one file to the library. Copies that
+  // land in different clusters need nothing here: whichever cluster runs
+  // later finds the bytes already homed and lists its path as a copy (groups
+  // run largest first, so a show's own folder normally gets there before a
+  // stray copy). Copies in the SAME cluster would each mint an Episode, so
+  // each cluster keeps one and the rest are listed once it has a row (end of
+  // batch). Deduplicating the whole batch up front would be wrong: it can
+  // pull a file out of its folder, which changes how the folder clusters.
+  const copies = [];
+  const clusters = clusterize(groups, priorSeasons).map((raw) => {
+    const { cluster, copies: extra } = dropCopiesWithin(raw);
+    copies.push(...extra);
+    return cluster;
+  });
 
   /** @type {ImportSummary} */
   const summary = { clusters: clusters.length, matched: 0, failed: 0, ambiguous: 0, crossFolderMerges: [] };

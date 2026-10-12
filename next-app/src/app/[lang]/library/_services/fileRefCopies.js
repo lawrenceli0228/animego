@@ -66,10 +66,10 @@ export function relocateFileRef(prior, found, onDisk) {
 }
 
 /**
- * Split an import batch into the files to import and the extra copies among
- * them: items whose bytes already appeared earlier in the batch. Only a
- * content hash proves two files hold the same bytes, so items without one
- * (their hashing failed) are always imported.
+ * Split items into the files to import and the extra copies among them:
+ * items whose bytes already appeared earlier in the list. Only a content
+ * hash proves two files hold the same bytes, so items without one (their
+ * hashing failed) are always imported.
  *
  * @param {EpisodeItem[]} items
  * @returns {{ distinct: EpisodeItem[], copies: EpisodeItem[] }}
@@ -92,6 +92,39 @@ export function separateCopies(items) {
     }
   }
   return { distinct, copies };
+}
+
+/**
+ * A cluster with each set of identical files in it reduced to its first
+ * member. Two copies of the same bytes in one cluster would each mint an
+ * Episode; the others are returned, to be listed as copies once the first has
+ * a row. Folders left contributing nothing drop out of the cluster's groups,
+ * so a copy does not count as a second folder merged into the card.
+ *
+ * @param {import('@/lib/library/types').MatchCluster} cluster
+ * @returns {{ cluster: import('@/lib/library/types').MatchCluster, copies: EpisodeItem[] }}
+ */
+export function dropCopiesWithin(cluster) {
+  const { distinct, copies } = separateCopies(cluster.items ?? []);
+  if (!copies.length) return { cluster, copies };
+  const kept = new Set(distinct);
+  const rep = cluster.representative;
+  const representative =
+    rep && !kept.has(rep)
+      ? (distinct.find((item) => item.hash16M && fileRefId(item) === fileRefId(rep)) ??
+        distinct[0])
+      : rep;
+  return {
+    cluster: {
+      ...cluster,
+      items: distinct,
+      representative,
+      groups: (cluster.groups ?? []).filter((group) =>
+        (group.items ?? []).some((item) => kept.has(item)),
+      ),
+    },
+    copies,
+  };
 }
 
 /**
