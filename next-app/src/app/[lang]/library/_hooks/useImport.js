@@ -26,7 +26,7 @@ import { createHashPool } from '@/lib/library/hashPool.js';
  *   hashPool?: HashPool
  * }} options
  * @returns {{
- *   run(input: { items: EpisodeItem[], libraryId: string }): Promise<void>,
+ *   run(input: { items: EpisodeItem[], libraryId: string, onDisk?: Map<string, Set<string>> }): Promise<void>,
  *   progress: ImportEvent[],
  *   summary: ImportSummary|null,
  *   status: ImportStatus,
@@ -68,7 +68,11 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
    * Run the full import pipeline.
    * Resets progress on each call; partial events are retained even if cancelled.
    *
-   * @param {{ items: EpisodeItem[], libraryId: string }} input
+   * `onDisk` (optional) is what is on disk now, per library folder (see
+   * OnDisk in rescanService); the pipeline uses it to tell a second copy of
+   * a known file from a moved one (see importPipeline.runImport).
+   *
+   * @param {{ items: EpisodeItem[], libraryId: string, onDisk?: Map<string, Set<string>> }} input
    * @returns {Promise<void>}
    */
   const run = useCallback(async (input) => {
@@ -107,7 +111,7 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
       }
 
       const result = await runImport(
-        { items: hashed, libraryId: input.libraryId },
+        { items: hashed, libraryId: input.libraryId, onDisk: input.onDisk },
         {
           db,
           dandan,

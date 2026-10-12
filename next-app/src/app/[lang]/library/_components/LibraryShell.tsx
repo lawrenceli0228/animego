@@ -41,6 +41,7 @@ import { makeOpsLogRepo } from "@/lib/library/db/opsLogRepo.js";
 // @ts-ignore
 import { isFsaSupported } from "@/lib/library/handles/fsaFeatureCheck.js";
 import { isFolderWatchSupported } from "../_services/folderWatcher.js";
+import { baselineKey } from "../_services/rescanService.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { enumerateAll } from "@/lib/library/enumerator.js";
@@ -359,6 +360,7 @@ export function LibraryShell() {
   const [scanToast, setScanToast] = useState<number | null>(null);
   const {
     scanning: rescanBusy,
+    completedScans,
     manualRescan,
     yieldToManual,
     rearmWatch,
@@ -558,6 +560,22 @@ export function LibraryShell() {
       collected.map(({ file, relPath }: any) => [file, relPath]),
     );
     const { files: items } = processFiles(allFiles, { pathMap });
+    // What the new folder holds, keyed like the rescan baseline: lets the
+    // import tell a second copy of a file the library already holds from a
+    // file that moved, so the copy is listed instead of taking over the path.
+    // Only this folder was read, so other folders' files count as unknown.
+    const onDisk = new Map<string, Set<string>>([
+      [
+        record.libraryId,
+        new Set(
+          collected
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .filter(({ kind }: any) => kind === "video")
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .map(({ file, relPath }: any) => baselineKey(relPath, file.size)),
+        ),
+      ],
+    ]);
     // D2 preemption: cancel any in-flight silent auto-scan and wait (bounded)
     // for it to exit — two concurrent runImports race the priorSeasons
     // snapshot and can mint duplicate series. Placed AFTER pickFolder so the
@@ -568,8 +586,12 @@ export function LibraryShell() {
     // processFiles; EpisodeItem types it as a union literal. Legacy
     // SPA passed the value through unchanged at runtime — keeping
     // parity by widening to `any` at the boundary.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await runImport({ items: items as any, libraryId: record.libraryId });
+    await runImport({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      items: items as any,
+      libraryId: record.libraryId,
+      onDisk,
+    });
     // The watch effect observed the roots that existed at mount; this new
     // root is invisible to it until re-armed. Without this, files dropped
     // into a folder added mid-session are only found by tab-return scans.
@@ -1375,7 +1397,9 @@ export function LibraryShell() {
   );
 
   return (
-    <div style={s.page}>
+    // data-rescan-count: scans finished on this page, so an end-to-end test
+    // can wait for one that (correctly) changes nothing.
+    <div style={s.page} data-rescan-count={completedScans}>
       <style>{PRIVACY_PULSE_CSS}</style>
       <LibraryDbAlert />
       {showBanner && <FsaUnsupportedBanner />}

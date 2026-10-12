@@ -478,6 +478,376 @@ describe("watch trigger and deferred retry", () => {
   });
 });
 
+// ---- second copies and moved files ----------------------------------------
+//
+// Two copies of one file share a fileRef row (its id is a content hash). The
+// scan has to know whether the location the row records — library folder
+// AND path — still holds the file before it can tell a second copy from a
+// file whose original went away. And content the library already held must
+// not be announced as a new episode when it lands at a new path.
+
+describe("second copies and moved files", () => {
+  const PRIMARY_PATH = "Re Zero/S04E09.mkv";
+  const PRIMARY = baselineKey(PRIMARY_PATH, 900);
+  const COPY_KEY = baselineKey("S04E09.mkv", 900);
+  const COPY_ENTRY = video("S04E09.mkv", 900);
+  const rowIn = (libraryId) => ({ id: "row-1", libraryId, relPath: PRIMARY_PATH, size: 900 });
+
+  function copyDiff({ primaryOnDisk, rowLibrary = "lib1" }) {
+    return {
+      ...emptyDiff(),
+      copyHits: [{ entry: COPY_ENTRY, row: rowIn(rowLibrary) }],
+      seenKeys: new Set([COPY_KEY, ...(primaryOnDisk ? [PRIMARY] : [])]),
+    };
+  }
+
+  test("a copy whose row's file is still on disk is not imported", async () => {
+    const { controller, calls } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      diffScanRoot: async () => copyDiff({ primaryOnDisk: true }),
+    });
+    const result = await controller.maybeScan({ trigger: "visibility" });
+    expect(calls.imports).toHaveLength(0);
+    expect(calls.beforeSilent).toBe(0);
+    expect(result.newCount).toBe(0);
+  });
+
+  test("a copy whose row's file is gone is imported to take over", async () => {
+    const { controller, calls } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      diffScanRoot: async () => copyDiff({ primaryOnDisk: false }),
+    });
+    await controller.maybeScan({ trigger: "visibility" });
+    expect(calls.imports).toHaveLength(1);
+    expect(calls.imports[0].items.map((it) => it.relativePath)).toEqual(["S04E09.mkv"]);
+  });
+
+  test("a copy stands in when the row's folder could not be read", async () => {
+    const { controller, calls } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      diffScanRoot: async () => copyDiff({ primaryOnDisk: true, rowLibrary: "lib-unplugged" }),
+    });
+    await controller.maybeScan({ trigger: "visibility" });
+    expect(calls.imports).toHaveLength(1);
+  });
+
+  test("the row's folder counts, not the path alone: the same path elsewhere is not its file", async () => {
+    // The row is in lib-A, which no longer holds the file; lib-B happens to
+    // hold the same relative path.
+    const { controller, calls } = harness({
+      listRoots: async () => [root("lib-A", 200, { t: "A" }), root("lib-B", 100, { t: "B" })],
+      diffScanRoot: async ({ handle }) =>
+        handle.t === "A"
+          ? { ...copyDiff({ primaryOnDisk: false, rowLibrary: "lib-A" }) }
+          : { ...emptyDiff(), seenKeys: new Set([PRIMARY]) },
+    });
+    await controller.maybeScan({ trigger: "visibility" });
+    expect(calls.imports).toHaveLength(1);
+    expect(calls.imports[0].libraryId).toBe("lib-A");
+  });
+
+  test("the row's file found in its own folder keeps a copy under another folder idle", async () => {
+    const { controller, calls } = harness({
+      listRoots: async () => [root("copyRoot", 200, { t: "copy" }), root("primaryRoot", 100, { t: "primary" })],
+      diffScanRoot: async ({ handle }) =>
+        handle.t === "copy"
+          ? copyDiff({ primaryOnDisk: false, rowLibrary: "primaryRoot" })
+          : { ...emptyDiff(), seenKeys: new Set([PRIMARY]) },
+    });
+    await controller.maybeScan({ trigger: "visibility" });
+    expect(calls.imports).toHaveLength(0);
+  });
+
+  describe("the same path under another folder", () => {
+    const owner = { id: "row-1", libraryId: "lib-A", relPath: "Show/E01.mkv", size: 100 };
+    const foreign = () => ({
+      ...emptyDiff(),
+      foreignHits: [{ entry: video("Show/E01.mkv", 100), owners: [owner] }],
+      seenKeys: new Set([baselineKey("Show/E01.mkv", 100)]),
+    });
+
+    test("takes over once the row's folder was read without the file", async () => {
+      const { controller, calls } = harness({
+        listRoots: async () => [root("lib-B", 200, { t: "B" }), root("lib-A", 100, { t: "A" })],
+        diffScanRoot: async ({ handle }) => (handle.t === "B" ? foreign() : emptyDiff()),
+      });
+      await controller.maybeScan({ trigger: "visibility" });
+      expect(calls.imports).toHaveLength(1);
+      expect(calls.imports[0].libraryId).toBe("lib-B");
+    });
+
+    test("is left alone while the row's folder still holds the file", async () => {
+      const { controller, calls } = harness({
+        listRoots: async () => [root("lib-B", 200, { t: "B" }), root("lib-A", 100, { t: "A" })],
+        diffScanRoot: async ({ handle }) =>
+          handle.t === "B"
+            ? foreign()
+            : { ...emptyDiff(), seenKeys: new Set([baselineKey("Show/E01.mkv", 100)]) },
+      });
+      await controller.maybeScan({ trigger: "visibility" });
+      expect(calls.imports).toHaveLength(0);
+    });
+
+    test("is left alone when the row's folder was not read at all", async () => {
+      const { controller, calls } = harness({
+        listRoots: async () => [root("lib-B", 200)],
+        diffScanRoot: async () => foreign(),
+      });
+      await controller.maybeScan({ trigger: "visibility" });
+      expect(calls.imports).toHaveLength(0);
+    });
+  });
+
+  test("records of one directory are read once and share what was found", async () => {
+    const shared = { t: "same" };
+    const diffArgs = [];
+    let received;
+    const { controller } = harness({
+      listRoots: async () => [root("a", 200, shared), root("b", 100, shared)],
+      isSameEntry: async (x, y) => x === y,
+      diffScanRoot: async (args) => {
+        diffArgs.push(args);
+        return { ...emptyDiff(), newVideos: [video("x/01.mkv", 10)], seenKeys: new Set([baselineKey("x/01.mkv", 10)]) };
+      },
+      runImport: async ({ onDisk }) => {
+        received = onDisk;
+      },
+    });
+    await controller.maybeScan({ trigger: "mount" });
+    expect(diffArgs).toHaveLength(1);
+    expect([...diffArgs[0].libraryIds].sort()).toEqual(["a", "b"]);
+    expect(received.get("a")).toBe(received.get("b"));
+    expect([...received.get("a")]).toEqual([baselineKey("x/01.mkv", 10)]);
+  });
+
+  test("markSuperseded is limited to the scanned folder's libraries", async () => {
+    let libs;
+    const { controller } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      diffScanRoot: async () => ({
+        ...emptyDiff(),
+        newVideos: [video("x/01.mkv", 2)],
+        supersededCandidates: [{ relPath: "x/01.mkv", ids: ["old"] }],
+      }),
+      markSuperseded: async (_c, _now, libraryIds) => {
+        libs = libraryIds;
+      },
+    });
+    await controller.maybeScan({ trigger: "mount" });
+    expect([...libs]).toEqual(["lib1"]);
+  });
+
+  test("every root is read before the first import", async () => {
+    const log = [];
+    const { controller } = harness({
+      listRoots: async () => [root("a", 200, { t: "a" }), root("b", 100, { t: "b" })],
+      diffScanRoot: async ({ handle }) => {
+        log.push(`diff:${handle.t}`);
+        return { ...emptyDiff(), newVideos: [video(`${handle.t}/01.mkv`)] };
+      },
+      runImport: async ({ libraryId }) => {
+        log.push(`import:${libraryId}`);
+      },
+    });
+    await controller.maybeScan({ trigger: "mount" });
+    expect(log).toEqual(["diff:a", "diff:b", "import:a", "import:b"]);
+  });
+
+  test("runImport is told what each folder holds", async () => {
+    let received;
+    const { controller } = harness({
+      listRoots: async () => [root("a", 200, { t: "a" }), root("b", 100, { t: "b" })],
+      diffScanRoot: async ({ handle }) => ({
+        ...emptyDiff(),
+        newVideos: handle.t === "a" ? [video("a/01.mkv", 10)] : [],
+        seenKeys: new Set([baselineKey(`${handle.t}/01.mkv`, 10)]),
+      }),
+      runImport: async ({ onDisk }) => {
+        received = onDisk;
+      },
+    });
+    await controller.maybeScan({ trigger: "mount" });
+    expect([...received.get("a")]).toEqual([baselineKey("a/01.mkv", 10)]);
+    expect([...received.get("b")]).toEqual([baselineKey("b/01.mkv", 10)]);
+  });
+
+  /**
+   * Baselines before and after the import: `before` is what the library held
+   * when the scan started, `after` is what it holds once the import ran.
+   */
+  function baselines({ before, after }) {
+    let n = 0;
+    return async () => {
+      n++;
+      const b = n === 1 ? before : after;
+      return {
+        keys: new Set(b.keys ?? []),
+        byRelPath: new Map(),
+        copyKeys: new Set(b.copyKeys ?? []),
+        rowOf: new Map(b.rowOf ?? []),
+        ids: new Set(b.ids ?? []),
+      };
+    };
+  }
+
+  test("a moved file the library already held is relinked, not announced as new", async () => {
+    const key = baselineKey("Moved/01.mkv", 500);
+    const row = { id: "row-1", libraryId: "lib1", relPath: "Moved/01.mkv", size: 500 };
+    const { controller, calls } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      buildBaseline: baselines({
+        before: { ids: ["row-1"] },
+        after: { keys: [key], rowOf: [[key, row]], ids: ["row-1"] },
+      }),
+      diffScanRoot: async () => ({ ...emptyDiff(), newVideos: [video("Moved/01.mkv", 500)] }),
+    });
+    const result = await controller.maybeScan({ trigger: "visibility" });
+    expect(calls.imports).toHaveLength(1);
+    expect(result.newCount).toBe(0);
+    expect(result.relinkedCount).toBe(1);
+    expect(result.failedCount).toBe(0);
+  });
+
+  test("a second copy that lands as a copy counts as relinked", async () => {
+    const row = rowIn("lib1");
+    const { controller } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      buildBaseline: baselines({
+        before: { keys: [PRIMARY], rowOf: [[PRIMARY, row]], ids: ["row-1"] },
+        after: {
+          keys: [PRIMARY],
+          copyKeys: [COPY_KEY],
+          rowOf: [
+            [PRIMARY, row],
+            [COPY_KEY, row],
+          ],
+          ids: ["row-1"],
+        },
+      }),
+      diffScanRoot: async () => ({
+        ...emptyDiff(),
+        newVideos: [COPY_ENTRY],
+        seenKeys: new Set([PRIMARY, COPY_KEY]),
+      }),
+    });
+    const result = await controller.maybeScan({ trigger: "visibility" });
+    expect(result.newCount).toBe(0);
+    expect(result.relinkedCount).toBe(1);
+  });
+
+  test("two paths of one brand-new file count as one new episode", async () => {
+    const a = baselineKey("Show/01.mkv", 700);
+    const b = baselineKey("01.mkv", 700);
+    const row = { id: "row-new", libraryId: "lib1", relPath: "Show/01.mkv", size: 700 };
+    const { controller } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      buildBaseline: baselines({
+        before: {},
+        after: {
+          keys: [a],
+          copyKeys: [b],
+          rowOf: [
+            [a, row],
+            [b, row],
+          ],
+          ids: ["row-new"],
+        },
+      }),
+      diffScanRoot: async () => ({
+        ...emptyDiff(),
+        newVideos: [video("Show/01.mkv", 700), video("01.mkv", 700)],
+      }),
+    });
+    const result = await controller.maybeScan({ trigger: "mount" });
+    expect(result.newCount).toBe(1);
+    expect(result.relinkedCount).toBe(0);
+  });
+
+  /** A baseline where the copy is still only a copy of `row`. */
+  function stillACopyOf(row) {
+    return async () => ({
+      keys: new Set([baselineKey(row.relPath, row.size)]),
+      byRelPath: new Map(),
+      copyKeys: new Set([COPY_KEY]),
+      rowOf: new Map([
+        [baselineKey(row.relPath, row.size), row],
+        [COPY_KEY, row],
+      ]),
+      ids: new Set([row.id]),
+    });
+  }
+
+  test("a takeover whose row still points at a file that is gone is a failed attempt", async () => {
+    const { controller, calls, advance } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      buildBaseline: stillACopyOf(rowIn("lib1")),
+      diffScanRoot: async () => copyDiff({ primaryOnDisk: false }),
+    });
+    let last;
+    for (let i = 0; i < MAX_IMPORT_ATTEMPTS + 1; i++) {
+      last = await controller.maybeScan({ trigger: "visibility" });
+      advance(MIN_SCAN_INTERVAL_MS + 1000);
+    }
+    expect(calls.imports).toHaveLength(MAX_IMPORT_ATTEMPTS);
+    expect(last.failedCount).toBe(1);
+    expect(last.relinkedCount).toBe(0);
+  });
+
+  test("a takeover beaten by another copy of the same row is not a failure", async () => {
+    // Another copy now holds the row, and it is on disk: this one is rightly
+    // just a listed copy.
+    const winner = { id: "row-1", libraryId: "lib1", relPath: "Backup/S04E09.mkv", size: 900 };
+    const { controller, calls, advance } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      buildBaseline: stillACopyOf(winner),
+      diffScanRoot: async () => ({
+        ...copyDiff({ primaryOnDisk: false }),
+        seenKeys: new Set([COPY_KEY, baselineKey(winner.relPath, 900)]),
+      }),
+    });
+    let last;
+    for (let i = 0; i < MAX_IMPORT_ATTEMPTS + 1; i++) {
+      last = await controller.maybeScan({ trigger: "visibility" });
+      advance(MIN_SCAN_INTERVAL_MS + 1000);
+    }
+    expect(calls.imports).toHaveLength(MAX_IMPORT_ATTEMPTS + 1);
+    expect(last.failedCount).toBe(0);
+  });
+
+  test("an entry that lands has its earlier strikes cleared", async () => {
+    const key = baselineKey("x/01.mkv", 5);
+    const row = { id: "row-x", libraryId: "lib1", relPath: "x/01.mkv", size: 5 };
+    // Verify after each import: missing, missing, landed, missing, missing, …
+    const landedOn = new Set([3]);
+    let imports = 0;
+    const { controller, calls, advance } = harness({
+      listRoots: async () => [root("lib1", 1)],
+      buildBaseline: async () => {
+        const landed = landedOn.has(imports);
+        return {
+          keys: new Set(landed ? [key] : []),
+          byRelPath: new Map(),
+          copyKeys: new Set(),
+          rowOf: new Map(landed ? [[key, row]] : []),
+          ids: new Set(),
+        };
+      },
+      diffScanRoot: async () => ({ ...emptyDiff(), newVideos: [video("x/01.mkv", 5)] }),
+      runImport: async (p) => {
+        imports++;
+        calls.imports.push(p);
+      },
+    });
+    for (let i = 0; i < 6; i++) {
+      await controller.maybeScan({ trigger: "visibility" });
+      advance(MIN_SCAN_INTERVAL_MS + 1000);
+    }
+    // Without the reset, strikes 1, 2, (landed), 3 would give the key up
+    // after the fourth import.
+    expect(calls.imports).toHaveLength(6);
+  });
+});
+
 // ---- preemption (D2) ------------------------------------------------------
 
 describe("yieldToManual", () => {

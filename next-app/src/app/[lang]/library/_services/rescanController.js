@@ -18,21 +18,28 @@
 //     watch (observer, 10s tier) ─────────┼─► guards: FSA ∧ !running ∧ import idle ∧ throttle
 //     deferred-retry (65s timer) ─────────┤      │
 //     periodic (120s, hook arms it only ──┘      ▼
-//       when observer unsupported)         roots (lastSeenAt DESC, isSameEntry dedupe)
-//                                                │ per root: probe → diffScanRoot
-//                                                │   → filter failedKeys (< 3 attempts)
+//       when observer unsupported)         roots (lastSeenAt DESC)
+//                                                │ phase 1a: probe; group records of the
+//                                                │   same directory (isSameEntry)
+//                                                │ phase 1b: diffScanRoot per directory
+//                                                │   → onDisk: libraryId → keys found
 //                                                ▼
-//                                          markSuperseded → processFiles
-//                                                → runImport(root's persisted libraryId)
+//                                          phase 2, per directory: new videos
+//                                                + copies whose row's file is not on disk
+//                                                + same paths whose row's folder lost them
+//                                                → filter failedKeys (< 3 attempts)
+//                                                → markSuperseded → processFiles
+//                                                → runImport(record's libraryId, onDisk)
 //                                                ▼
-//                                          verify vs fresh baseline → attempts++ on miss
+//                                          verify vs fresh baseline → attempts++ on miss;
+//                                                landed bytes seen before = relinked, else new
 //                                                → onScanComplete
 //
 //   bounce (watch/deferred-retry only): host-deferred / busy / import-busy /
 //     throttled → re-arm the 65s timer so the chain outlives the bounce
 //   quiet-period deferrals found → arm the 65s timer
 
-import { baselineKey, QUIET_PERIOD_MS } from "./rescanService.js";
+import { baselineKey, isGone, isOnDisk, QUIET_PERIOD_MS } from "./rescanService.js";
 
 /** Minimum gap between automatic scans. Manual rescans bypass this. */
 export const MIN_SCAN_INTERVAL_MS = 60_000;
@@ -85,11 +92,11 @@ export const MAX_IMPORT_ATTEMPTS = 3;
  *   listRoots: () => Promise<any[]>,
  *   probeRoot: (handle: any) => Promise<string>,
  *   isSameEntry: (a: any, b: any) => Promise<boolean>,
- *   buildBaseline: () => Promise<{keys: Set<string>, byRelPath: Map<string, any[]>}>,
- *   diffScanRoot: (p: {handle: any, baseline: any, now: number}) => Promise<any>,
- *   markSuperseded: (candidates: any[], now: number) => Promise<void>,
+ *   buildBaseline: () => Promise<import('./rescanService.js').Baseline>,
+ *   diffScanRoot: (p: {handle: any, baseline: any, now: number, libraryIds: Set<string>}) => Promise<any>,
+ *   markSuperseded: (candidates: any[], now: number, libraryIds: Set<string>) => Promise<void>,
  *   processFiles: (files: File[], opts: {pathMap: Map<File, string>}) => {files: any[]},
- *   runImport: (p: {items: any[], libraryId: string}) => Promise<void>,
+ *   runImport: (p: {items: any[], libraryId: string, onDisk: Map<string, Set<string>>}) => Promise<void>,
  *   getImportStatus: () => string,
  *   onBeforeSilentRun: () => void,
  *   onScanComplete: (result: any) => void,
@@ -146,15 +153,56 @@ export function createRescanController(deps) {
     return n;
   }
 
-  async function isDuplicateOf(scannedHandles, handle) {
-    for (const seen of scannedHandles) {
+  /**
+   * Check the scan's import attempts against a fresh baseline.
+   *
+   * An ordinary entry landed when its path is now known — as a row's recorded
+   * path or as a listed copy. A takeover landed when the row holding its
+   * bytes now points at a file that is on disk: usually the takeover itself,
+   * or, when several copies raced for one row, whichever won (the rest then
+   * correctly sit in the row's copies). Whatever did not land takes one more
+   * strike on its attempt counter; whatever did has its strikes cleared.
+   *
+   * Landed entries whose bytes the library held before this scan are
+   * relinks (moved, renamed, another copy); the rest are new, counted per
+   * row so that two paths of one new file are one new episode.
+   *
+   * @param {Array<{ key: string, takeover: boolean }>} attempted
+   * @param {{ ids?: Set<string> }} before  the baseline the scan started from
+   * @param {Map<string, Set<string>>} onDisk  what this pass found, per library
+   * @returns {Promise<{ newCount: number, relinkedCount: number }>}
+   */
+  async function settleAttempts(attempted, before, onDisk) {
+    if (!attempted.length) return { newCount: 0, relinkedCount: 0 };
+    const after = await deps.buildBaseline();
+    const newIds = new Set();
+    let relinkedCount = 0;
+    for (const { key, takeover } of attempted) {
+      const row = after.rowOf?.get(key);
+      const landed = takeover
+        ? row !== undefined && isOnDisk(onDisk, row, row.size)
+        : after.keys.has(key) || Boolean(after.copyKeys?.has(key));
+      if (!landed) {
+        failedKeys.set(key, (failedKeys.get(key) ?? 0) + 1);
+        continue;
+      }
+      failedKeys.delete(key);
+      if (row && before.ids?.has(row.id)) relinkedCount++;
+      else newIds.add(row?.id ?? key);
+    }
+    return { newCount: newIds.size, relinkedCount };
+  }
+
+  /** The probed group whose directory is the same entry as `handle`, if any. */
+  async function findGroup(groups, handle) {
+    for (const group of groups) {
       try {
-        if (await deps.isSameEntry(seen, handle)) return true;
+        if (await deps.isSameEntry(group.rootRecord.handle, handle)) return group;
       } catch {
         // isSameEntry unsupported/failed → conservatively treat as different.
       }
     }
-    return false;
+    return null;
   }
 
   async function doScan(trigger) {
@@ -170,12 +218,14 @@ export function createRescanController(deps) {
     );
     const baseline = await deps.buildBaseline();
 
-    const scannedHandles = [];
-    const attemptedKeys = [];
     let skippedRoots = 0;
     let deferredCount = 0;
-    let silentRunStarted = false;
 
+    // Phase 1a — probe every root, and group records that point at the same
+    // directory (a folder added more than once). Each group is read once,
+    // under its freshest record, and all of its libraryIds share what was
+    // found there.
+    const groups = [];
     for (const rootRecord of sorted) {
       if (cancelRequested) break;
       try {
@@ -184,17 +234,63 @@ export function createRescanController(deps) {
           skippedRoots++;
           continue;
         }
-        if (await isDuplicateOf(scannedHandles, rootRecord.handle)) continue;
-        scannedHandles.push(rootRecord.handle);
+        const group = await findGroup(groups, rootRecord.handle);
+        if (group) group.libraryIds.add(rootRecord.libraryId);
+        else groups.push({ rootRecord, libraryIds: new Set([rootRecord.libraryId]) });
+      } catch {
+        // Per-root isolation: an unplugged volume / revoked grant mid-scan
+        // must neither kill the pass nor log (the /library e2e specs assert
+        // ZERO console errors). Surfaced via refreshHandles below instead.
+        skippedRoots++;
+      }
+    }
 
+    // Phase 1b — read every directory before importing anything. Whether a
+    // known file's recorded location still holds it decides between a second
+    // copy and a moved file, and the two can sit under different roots.
+    const scanned = [];
+    /** @type {Map<string, Set<string>>} */
+    const onDisk = new Map();
+    for (const group of groups) {
+      if (cancelRequested) break;
+      try {
         const diff = await deps.diffScanRoot({
-          handle: rootRecord.handle,
+          handle: group.rootRecord.handle,
           baseline,
           now: deps.now(),
+          libraryIds: group.libraryIds,
         });
         deferredCount += diff.deferredCount;
+        const seen = diff.seenKeys ?? new Set();
+        for (const libraryId of group.libraryIds) onDisk.set(libraryId, seen);
+        scanned.push({ ...group, diff });
+      } catch {
+        skippedRoots++;
+      }
+    }
 
-        const fresh = diff.newVideos.filter(
+    // Phase 2 — import, folder by folder.
+    const attempted = [];
+    let silentRunStarted = false;
+    for (const { rootRecord, libraryIds, diff } of scanned) {
+      if (cancelRequested) break;
+      try {
+        const takeovers = new Set([
+          // A listed copy takes over unless the row's recorded file is known
+          // to be on disk. An unread root counts as not there, so a copy can
+          // stand in while the original's drive is unplugged.
+          ...(diff.copyHits ?? [])
+            .filter((hit) => !isOnDisk(onDisk, hit.row, hit.row.size))
+            .map((hit) => hit.entry),
+          // The same path under another folder takes over only once that
+          // folder was read and no longer holds the file. The global baseline
+          // already counts these as known; acting on "unread" here would
+          // re-hash every folder still registered under a stale record.
+          ...(diff.foreignHits ?? [])
+            .filter((hit) => hit.owners.every((row) => isGone(onDisk, row, row.size)))
+            .map((hit) => hit.entry),
+        ]);
+        const fresh = [...diff.newVideos, ...takeovers].filter(
           (v) => (failedKeys.get(entryKey(v)) ?? 0) < MAX_IMPORT_ATTEMPTS,
         );
         if (!fresh.length) continue;
@@ -205,7 +301,7 @@ export function createRescanController(deps) {
           silentRunStarted = true;
         }
         if (diff.supersededCandidates.length) {
-          await deps.markSuperseded(diff.supersededCandidates, deps.now());
+          await deps.markSuperseded(diff.supersededCandidates, deps.now(), libraryIds);
         }
 
         const entries = [...fresh, ...diff.subtitles];
@@ -214,27 +310,18 @@ export function createRescanController(deps) {
           entries.map((e) => e.file),
           { pathMap },
         );
-        await deps.runImport({ items, libraryId: rootRecord.libraryId });
-        attemptedKeys.push(...fresh.map(entryKey));
+        await deps.runImport({ items, libraryId: rootRecord.libraryId, onDisk });
+        attempted.push(
+          ...fresh.map((v) => ({ key: entryKey(v), takeover: takeovers.has(v) })),
+        );
       } catch {
-        // Per-root isolation: an unplugged volume / revoked grant mid-scan
-        // must neither kill the pass nor log (the /library e2e specs assert
-        // ZERO console errors). Surfaced via refreshHandles below instead.
+        // Same isolation as phase 1: a root failing mid-import is a skipped
+        // root, not a failed scan.
         skippedRoots++;
       }
     }
 
-    // Verify which attempted entries actually landed: anything still missing
-    // from a fresh baseline failed inside the pipeline → one more strike on
-    // its attempt counter.
-    let newCount = 0;
-    if (attemptedKeys.length) {
-      const after = await deps.buildBaseline();
-      for (const key of attemptedKeys) {
-        if (after.keys.has(key)) newCount++;
-        else failedKeys.set(key, (failedKeys.get(key) ?? 0) + 1);
-      }
-    }
+    const { newCount, relinkedCount } = await settleAttempts(attempted, baseline, onDisk);
 
     if (skippedRoots > 0) {
       try {
@@ -248,6 +335,7 @@ export function createRescanController(deps) {
       outcome: "scanned",
       trigger,
       newCount,
+      relinkedCount,
       deferredCount,
       skippedRoots,
       failedCount: exhaustedKeyCount(),
