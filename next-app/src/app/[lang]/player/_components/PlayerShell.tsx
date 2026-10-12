@@ -97,7 +97,6 @@ import { VideoPlayer } from "./VideoPlayer"; // eslint-disable-line @typescript-
 // Subagent B's player components
 import { EpisodeFileList } from "./EpisodeFileList";
 import { EpisodeNav } from "./EpisodeNav";
-import { EpisodeSidebar } from "./EpisodeSidebar";
 import { MatchProgress } from "./MatchProgress";
 import { DropZone } from "./DropZone";
 
@@ -109,26 +108,6 @@ import { HeatmapTuner } from "./HeatmapTuner";
 
 const FADE_UP_CSS = `@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`;
 
-/**
- * The playing view's grid. The player is sized to fit the window — width is
- * capped at what 16:9 allows for the height left under the nav bar and the
- * header — and the episode list beside it takes the player's height. Below
- * 1100px the list moves under the player as a row of chips.
- *
- * In a <style> block rather than inline styles only because inline styles
- * cannot hold a media query.
- */
-const PLAY_LAYOUT_CSS = `
-.ag-play-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:stretch;max-width:1680px;margin:0 auto}
-.ag-play-main{min-width:0}
-.ag-play-video{width:min(100%,calc((100vh - var(--nav-h) - 128px) * 16 / 9));margin:0 auto}
-.ag-play-side{position:relative}
-.ag-play-chips{display:none}
-@media (max-width:1100px){
-  .ag-play-grid{grid-template-columns:minmax(0,1fr)}
-  .ag-play-side{display:none}
-  .ag-play-chips{display:block}
-}`;
 const fadeUp: CSSProperties = {
   animation: "fadeUp 300ms cubic-bezier(0.4,0,0.2,1) both",
 };
@@ -252,7 +231,7 @@ const s = {
     gridTemplateColumns: "auto 1fr auto",
     alignItems: "center",
     gap: 20,
-    maxWidth: 1680,
+    maxWidth: 1400,
     margin: "0 auto",
     padding: "14px 2px 14px",
   } as CSSProperties,
@@ -307,7 +286,14 @@ const s = {
     gap: 10,
     flexShrink: 0,
   } as CSSProperties,
-  playerWrap: { maxWidth: 1680, margin: "0 auto" } as CSSProperties,
+  playerWrap: { maxWidth: 1400, margin: "0 auto" } as CSSProperties,
+  // The player fits the window: its width is capped at what 16:9 allows for
+  // the height left under the nav bar, the header and the episode chips, so
+  // the controls and the chips are on screen without scrolling.
+  playerFit: {
+    width: "min(100%, calc((100vh - var(--nav-h) - 160px) * 16 / 9))",
+    margin: "0 auto",
+  } as CSSProperties,
   errorBox: {
     maxWidth: 600,
     margin: "64px auto",
@@ -1483,7 +1469,6 @@ function PlayerShellInner() {
       {/* PLAYING */}
       {uiPhase === "playing" && (
         <div style={fadeUp}>
-          <style>{PLAY_LAYOUT_CSS}</style>
           <header style={s.playHeader}>
             <HudBackButton
               onClick={handleBackToList}
@@ -1520,55 +1505,37 @@ function PlayerShellInner() {
             </div>
           </header>
 
-          <div className="ag-play-grid">
-            <div className="ag-play-main">
-              <div className="ag-play-video">
-                <PlayerHudFrame
-                  videoUrl={videoUrl}
-                  danmakuList={danmakuList}
-                  subtitles={subtitles}
-                  onEnded={handleVideoEnded}
-                  onPlaybackError={handlePlaybackError}
-                  progressKey={progressKey}
-                  resumeAt={resumeAt}
-                  onProgressTick={handleProgressTick}
-                  onWatchTick={handleTick}
-                />
-              </div>
-              {/* Narrow windows: the list collapses to the chip row under
-                  the player. Display numbers on the library path, so the
-                  list and the header agree with the chip the user clicked in
-                  the library; the drop-zone path has no series to normalise
-                  against and stays on the numbers parsed from the files. */}
-              <div className="ag-play-chips">
-                <EpisodeNav
-                  episodes={locationSeriesId ? episodeNav.numbers : episodes}
-                  currentEpisode={locationSeriesId ? playingDisplayEp : playingEp}
-                  onSelect={
-                    locationSeriesId
-                      ? handleLibraryEpisodeSelectByDisplay
-                      : handleEpisodeSwitch
-                  }
-                />
-              </div>
-            </div>
-            <aside className="ag-play-side">
-              <EpisodeSidebar
-                episodes={locationSeriesId ? episodeNav.numbers : episodes}
-                currentEpisode={locationSeriesId ? playingDisplayEp : playingEp}
-                onSelect={
-                  locationSeriesId
-                    ? handleLibraryEpisodeSelectByDisplay
-                    : handleEpisodeSwitch
-                }
-                titleOf={(ep) => {
-                  const raw = locationSeriesId
-                    ? (episodeNav.rawByDisplay.get(ep) ?? ep)
-                    : ep;
-                  return matchResult?.episodeMap?.[raw]?.title;
-                }}
+          <div style={s.playerWrap}>
+            <div style={s.playerFit}>
+              <PlayerHudFrame
+                videoUrl={videoUrl}
+                danmakuList={danmakuList}
+                subtitles={subtitles}
+                onEnded={handleVideoEnded}
+                onPlaybackError={handlePlaybackError}
+                progressKey={progressKey}
+                resumeAt={resumeAt}
+                onProgressTick={handleProgressTick}
+                onWatchTick={handleTick}
               />
-            </aside>
+            </div>
+            {/* Display numbers on the library path, so the strip and the
+                header above agree with the chip the user clicked in the
+                library. The drop-zone path has no series to normalise
+                against and stays on the numbers parsed from the filenames. */}
+            <EpisodeNav
+              episodes={
+                locationSeriesId ? episodeNav.numbers : episodes
+              }
+              currentEpisode={
+                locationSeriesId ? playingDisplayEp : playingEp
+              }
+              onSelect={
+                locationSeriesId
+                  ? handleLibraryEpisodeSelectByDisplay
+                  : handleEpisodeSwitch
+              }
+            />
           </div>
         </div>
       )}

@@ -867,9 +867,6 @@ const en = {
     epSuffix: 'eps',
     // page.tsx skeleton
     loadingPlayer: 'Loading player…',
-    // EpisodeSidebar
-    episodeList: 'Episodes',
-    episodeTotal: '{{n}} episodes',
     // SubtitlePanel
     subs: {
       button: 'Subtitles',

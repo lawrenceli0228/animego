@@ -922,9 +922,6 @@ const zhHant = {
     epSuffix: '集',
     // page.tsx skeleton
     loadingPlayer: '正在載入播放器…',
-    // EpisodeSidebar
-    episodeList: '選集',
-    episodeTotal: '共 {{n}} 集',
     // SubtitlePanel
     subs: {
       button: '字幕',
