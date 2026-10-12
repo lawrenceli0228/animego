@@ -7,6 +7,8 @@ import { ensurePermission } from '@/lib/library/handles/permissionGate.js';
 import { makeFileHandleStore } from '@/lib/library/handles/fileHandleStore.js';
 import { probeRootStatus } from '@/lib/library/handles/probeRoot.js';
 import { pickLargestSameExt } from '@/lib/library/enumerator.js';
+import { listSubtitlesNear as listNear } from '@/lib/subtitles/listNearby';
+
 
 /**
  * The picker rejects with AbortError when the user dismisses it. Every browser
@@ -45,6 +47,7 @@ function isAbortError(err) {
  *   reauthorize(libraryId: string): Promise<void>,
  *   dropFolder(id: string): Promise<void>,
  *   selectFileByName(libraryId: string, relPath: string): Promise<File|null>,
+ *   listSubtitlesNear(libraryId: string, relPath: string): Promise<{ file: File, relPath: string }[]>,
  *   refresh(): Promise<void>,
  * }}
  */
@@ -228,7 +231,31 @@ export function useFileHandles({ db }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { status, roots, libraryStatus, pickFolder, reauthorize, dropFolder, selectFileByName, refresh };
+  /**
+   * Subtitle files in the folder `relPath` sits in, and in the folders
+   * directly inside it (`Subs/`, `SC/`, `字幕/`), for the player to match
+   * against the video at play time.
+   *
+   * The library import walks subtitles but never stores them — rescanService
+   * says playback resolves them "from the folder at play time" — and until
+   * this existed, nothing did: a library episode played with no sidecar ever.
+   *
+   * Reached right after selectFileByName for the same video, so the root's
+   * permission is already granted. Returns [] on any failure — a folder that
+   * cannot be listed leaves the video playable. See lib/subtitles/listNearby.
+   */
+  const listSubtitlesNear = useCallback(async (libraryId, relPath) => {
+    try {
+      const rec = await getStore().findByLibrary(libraryId);
+      if (!rec) return [];
+      return await listNear(rec.handle, relPath);
+    } catch {
+      return [];
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return { status, roots, libraryStatus, pickFolder, reauthorize, dropFolder, selectFileByName, listSubtitlesNear, refresh };
 }
 
 export default useFileHandles;

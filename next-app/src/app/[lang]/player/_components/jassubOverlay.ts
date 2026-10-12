@@ -328,4 +328,161 @@ export async function destroyJassub(handle) {
   if (canvas?.parentNode) canvas.remove();
 }
 
+/**
+ * One ASS layer per player: the jassub instance over one <video>, kept for
+ * as long as that video lives, with its track, fonts and timing changed in
+ * place.
+ *
+ * Why not mount per track. The player now switches tracks (简体 → 繁體),
+ * receives a partial track and then the whole one, and moves the timing on
+ * every press of the offset buttons. Destroying and re-creating jassub for
+ * each of those re-ran WASM init, font loading and the first paint every
+ * time — a visible blank between two lines that were both ready.
+ *
+ * Every setter only records what is wanted and then reconciles, so calls
+ * that arrive while the first mount is still awaiting assets land on the
+ * instance once it exists, in the order the caller made them.
+ *
+ * `onShowing(true)` fires once libass is actually rendering — the caller
+ * hides the plaintext VTT layer then and not before — and `onShowing(false)`
+ * whenever the layer stops (no ASS content, or the mount failed).
+ *
+ * @param {HTMLVideoElement} video
+ * @param {{ onShowing?: (showing: boolean) => void }} [opts]
+ */
+export function createAssLayer(video, opts = {}) {
+  let handle = null;
+  let mounting = null;
+  let destroyed = false;
+  let wantContent = null;
+  let shownContent = null;
+  let wantFonts = [];
+  const sentFonts = new Set();
+  let wantOffset = 0;
+  let showing = false;
+
+  const setShowing = (v) => {
+    if (showing === v) return;
+    showing = v;
+    opts.onShowing?.(v);
+  };
+
+  const repaint = () => {
+    const inst = handle?.instance;
+    if (!inst) return;
+    inst
+      .manualRender({
+        mediaTime: video.currentTime || 0,
+        expectedDisplayTime: performance.now(),
+        width: video.videoWidth || 1920,
+        height: video.videoHeight || 1080,
+      })
+      .catch(() => {});
+  };
+
+  const apply = async () => {
+    if (destroyed) return;
+    if (!wantContent) {
+      setShowing(false);
+      if (handle) {
+        const h = handle;
+        handle = null;
+        shownContent = null;
+        sentFonts.clear();
+        await destroyJassub(h);
+      }
+      return;
+    }
+    if (!handle) {
+      if (mounting) return; // the mount below reconciles when it lands
+      const content = wantContent;
+      const fonts = wantFonts.slice();
+      mounting = mountJassub({ video, subContent: content, fonts });
+      const h = await mounting;
+      mounting = null;
+      if (destroyed) {
+        if (h) destroyJassub(h);
+        return;
+      }
+      if (!h) {
+        setShowing(false);
+        return;
+      }
+      handle = h;
+      shownContent = content;
+      fonts.forEach((f) => sentFonts.add(f));
+      handle.instance.timeOffset = -wantOffset;
+      setShowing(true);
+      // Anything asked for while the mount was in flight.
+      return apply();
+    }
+    // `renderer` is only assigned once the worker has initialised; until
+    // `ready` settles there is nothing to send a track or a font to.
+    const current = handle;
+    try {
+      await current.instance.ready;
+    } catch {
+      return;
+    }
+    if (destroyed || handle !== current) return;
+    const renderer = current.instance.renderer;
+    const newFonts = wantFonts.filter((f) => !sentFonts.has(f));
+    if (newFonts.length) {
+      newFonts.forEach((f) => sentFonts.add(f));
+      try {
+        await renderer.addFonts(newFonts);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[jassub] addFonts failed:', err);
+      }
+    }
+    if (shownContent !== wantContent) {
+      const content = wantContent;
+      try {
+        await renderer.setTrack(content);
+        shownContent = content;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[jassub] setTrack failed, remounting:', err);
+        const h = handle;
+        handle = null;
+        shownContent = null;
+        sentFonts.clear();
+        await destroyJassub(h);
+        return apply();
+      }
+    }
+    if (handle && handle.instance.timeOffset !== -wantOffset) handle.instance.timeOffset = -wantOffset;
+    setShowing(true);
+    repaint();
+  };
+
+  return {
+    /** Raw ASS script to show, or null to show none. */
+    setContent(content) {
+      wantContent = content || null;
+      apply();
+    },
+    /** Font files (MKV attachments). Each array element is sent once. */
+    setFonts(fonts) {
+      wantFonts = fonts ? [...fonts] : [];
+      if (handle) apply();
+    },
+    /** Seconds to show subtitles later (negative: earlier). */
+    setDelay(delaySec) {
+      wantOffset = delaySec || 0;
+      if (handle) {
+        handle.instance.timeOffset = -wantOffset;
+        repaint();
+      }
+    },
+    destroy() {
+      destroyed = true;
+      const h = handle;
+      handle = null;
+      if (h) destroyJassub(h);
+    },
+  };
+}
+
 export default mountJassub;

@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Artplayer from "artplayer";
 import type { Danmu } from "artplayer-plugin-danmuku";
 import { applyHeatmapPath } from "@/lib/heatmapPath";
-import { convertAssToVtt, convertSrtToVtt } from "@/lib/subtitleConvert";
-import { mountJassub, destroyJassub } from "./jassubOverlay";
+import { shiftVtt } from "@/lib/subtitles/vttShift";
+import { createAssLayer } from "./jassubOverlay";
+import { SubtitlePanel } from "./SubtitlePanel";
+import type { UseSubtitleTracksResult } from "../_hooks/useSubtitleTracks";
 import {
   DANMAKU_SPEED_STEPS,
   readDanmakuSpeed,
@@ -30,10 +33,9 @@ const SAVE_INTERVAL_MS = 5000;
 const RESTORE_MIN_SECONDS = 5;
 const RESTORE_TAIL_MARGIN = 10;
 
-// Subtitle font size in px. Range used for the Artplayer slider.
+// Subtitle font size in px. The range the 字幕 panel's slider allows.
 const SUBTITLE_SIZE_MIN = 14;
 const SUBTITLE_SIZE_MAX = 48;
-const SUBTITLE_SIZE_STEP = 2;
 const SUBTITLE_SIZE_DEFAULT = 20;
 const SUBTITLE_SIZE_KEY = "animego:subtitleFontSize";
 
@@ -41,7 +43,6 @@ const SUBTITLE_SIZE_KEY = "animego:subtitleFontSize";
 // sit in the bottom ~50px, so the default lifts subtitles above them.
 const SUBTITLE_OFFSET_MIN = 10;
 const SUBTITLE_OFFSET_MAX = 200;
-const SUBTITLE_OFFSET_STEP = 5;
 const SUBTITLE_OFFSET_DEFAULT = 60;
 const SUBTITLE_OFFSET_KEY = "animego:subtitleOffset";
 
@@ -210,6 +211,16 @@ function writeDanmakuVisible(v: boolean): void {
   }
 }
 
+/** Show or hide artplayer's plaintext subtitle layer. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function setVttVisible(art: any, visible: boolean): void {
+  try {
+    if (art?.subtitle) art.subtitle.show = visible;
+  } catch {
+    // older artplayer versions may not expose the show setter — ignore
+  }
+}
+
 function readProgress(key: string): number | null {
   try {
     const raw = localStorage.getItem(key);
@@ -241,11 +252,13 @@ function writeProgress(key: string, t: number): void {
 // untyped surface.
 export type DanmakuComment = Danmu;
 
-// Widened to `string | null | undefined` for cross-subagent parity (the
-// legacy JS path only checks `subtitleType !== 'ass'`). "ass" | "vtt" |
-// "srt" are the canonical values but consumers (PlayerHudFrame, etc.)
-// pass plain `string | null` — accept that without forcing a narrow.
-export type SubtitleType = string | null | undefined;
+/** Closed-captions glyph for the 字幕 control. */
+const SUBTITLE_ICON =
+  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">' +
+  '<rect x="3" y="5" width="18" height="14" rx="2.5"/>' +
+  '<path d="M10.5 10.2a2.2 2.2 0 1 0 0 3.6M16.5 10.2a2.2 2.2 0 1 0 0 3.6" stroke-linecap="round"/></svg>';
+
+const EMPTY_VTT = "WEBVTT\n\n";
 
 export interface PlaybackErrorInfo {
   kind: "decode" | "unknown";
@@ -256,9 +269,13 @@ export interface PlaybackErrorInfo {
 export interface VideoPlayerProps {
   videoUrl: string | null | undefined;
   danmakuList?: DanmakuComment[] | null;
-  subtitleUrl?: string | null;
-  subtitleType?: SubtitleType;
-  subtitleContent?: string | null;
+  /**
+   * The episode's subtitle tracks and the reader's choice among them
+   * (usePlaybackSession → useSubtitleTracks). VideoPlayer shows the active
+   * one — plaintext VTT always, libass on top when it is ASS — and renders
+   * the 字幕 panel that changes it.
+   */
+  subtitles?: UseSubtitleTracksResult | null;
   onEnded?: () => void;
   onPlaybackError?: (info: PlaybackErrorInfo) => void;
   progressKey?: string | null;
@@ -279,9 +296,7 @@ export interface VideoPlayerProps {
 export function VideoPlayer({
   videoUrl,
   danmakuList,
-  subtitleUrl,
-  subtitleType,
-  subtitleContent,
+  subtitles = null,
   onEnded,
   onPlaybackError,
   progressKey,
@@ -297,18 +312,41 @@ export function VideoPlayer({
   // a refactor).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const artRef = useRef<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const jassubRef = useRef<any>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const userSubtitleBlobRef = useRef<string | null>(null);
+  // One libass layer per artplayer instance (see createAssLayer).
+  const assLayerRef = useRef<ReturnType<typeof createAssLayer> | null>(null);
+  // The blob url of the VTT artplayer is showing; revoked when replaced.
+  const vttUrlRef = useRef<string | null>(null);
   // Flips to true once the async artplayer init completes. Effects that need
   // art.video (jassub mount, etc.) gate on this so they don't run before
   // artRef.current is populated.
   const [playerReady, setPlayerReady] = useState(false);
+  // artplayer's own player element: the portal target for the 字幕 panel,
+  // so the panel goes fullscreen with the video.
+  const [playerEl, setPlayerEl] = useState<HTMLElement | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  // Timing correction for the track on screen, in seconds (positive: later).
+  // Belongs to the episode it was set on: the next file may be timed
+  // correctly, and an offset carried over silently would mistime it. Kept
+  // across track switches within the episode. Keyed by the video url rather
+  // than reset in an effect, so the new episode never renders one frame with
+  // the old offset.
+  const [delayFor, setDelayFor] = useState<{ url: string | null | undefined; sec: number }>({
+    url: videoUrl,
+    sec: 0,
+  });
+  const subtitleDelay = delayFor.url === videoUrl ? delayFor.sec : 0;
+  const setSubtitleDelay = useCallback(
+    (sec: number) => setDelayFor({ url: videoUrl, sec }),
+    [videoUrl],
+  );
+  const [subtitleSize, setSubtitleSize] = useState(readSubtitleSize);
+  const [subtitlePosition, setSubtitlePosition] = useState(readSubtitleOffset);
+  // True while libass is drawing the active track; the VTT layer hides then.
+  const [assShowing, setAssShowing] = useState(false);
   const progressKeyRef = useRef(progressKey);
   const danmakuListRef = useRef(danmakuList);
-  const subtitleSizeRef = useRef(readSubtitleSize());
-  const subtitleOffsetRef = useRef(readSubtitleOffset());
+  const subtitleSizeRef = useRef(subtitleSize);
+  const subtitleOffsetRef = useRef(subtitlePosition);
   const playbackRateRef = useRef(readPlaybackRate());
   const danmakuVisibleRef = useRef(readDanmakuVisible());
   const danmakuSpeedRef = useRef(readDanmakuSpeed());
@@ -357,22 +395,18 @@ export function VideoPlayer({
     const initialRate = playbackRateRef.current;
     const initialDanmakuVisible = danmakuVisibleRef.current;
     const initialDanmakuSpeed = danmakuSpeedRef.current;
-    // Always wire VTT plaintext as the resilient base layer. When jassub
-    // mounts successfully on top, we hide the VTT div so they don't double.
-    // If jassub fails to load, VTT remains visible — user always sees
-    // *something*.
-    const subtitleConfig = subtitleUrl
-      ? {
-          url: subtitleUrl,
-          type: "vtt",
-          encoding: "utf-8",
-          style: {
-            color: "#fff",
-            fontSize: `${initialSize}px`,
-            bottom: `${initialOffset}px`,
-          },
-        }
-      : {};
+    // The VTT plaintext layer is always wired as the resilient base layer;
+    // the subtitle effects below give it a track once the player exists.
+    // When libass draws on top, the VTT div is hidden so the two don't
+    // double. If libass fails to load, VTT stays visible — the reader always
+    // sees *something*.
+    const subtitleConfig = {
+      style: {
+        color: "#fff",
+        fontSize: `${initialSize}px`,
+        bottom: `${initialOffset}px`,
+      },
+    };
 
     (async () => {
       // Dynamic import keeps artplayer-plugin-danmuku out of the entry chunk.
@@ -398,44 +432,6 @@ export function VideoPlayer({
         subtitle: subtitleConfig,
         setting: true,
         settings: [
-          {
-            html: t("player.subtitleSize"),
-            width: 220,
-            tooltip: `${initialSize}px`,
-            range: [
-              initialSize,
-              SUBTITLE_SIZE_MIN,
-              SUBTITLE_SIZE_MAX,
-              SUBTITLE_SIZE_STEP,
-            ],
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onChange(item: any) {
-              const v = Number(item.range[0]);
-              subtitleSizeRef.current = v;
-              writeSubtitleSize(v);
-              art.subtitle.style({ fontSize: `${v}px` });
-              return `${v}px`;
-            },
-          },
-          {
-            html: t("player.subtitlePosition"),
-            width: 220,
-            tooltip: `${initialOffset}px`,
-            range: [
-              initialOffset,
-              SUBTITLE_OFFSET_MIN,
-              SUBTITLE_OFFSET_MAX,
-              SUBTITLE_OFFSET_STEP,
-            ],
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onChange(item: any) {
-              const v = Number(item.range[0]);
-              subtitleOffsetRef.current = v;
-              writeSubtitleOffset(v);
-              art.subtitle.style({ bottom: `${v}px` });
-              return `${v}px`;
-            },
-          },
           {
             html: t("player.playbackSpeed"),
             tooltip: `${initialRate}x`,
@@ -468,14 +464,15 @@ export function VideoPlayer({
               return next;
             },
           },
+        ],
+        controls: [
           {
-            html: t("player.loadSubtitleFile"),
-            tooltip: t("player.subtitleFileTooltip"),
-            selector: [{ html: t("player.clickToSelect"), value: "pick" }],
-            onSelect() {
-              fileInputRef.current?.click();
-              return t("player.clickToSelect");
-            },
+            name: "subtitle-panel",
+            position: "right",
+            index: 25,
+            html: SUBTITLE_ICON,
+            tooltip: t("player.subs.button"),
+            click: () => setPanelOpen((open) => !open),
           },
         ],
         plugins: [
@@ -759,6 +756,10 @@ export function VideoPlayer({
         return;
       }
       artRef.current = art;
+      assLayerRef.current = createAssLayer(art.video, {
+        onShowing: (showing: boolean) => setAssShowing(showing),
+      });
+      setPlayerEl(art.template?.$player ?? null);
       setPlayerReady(true);
 
       // Expose for HeatmapTuner — dev-only, gated. Next 16 doesn't have
@@ -788,11 +789,11 @@ export function VideoPlayer({
       detachFlushListeners?.();
       detachFlushListeners = null;
       const inst = artRef.current || art;
-      // Tear down jassub before artplayer so its ResizeObserver / RVFC
+      // Tear down libass before artplayer so its ResizeObserver / RVFC
       // hooks don't fire against a destroyed video element.
-      const ji = jassubRef.current;
-      jassubRef.current = null;
-      if (ji) destroyJassub(ji);
+      assLayerRef.current?.destroy();
+      assLayerRef.current = null;
+      setAssShowing(false);
       if (!inst) return;
       // Save final position before teardown (episode switch or unmount)
       const key = progressKeyRef.current;
@@ -815,6 +816,11 @@ export function VideoPlayer({
       inst.destroy(false);
       artRef.current = null;
       setPlayerReady(false);
+      setPlayerEl(null);
+      if (vttUrlRef.current) {
+        URL.revokeObjectURL(vttUrlRef.current);
+        vttUrlRef.current = null;
+      }
       if (
         typeof window !== "undefined" &&
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -826,108 +832,88 @@ export function VideoPlayer({
     };
   }, [videoUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Patch subtitle dynamically without recreating player.
-  // Re-apply the current font size so episode switches don't reset it.
-  // Always switch (even when ASS is active) so the VTT layer is ready as
-  // a resilient fallback if jassub fails to mount.
+  const active = subtitles?.active ?? null;
+  const activeVtt = active?.supported ? active.vtt : null;
+  const activeAss = active?.supported && active.format === "ass" ? active.assContent : null;
+  const subtitleFonts = subtitles?.state.fonts;
+
+  // The plaintext layer: the active track's VTT, moved by the reader's
+  // timing correction, as a blob artplayer can load. Re-made when either
+  // changes; the url it replaces is revoked once the switch has happened.
   //
   // `playerReady` is in the deps because `artRef.current` is a ref, and a ref
-  // going from null to an instance does NOT re-run an effect. Subtitles for a
-  // sidecar file resolve asynchronously (read the file → convert → blob), so
-  // `subtitleUrl` can land in the window before line 674 assigns artRef —
-  // and since `subtitleUrl` never changes again for that episode, the early
-  // return above was permanent. The whole VTT layer silently went missing.
-  //
-  // Measured on production, not reasoned about: a sidecar .srt produced its
-  // `text/vtt` blob every time and the <track> src stayed empty, while the
-  // .ass beside it wired up fine — a bigger file down a slower converter,
-  // landing late enough to win the race. The jassub effect below never had
-  // this problem because it already gates on `playerReady`.
-  //
-  // Re-running once more when the flag flips is harmless: switching to the
-  // same url just re-attaches the same track.
+  // going from null to an instance does NOT re-run an effect. Subtitles
+  // resolve asynchronously (a sidecar read, an MKV scan), so the track can
+  // land before the player exists; without the flag it would never be shown.
   useEffect(() => {
     const art = artRef.current;
-    if (!art || !subtitleUrl) return;
-    art.subtitle.switch(subtitleUrl, {
-      type: "vtt",
-      encoding: "utf-8",
-      style: {
-        color: "#fff",
-        fontSize: `${subtitleSizeRef.current}px`,
-        bottom: `${subtitleOffsetRef.current}px`,
-      },
-    });
-  }, [subtitleUrl, playerReady]);
+    if (!art || !playerReady) return;
+    const text = activeVtt ? shiftVtt(activeVtt, subtitleDelay) : EMPTY_VTT;
+    const url = URL.createObjectURL(new Blob([text], { type: "text/vtt" }));
+    const previous = vttUrlRef.current;
+    vttUrlRef.current = url;
+    Promise.resolve(
+      art.subtitle.switch(url, {
+        type: "vtt",
+        encoding: "utf-8",
+        style: {
+          color: "#fff",
+          fontSize: `${subtitleSizeRef.current}px`,
+          bottom: `${subtitleOffsetRef.current}px`,
+        },
+      }),
+    )
+      .catch(() => {})
+      .finally(() => {
+        if (previous) URL.revokeObjectURL(previous);
+      });
+  }, [activeVtt, subtitleDelay, playerReady]);
 
-  // jassub lifecycle: mount when ASS content is available, tear down on
-  // change/unmount. Gates on playerReady so artRef.current.video is
-  // guaranteed populated. Destroy + recreate on content swap (cheap after
-  // first load — worker is hot) sidesteps coupling to jassub's internal
-  // renderer.setTrack Remote API.
-  //
-  // VTT fallback handshake: artplayer's VTT subtitle stays mounted as the
-  // resilient base layer. When jassub mounts successfully, hide the VTT
-  // div so styled ASS doesn't get doubled by plaintext. When jassub
-  // tears down (or fails), restore VTT visibility.
+  // Plaintext shows when there is a track and libass is not drawing it.
   useEffect(() => {
     if (!playerReady) return;
+    setVttVisible(artRef.current, Boolean(activeVtt) && !assShowing);
+  }, [activeVtt, assShowing, playerReady]);
 
-    const art = artRef.current;
-    let cancelled = false;
+  // The libass layer: same instance for the life of this artplayer, track,
+  // fonts and timing changed in place (createAssLayer).
+  useEffect(() => {
+    if (!playerReady) return;
+    assLayerRef.current?.setContent(activeAss ?? null);
+  }, [activeAss, playerReady]);
 
-    const setVttVisible = (visible: boolean) => {
-      const sub = art?.subtitle;
-      if (!sub) return;
-      try {
-        sub.show = visible;
-      } catch {
-        // older artplayer versions may not expose the show setter — ignore
-      }
-    };
+  useEffect(() => {
+    if (!playerReady) return;
+    assLayerRef.current?.setFonts(subtitleFonts ?? []);
+  }, [subtitleFonts, playerReady]);
 
-    const tearDown = async () => {
-      const inst = jassubRef.current;
-      jassubRef.current = null;
-      if (inst) await destroyJassub(inst);
-      setVttVisible(true);
-    };
+  useEffect(() => {
+    if (!playerReady) return;
+    assLayerRef.current?.setDelay(subtitleDelay);
+  }, [subtitleDelay, playerReady]);
 
-    if (subtitleType !== "ass" || !subtitleContent) {
-      tearDown();
-      return;
-    }
+  const handleSizeChange = useCallback((px: number) => {
+    subtitleSizeRef.current = px;
+    writeSubtitleSize(px);
+    setSubtitleSize(px);
+    artRef.current?.subtitle?.style({ fontSize: `${px}px` });
+  }, []);
 
-    const video = art?.video;
-    if (!video) return;
+  const handlePositionChange = useCallback((px: number) => {
+    subtitleOffsetRef.current = px;
+    writeSubtitleOffset(px);
+    setSubtitlePosition(px);
+    artRef.current?.subtitle?.style({ bottom: `${px}px` });
+  }, []);
 
-    tearDown()
-      .then(() =>
-        cancelled
-          ? null
-          : // fonts is wired by Subagent B's usePlaybackSession (CJK font
-            // pre-load on user gesture) — left undefined here for the
-            // VideoPlayer-only entry point. jassubOverlay handles the
-            // undefined case internally.
-            mountJassub({ video, subContent: subtitleContent, fonts: undefined }),
-      )
-      .then((inst) => {
-        if (cancelled) {
-          if (inst) destroyJassub(inst);
-          return;
-        }
-        jassubRef.current = inst;
-        // Hide VTT only when jassub is actually rendering. If mountJassub
-        // returned null (asset load failed, ctor threw), keep VTT visible
-        // so the user still gets plaintext subtitles.
-        if (inst) setVttVisible(false);
-      });
+  const closePanel = useCallback(() => setPanelOpen(false), []);
 
-    return () => {
-      cancelled = true;
-      tearDown();
-    };
-  }, [playerReady, subtitleType, subtitleContent]);
+  // The control reads as "on" while a track is showing.
+  useEffect(() => {
+    const el = playerEl?.querySelector(".art-control-subtitle-panel") as HTMLElement | null;
+    if (!el) return;
+    el.style.color = subtitles?.state.activeId ? "oklch(78% 0.15 200)" : "";
+  }, [playerEl, subtitles?.state.activeId]);
 
   useEffect(() => {
     const danmuku = artRef.current?.plugins?.artplayerPluginDanmuku;
@@ -937,71 +923,6 @@ export function VideoPlayer({
     danmuku.config({ danmuku: danmakuList || [] });
     danmuku.load();
   }, [danmakuList]);
-
-  // Manual subtitle file pick — invoked from artplayer's "加载字幕文件"
-  // settings entry. Routes by extension:
-  //   .vtt        → load directly
-  //   .srt        → swap `,` for `.` in timestamps + add WEBVTT header
-  //   .ass / .ssa → convert via subtitleConvert.convertAssToVtt (plain
-  //                 text only — typesetting / colors / animations are
-  //                 stripped because artplayer's renderer is VTT-only;
-  //                 full ASS fidelity needs libass-wasm)
-  async function handleSubtitleFilePick(
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) {
-    const input = e.target;
-    const file = input.files?.[0];
-    input.value = "";
-    if (!file) return;
-    const art = artRef.current;
-    if (!art) return;
-
-    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || "").toLowerCase();
-    let url: string;
-    try {
-      if (ext === "vtt") {
-        url = URL.createObjectURL(file);
-      } else if (ext === "srt") {
-        const text = await file.text();
-        url = URL.createObjectURL(
-          new Blob([convertSrtToVtt(text)], { type: "text/vtt" }),
-        );
-      } else if (ext === "ass" || ext === "ssa") {
-        const text = await file.text();
-        url = URL.createObjectURL(
-          new Blob([convertAssToVtt(text)], { type: "text/vtt" }),
-        );
-      } else {
-        // Unknown extension — try as VTT, may fail silently if not parseable.
-        url = URL.createObjectURL(file);
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn("[VideoPlayer] subtitle file load failed:", err);
-      art.notice.show = `${t("player.subtitleLoadFailed")}${(err as Error)?.message || String(err)}`;
-      return;
-    }
-
-    if (userSubtitleBlobRef.current) {
-      try {
-        URL.revokeObjectURL(userSubtitleBlobRef.current);
-      } catch {
-        /* ignore */
-      }
-    }
-    userSubtitleBlobRef.current = url;
-
-    art.subtitle.switch(url, {
-      type: "vtt",
-      encoding: "utf-8",
-      style: {
-        color: "#fff",
-        fontSize: `${subtitleSizeRef.current}px`,
-        bottom: `${subtitleOffsetRef.current}px`,
-      },
-    });
-    art.notice.show = `${t("player.subtitleLoaded")}${file.name}`;
-  }
 
   return (
     <div style={s.wrapper}>
@@ -1031,14 +952,24 @@ export function VideoPlayer({
         </filter>
       </svg>
       <div ref={containerRef} style={s.player} />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".vtt,.srt,.ass,.ssa"
-        style={{ display: "none" }}
-        onChange={handleSubtitleFilePick}
-        data-testid="video-player-subtitle-file-input"
-      />
+      {playerEl &&
+        subtitles &&
+        createPortal(
+          <SubtitlePanel
+            open={panelOpen}
+            onClose={closePanel}
+            state={subtitles.state}
+            onSelect={subtitles.select}
+            onLoadFile={subtitles.addFile}
+            delay={subtitleDelay}
+            onDelayChange={setSubtitleDelay}
+            size={subtitleSize}
+            onSizeChange={handleSizeChange}
+            position={subtitlePosition}
+            onPositionChange={handlePositionChange}
+          />,
+          playerEl,
+        )}
     </div>
   );
 }

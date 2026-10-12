@@ -4,8 +4,13 @@
 // drop-zone files into parsed EpisodeItem[] shape that the import pipeline
 // expects. Maintains stable blob URLs per file id so switching episodes
 // does not revoke other files' URLs.
+//
+// Each video carries every subtitle file that belongs to it
+// (lib/subtitles/sidecars.ts), not the one that sorted first: a release with
+// `.sc.ass` and `.tc.ass` beside each episode offers both in the player.
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { dirOf, matchSidecars, sidecarDescriptor } from "@/lib/subtitles/sidecars";
 // JS module — local ported copy of client/src/utils/episodeParser.js.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — JSDoc-only JS module
@@ -22,7 +27,11 @@ export interface SubtitleMatch {
   file: File;
   fileName: string;
   episode: number | null;
-  type: string;
+  type: string | null;
+  /** Folder relative to the dropped root, when the browser said. */
+  dir: string | null;
+  /** What the name says beyond the video's own name ("sc", "[简体]"). */
+  descriptor?: string;
 }
 
 export interface ParsedEpisodeItem {
@@ -31,7 +40,7 @@ export interface ParsedEpisodeItem {
   fileName: string;
   relativePath: string;
   episode: number | null;
-  subtitle: SubtitleMatch | null;
+  subtitles: SubtitleMatch[];
   parsedTitle?: string;
   parsedNumber?: number;
   parsedKind?: string;
@@ -70,21 +79,13 @@ export interface UseVideoFilesResult {
     options?: ProcessFilesOptions,
   ) => { files: ParsedEpisodeItem[]; keyword: string };
   getVideoUrl: (file: File) => string;
-  getSubtitleUrl: (file: File) => string;
   clear: () => void;
 }
 
-const SUB_PRIORITY: Record<string, number> = { ass: 0, ssa: 1, srt: 2, vtt: 3 };
-function subPriority(type: string): number {
-  return SUB_PRIORITY[type] ?? 9;
-}
-
-function findSubByName(
-  videoName: string,
-  subs: SubtitleMatch[],
-): SubtitleMatch | null {
-  const base = videoName.replace(/\.[^.]+$/, "");
-  return subs.find((s) => s.fileName.replace(/\.[^.]+$/, "") === base) || null;
+/** webkitRelativePath is a non-standard File extension. */
+function relPathOf(file: File, pathMap?: Map<File, string>): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return pathMap?.get?.(file) || ((file as any).webkitRelativePath as string) || null;
 }
 
 function makeFileId(file: File): string {
@@ -111,7 +112,6 @@ export function useVideoFiles(): UseVideoFilesResult {
   const [videoFiles, setVideoFiles] = useState<ParsedEpisodeItem[]>([]);
   const [keyword, setKeyword] = useState("");
   const videoBlobMap = useRef(new Map<string, string>());
-  const subBlobMap = useRef(new Map<string, string>());
 
   const processFiles = useCallback(
     (
@@ -125,28 +125,25 @@ export function useVideoFiles(): UseVideoFilesResult {
 
       const subs: SubtitleMatch[] = allFiles
         .filter((f) => isSubtitleFile(f.name))
-        .map((f) => ({
-          file: f,
-          fileName: f.name,
-          episode: parseEpisodeNumber(f.name),
-          type: getSubtitleType(f.name),
-        }));
+        .map((f) => {
+          const rel = relPathOf(f, pathMap);
+          return {
+            file: f,
+            fileName: f.name,
+            episode: parseEpisodeNumber(f.name),
+            type: getSubtitleType(f.name),
+            dir: rel ? dirOf(rel) : null,
+          };
+        });
 
       const parsed: ParsedEpisodeItem[] = videos.map((file) => {
         const episode = parseEpisodeNumber(file.name);
         const meta = parseEpisodeMeta(file.name);
-        const matchedSub =
-          episode != null
-            ? subs
-                .filter((s) => s.episode === episode)
-                .sort((a, b) => subPriority(a.type) - subPriority(b.type))[0]
-            : findSubByName(file.name, subs);
-        const overridePath = pathMap?.get?.(file);
-        // webkitRelativePath is a non-standard File extension; cast for TS.
-        const overrideRel = overridePath ||
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ((file as any).webkitRelativePath as string) ||
-          file.name;
+        const overrideRel = relPathOf(file, pathMap) || file.name;
+        const matched = matchSidecars(
+          { fileName: file.name, episode, dir: relPathOf(file, pathMap) ? dirOf(overrideRel) : null },
+          subs,
+        ).map((sub) => ({ ...sub, descriptor: sidecarDescriptor(file.name, sub.fileName) }));
         const segments = overrideRel.split("/").filter(Boolean);
         const folderTitle =
           segments.length > 1 ? parseAnimeKeyword(segments[0]) : null;
@@ -156,7 +153,7 @@ export function useVideoFiles(): UseVideoFilesResult {
           fileName: file.name,
           relativePath: overrideRel,
           episode,
-          subtitle: matchedSub || null,
+          subtitles: matched,
           parsedTitle: folderTitle || meta.title,
           parsedNumber: meta.number,
           parsedKind: meta.kind,
@@ -182,8 +179,6 @@ export function useVideoFiles(): UseVideoFilesResult {
       if (mergeMode === "replace") {
         videoBlobMap.current.forEach((url) => URL.revokeObjectURL(url));
         videoBlobMap.current.clear();
-        subBlobMap.current.forEach((url) => URL.revokeObjectURL(url));
-        subBlobMap.current.clear();
       }
 
       setVideoFiles((prev) => {
@@ -210,37 +205,23 @@ export function useVideoFiles(): UseVideoFilesResult {
     return videoBlobMap.current.get(id) as string;
   }, []);
 
-  const getSubtitleUrl = useCallback((file: File): string => {
-    const id = makeFileId(file);
-    if (!subBlobMap.current.has(id)) {
-      subBlobMap.current.set(id, URL.createObjectURL(file));
-    }
-    return subBlobMap.current.get(id) as string;
-  }, []);
-
   const clear = useCallback(() => {
     videoBlobMap.current.forEach((url) => URL.revokeObjectURL(url));
     videoBlobMap.current.clear();
-    subBlobMap.current.forEach((url) => URL.revokeObjectURL(url));
-    subBlobMap.current.clear();
     setVideoFiles([]);
     setKeyword("");
   }, []);
 
-  useEffect(
-    () => () => {
-      videoBlobMap.current.forEach((url) => URL.revokeObjectURL(url));
-      subBlobMap.current.forEach((url) => URL.revokeObjectURL(url));
-    },
-    [],
-  );
+  useEffect(() => {
+    const videos = videoBlobMap.current;
+    return () => videos.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
 
   return {
     videoFiles,
     keyword,
     processFiles,
     getVideoUrl,
-    getSubtitleUrl,
     clear,
   };
 }
