@@ -196,6 +196,9 @@
  * @property {string}  [codec]
  * @property {'pending'|'matched'|'manual'|'ambiguous'|'failed'} matchStatus
  * @property {{ animeId: number, episodeId: number, score: number }[]} [matchCandidates]
+ * @property {number}  [supersededAt]  - 同一 relPath 换成了别的内容(大小变了)时打上;基线忽略这一行
+ * @property {{ libraryId: string, relPath: string }[]} [copies] - 同一份内容在硬盘上的其他位置
+ *   (发现时 relPath 那份还在)。播放用 relPath;扫描靠它认出副本,不再把副本当新文件反复导入
  */
 
 /**

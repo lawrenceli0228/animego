@@ -544,8 +544,12 @@ function PlayerShellInner() {
     onBeforeSilentRun: () => {},
     // useSeriesDetail is a one-shot load (not liveQuery) — pull the fresh
     // episode list so the new download appears in EpisodeNav immediately.
-    onScanComplete: (result: { newCount: number }) => {
-      if (result.newCount > 0) seriesDetail.refresh();
+    // A relinked file (moved, renamed, or its recorded copy deleted) has a
+    // new path, and the loaded fileRef would still point at the old one.
+    onScanComplete: (result: { newCount: number; relinkedCount?: number }) => {
+      if (result.newCount > 0 || (result.relinkedCount ?? 0) > 0) {
+        seriesDetail.refresh();
+      }
     },
   });
 

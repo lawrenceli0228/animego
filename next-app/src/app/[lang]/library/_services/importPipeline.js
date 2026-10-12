@@ -22,6 +22,7 @@ import {
   fileRefId,
 } from '@/lib/library/recordFactory.js';
 import { normalizeTokens } from '@/lib/library/normalize.js';
+import { batchOnDisk, dropCopiesWithin, relocateFileRef } from './fileRefCopies.js';
 // The one door in and out of `Series.anilistId`. Imported rather than
 // re-implemented: the guarantee that an automatic write can never stomp a
 // binding the user set by hand lives in that module, and an import is about as
@@ -52,7 +53,18 @@ import { writeBinding } from '@/lib/library/animeBinding';
 /**
  * Run the full import pipeline for a batch of EpisodeItems.
  *
- * @param {{ items: EpisodeItem[], libraryId: string }} input
+ * `onDisk` is what is on disk right now, per library folder (see OnDisk in
+ * rescanService): the rescan reads every folder first, "+ add folder" passes
+ * its own folder. It is how a file the library already holds, found at a new
+ * location, is told apart: a second copy when its recorded location still
+ * holds it, a move when it does not. Without it the batch itself is the only
+ * evidence.
+ *
+ * @param {{
+ *   items: EpisodeItem[],
+ *   libraryId: string,
+ *   onDisk?: import('./rescanService.js').OnDisk,
+ * }} input
  * @param {{
  *   db: import('dexie').Dexie,
  *   dandan: { match(hash16M: string, fileName: string, opts?: { fileSize?: number }): Promise<any> },
@@ -71,6 +83,8 @@ export async function runImport(input, ctx) {
   const seasonRepo = makeSeasonRepo(db);
   const fileRefRepo = makeFileRefRepo(db);
   const cacheRepo = makeMatchCacheRepo(db);
+
+  const onDisk = input.onDisk ?? batchOnDisk(items, libraryId);
 
   // Stage 1: group by folder
   const groups = groupByFolder(items);
@@ -94,7 +108,21 @@ export async function runImport(input, ctx) {
   const userOverrides = new Map(overrideRows.map((o) => [o.seriesId, o]));
 
   // Stage 3: clusterize
-  const clusters = clusterize(groups, priorSeasons);
+  //
+  // Two copies of the same bytes are one file to the library. Copies that
+  // land in different clusters need nothing here: whichever cluster runs
+  // later finds the bytes already homed and lists its path as a copy (groups
+  // run largest first, so a show's own folder normally gets there before a
+  // stray copy). Copies in the SAME cluster would each mint an Episode, so
+  // each cluster keeps one and the rest are listed once it has a row (end of
+  // batch). Deduplicating the whole batch up front would be wrong: it can
+  // pull a file out of its folder, which changes how the folder clusters.
+  const copies = [];
+  const clusters = clusterize(groups, priorSeasons).map((raw) => {
+    const { cluster, copies: extra } = dropCopiesWithin(raw);
+    copies.push(...extra);
+    return cluster;
+  });
 
   /** @type {ImportSummary} */
   const summary = { clusters: clusters.length, matched: 0, failed: 0, ambiguous: 0, crossFolderMerges: [] };
@@ -128,6 +156,7 @@ export async function runImport(input, ctx) {
         cacheRepo,
         dandan,
         db,
+        onDisk,
         ulidSeed: ulidSeedBase !== undefined ? seedOffset : undefined,
         summary,
         emit,
@@ -143,6 +172,8 @@ export async function runImport(input, ctx) {
     seedOffset += 100;
   }
 
+  if (copies.length) await recordCopies(db, copies, libraryId, onDisk);
+
   for (const [seriesId, folders] of seriesFolders) {
     if (folders.size >= 2) {
       summary.crossFolderMerges.push({
@@ -154,6 +185,25 @@ export async function runImport(input, ctx) {
 
   emit({ kind: 'finish', summary: { ...summary } });
   return summary;
+}
+
+/**
+ * List a batch's duplicate items on the row their twin was imported into.
+ * A twin whose cluster failed has no row; its copies are left for the next
+ * scan, which finds them new and imports them on their own.
+ *
+ * @param {import('dexie').Dexie} db
+ * @param {EpisodeItem[]} copies
+ * @param {string} libraryId
+ * @param {import('./rescanService.js').OnDisk} onDisk
+ */
+async function recordCopies(db, copies, libraryId, onDisk) {
+  for (const item of copies) {
+    const prior = await db.fileRefs.get(fileRefId(item));
+    if (!prior) continue;
+    const found = buildFileRefRecord({ libraryId, episodeId: prior.episodeId ?? null, item });
+    await db.fileRefs.put(relocateFileRef(prior, found, onDisk));
+  }
 }
 
 /**
@@ -179,9 +229,16 @@ async function processCluster(p) {
     }
   };
 
+  // Bytes the library already holds — every file here has a row on an episode
+  // of one series — come back through here when they moved, were renamed, or
+  // turned up a second time. Their home is already known, so settle it before
+  // the match cache and before dandanplay: a match could only re-derive what
+  // the library knows, and asking costs a network round trip per file per scan.
+  const knownHome = p.db ? await deriveExistingHome(cluster, p.db) : null;
+
   // Check match cache first
   let cachedVerdict = null;
-  if (rep?.hash16M) {
+  if (!knownHome && rep?.hash16M) {
     cachedVerdict = await cacheRepo.get(rep.hash16M);
   }
 
@@ -244,7 +301,14 @@ async function processCluster(p) {
       return true;
     });
 
-  if (cachedVerdict) {
+  if (knownHome) {
+    verdict = {
+      kind: 'reuse',
+      seriesId: knownHome.seriesId,
+      seasonId: knownHome.seasonId,
+      animeId: knownHome.animeId,
+    };
+  } else if (cachedVerdict) {
     // Reconstruct verdict from cache — check if it matches a prior season (reuse)
     if (cachedVerdict.kind === 'new' && cachedVerdict.animeId !== undefined) {
       const match = findReusableSeason(cachedVerdict.animeId);
@@ -331,7 +395,9 @@ async function processCluster(p) {
   // series, swap the verdict to reuse the override target. We never fabricate
   // seasons — if the target animeId isn't already a known season, fall through
   // so the user notices the missing target rather than getting silent garbage.
-  if (verdict?.kind === 'reuse' && userOverrides) {
+  // Files already in the library are skipped: they keep the episodes (and so
+  // the seasons) they are on, and the pin only steers where new ones go.
+  if (!knownHome && verdict?.kind === 'reuse' && userOverrides) {
     const override = userOverrides.get(verdict.seriesId);
     const target = override?.overrideSeasonAnimeId;
     if (target !== undefined && target !== verdict.animeId) {
@@ -349,10 +415,11 @@ async function processCluster(p) {
     }
   }
 
-  // Home guards — three structural signals, strongest first, that stop a
-  // 'new' verdict from minting a duplicate card:
+  // Home guards — structural signals, strongest first, that stop a 'new'
+  // verdict from minting a duplicate card:
   //
-  //   1. content hash  — every file already homed on one series (re-import)
+  //   1. content hash  — every file already homed on one series (re-import).
+  //                      Checked first of all, above, as `knownHome`.
   //   2. same folder   — the new episode landed in a directory whose existing
   //                      files all belong to one series (the watch-folder
   //                      case: a brand-new episode dandanplay can't match yet)
@@ -363,13 +430,10 @@ async function processCluster(p) {
   // (seasonRecord.animeId): when dandanplay positively identified the content
   // as something new, its answer outranks folder/title heuristics. All three
   // bail to 'new' (manual merge stays the fallback) on any ambiguity.
-  if (verdict.kind === 'new' && p.db) {
-    let home = await deriveExistingHome(cluster, p.db);
-    if (!home && !verdict.seasonRecord?.animeId && p.homeIndexes) {
-      home =
-        deriveFolderHome(cluster, p.homeIndexes, clusterSeason) ??
-        deriveTitleHome(cluster, p.homeIndexes, clusterSeason);
-    }
+  if (verdict.kind === 'new' && !verdict.seasonRecord?.animeId && p.homeIndexes) {
+    const home =
+      deriveFolderHome(cluster, p.homeIndexes, clusterSeason) ??
+      deriveTitleHome(cluster, p.homeIndexes, clusterSeason);
     if (home) {
       verdict = {
         kind: 'reuse',
@@ -411,7 +475,7 @@ async function processCluster(p) {
     }
     // For reuse, only write fileRefs if they don't already exist
     if (verdict.kind === 'reuse') {
-      await persistFileRefsOnly(
+      const { episodesWritten } = await persistFileRefsOnly(
         cluster,
         libraryId,
         verdict.seriesId,
@@ -419,12 +483,22 @@ async function processCluster(p) {
         'matched',
         p.db ?? null,
         ulidSeed,
+        p.onDisk,
       );
       // persistFileRefsOnly never writes db.series, but useLibrary's liveQuery
       // only tracks that table — bump updatedAt so the new episode surfaces
       // in NewAdditionsRow (sorted by updatedAt) instead of landing silently.
-      await seriesRepo.touchSeries(verdict.seriesId);
-      trackFolders(verdict.seriesId);
+      //
+      // Only when an episode was written, i.e. a new episode or a new
+      // alternate source. A file that only moved or gained a second copy is
+      // not news, and bumping its card is what used to make a sorted-into-
+      // folders library look like it had just downloaded everything again.
+      if (episodesWritten > 0) {
+        await seriesRepo.touchSeries(verdict.seriesId);
+      }
+      // Files already on this series add no folder to it — a copy in a second
+      // folder is not two folders merged into one card.
+      if (!knownHome) trackFolders(verdict.seriesId);
     }
     // Cache the verdict. A reuse without an animeId (the re-import guard's
     // derived home) would serialize to a bare {kind:'new'} entry — useless
@@ -437,7 +511,7 @@ async function processCluster(p) {
     emit({ kind: 'clusterDone', clusterKey, verdict: 'matched' });
   } else if (verdict.kind === 'ambiguous') {
     // Write fileRefs with matchStatus='ambiguous', do NOT persist episodes
-    await persistAmbiguousFileRefs(cluster, libraryId, p.db);
+    await persistAmbiguousFileRefs(cluster, libraryId, p.db, p.onDisk);
     if (rep?.hash16M) {
       await cacheRepo.put(rep.hash16M, { kind: 'ambiguous', candidates: verdict.candidates });
     }
@@ -865,6 +939,9 @@ function buildPersistPayload(verdict, cluster, libraryId, matchStatus) {
  * overlap with the original import). Items whose episode number IS already
  * covered get attached as alternateFileIds on the existing Episode.
  *
+ * Items whose bytes are already on an episode of this series keep that
+ * episode; only where they live is updated (see relocateFileRef).
+ *
  * @param {import('@/lib/library/types').MatchCluster} cluster
  * @param {string} libraryId
  * @param {string} seriesId
@@ -872,14 +949,17 @@ function buildPersistPayload(verdict, cluster, libraryId, matchStatus) {
  * @param {string} matchStatus
  * @param {import('dexie').Dexie} db
  * @param {number} [ulidSeed]
+ * @param {import('./rescanService.js').OnDisk} onDisk  what is on disk now, per library
+ * @returns {Promise<{ episodesWritten: number }>}
  */
-async function persistFileRefsOnly(cluster, libraryId, seriesId, seasonId, matchStatus, db, ulidSeed) {
-  if (!db) return;
+async function persistFileRefsOnly(cluster, libraryId, seriesId, seasonId, matchStatus, db, ulidSeed, onDisk) {
+  if (!db) return { episodesWritten: 0 };
 
   // Snapshot the existing episodes for this series so the cluster items can
   // either link onto them (alternate source) or create a new row if the
   // number is new.
   const existing = await db.episodes.where('seriesId').equals(seriesId).toArray();
+  const ownEpisodeIds = new Set(existing.map((ep) => ep.id));
   /** @type {Map<number, import('@/lib/library/types').Episode>} */
   const byNumber = new Map();
   for (const ep of existing) {
@@ -894,6 +974,17 @@ async function persistFileRefsOnly(cluster, libraryId, seriesId, seasonId, match
 
   for (const item of cluster.items) {
     const refId = fileRefId(item);
+
+    // Already on one of this series' episodes: the file moved, was renamed,
+    // or this is a second copy. Re-deriving its episode from the name would
+    // move a renamed file onto whatever number the new name parses to.
+    const prior = await db.fileRefs.get(refId);
+    if (prior?.episodeId && ownEpisodeIds.has(prior.episodeId)) {
+      const found = buildFileRefRecord({ libraryId, episodeId: prior.episodeId, item });
+      fileRefs.push(relocateFileRef(prior, found, onDisk));
+      continue;
+    }
+
     let targetEp = item.episode != null ? byNumber.get(item.episode) : undefined;
 
     if (!targetEp) {
@@ -933,18 +1024,30 @@ async function persistFileRefsOnly(cluster, libraryId, seriesId, seasonId, match
 
   if (episodesToWrite.length) await db.episodes.bulkPut(episodesToWrite);
   await db.fileRefs.bulkPut(fileRefs);
+  return { episodesWritten: episodesToWrite.length };
 }
 
 /**
  * Write fileRefs with matchStatus='ambiguous' (no episodes).
+ *
+ * A file seen before keeps its row: the same bytes found at a second path
+ * are listed as a copy rather than rewriting the path (which the next scan
+ * would undo, forever), and a match the row already has is not dropped.
+ *
  * @param {import('@/lib/library/types').MatchCluster} cluster
  * @param {string} libraryId
  * @param {import('dexie').Dexie} db
+ * @param {import('./rescanService.js').OnDisk} onDisk  what is on disk now, per library
  */
-async function persistAmbiguousFileRefs(cluster, libraryId, db) {
-  const fileRefs = cluster.items.map(it => ({
-    ...buildFileRefRecord({ libraryId, episodeId: null, item: it }),
-    matchStatus: 'ambiguous',
-  }));
+async function persistAmbiguousFileRefs(cluster, libraryId, db, onDisk) {
+  const fileRefs = [];
+  for (const it of cluster.items) {
+    const found = {
+      ...buildFileRefRecord({ libraryId, episodeId: null, item: it }),
+      matchStatus: /** @type {const} */ ('ambiguous'),
+    };
+    const prior = await db.fileRefs.get(found.id);
+    fileRefs.push(prior ? relocateFileRef(prior, found, onDisk) : found);
+  }
   await db.fileRefs.bulkPut(fileRefs);
 }

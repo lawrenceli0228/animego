@@ -40,11 +40,14 @@ function fakeDb({ seasons = [], episodes = [], cacheEntries = {} } = {}) {
     userOverride: { toArray: async () => [] },
     episodes: {
       where: () => ({ equals: () => ({ toArray: async () => episodes }) }),
+      get: async () => undefined,
       bulkPut: async (rows) => {
         writes.episodes.push(...rows);
       },
     },
     fileRefs: {
+      // Every file in these tests is new to the library.
+      get: async () => undefined,
       bulkPut: async (rows) => {
         writes.fileRefs.push(...rows);
       },

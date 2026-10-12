@@ -141,22 +141,29 @@ describe("re-import guard (all files already homed)", () => {
     ],
   };
 
-  test("flips to reuse: no duplicate series, updatedAt bumped, nothing cached", async () => {
+  test("flips to reuse: no duplicate series, card not bumped, nothing cached", async () => {
     const { db, writes } = fakeDb(HOMED);
+    const dandan = nullDandan();
 
     const summary = await runImport(
       { items: [theItem], libraryId: "lib-1" },
-      { db, dandan: nullDandan() },
+      { db, dandan },
     );
 
     expect(summary.matched).toBe(1);
     expect(summary.failed).toBe(0);
     // The whole point: NO fresh series minted for an already-imported cluster.
     expect(writes.seriesPuts).toHaveLength(0);
-    // Reuse persistence ran: touchSeries bump + fileRef re-write.
-    expect(writes.seriesUpdates).toHaveLength(1);
-    expect(writes.seriesUpdates[0].id).toBe("sr-1");
-    expect(writes.fileRefs.length).toBeGreaterThanOrEqual(1);
+    // Reuse persistence ran: the fileRef is re-written on its own episode…
+    expect(writes.fileRefs).toHaveLength(1);
+    expect(writes.fileRefs[0].episodeId).toBe("ep-7");
+    // …but nothing new arrived, so the card is not bumped into "new
+    // additions". It used to be, which made every moved or copied file look
+    // like a fresh download.
+    expect(writes.seriesUpdates).toHaveLength(0);
+    expect(writes.episodes).toHaveLength(0);
+    // Already-held files are settled before the network: no dandanplay call.
+    expect(dandan.calls).toHaveLength(0);
     // Derived home has no animeId — caching it would recreate the bare-entry
     // problem, so nothing is cached.
     expect(writes.cachePuts).toHaveLength(0);

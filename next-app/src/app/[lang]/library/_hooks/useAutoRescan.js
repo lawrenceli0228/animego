@@ -38,7 +38,7 @@ import {
  *   db: import('dexie').Dexie,
  *   handlesStatus: string,
  *   importStatus: string,
- *   runImport: (p: {items: any[], libraryId: string}) => Promise<void>,
+ *   runImport: (p: {items: any[], libraryId: string, onDisk: Map<string, Set<string>>}) => Promise<void>,
  *   processFiles: (files: File[], opts: any) => {files: any[]},
  *   refreshHandles: () => Promise<void>,
  *   onBeforeSilentRun: () => void,
@@ -75,6 +75,10 @@ export function useAutoRescan({
   const wantWatch = triggers.watch !== false;
   const [scanning, setScanning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  // Scans completed on this page. A scan that finds nothing changes nothing
+  // visible, so this count is the one way to tell it has run (the library
+  // page exposes it for end-to-end tests).
+  const [completedScans, setCompletedScans] = useState(0);
   // Bumped by rearmWatch() so the watch effect re-runs and re-observes ALL
   // ready roots. Without it a root added via "+ add folder" after mount is
   // never observed — the effect is keyed on handlesStatus, which stays
@@ -106,13 +110,15 @@ export function useAutoRescan({
           typeof a?.isSameEntry === "function" ? a.isSameEntry(b) : false,
         buildBaseline: () => buildBaseline(db),
         diffScanRoot,
-        markSuperseded: (candidates, now) => markSuperseded(db, candidates, now),
+        markSuperseded: (candidates, now, libraryIds) =>
+          markSuperseded(db, candidates, now, libraryIds),
         processFiles: (files, opts) => latest.current.processFiles(files, opts),
         runImport: (p) => latest.current.runImport(p),
         getImportStatus: () => latest.current.importStatus,
         onBeforeSilentRun: () => latest.current.onBeforeSilentRun?.(),
         onScanComplete: (result) => {
           setLastResult(result);
+          setCompletedScans((n) => n + 1);
           latest.current.onScanComplete?.(result);
         },
         refreshHandles: () =>
@@ -231,7 +237,14 @@ export function useAutoRescan({
     if (controllerRef.current) await controllerRef.current.yieldToManual();
   }, []);
 
-  return { scanning, lastResult, manualRescan, yieldToManual, rearmWatch };
+  return {
+    scanning,
+    lastResult,
+    completedScans,
+    manualRescan,
+    yieldToManual,
+    rearmWatch,
+  };
 }
 
 export default useAutoRescan;
