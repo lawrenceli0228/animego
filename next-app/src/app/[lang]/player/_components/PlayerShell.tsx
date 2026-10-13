@@ -1469,7 +1469,7 @@ function PlayerShellInner() {
       {/* PLAYING */}
       {uiPhase === "playing" && (
         <div style={fadeUp}>
-          <header style={s.playHeader}>
+          <header style={s.playHeader} data-testid="player-header">
             <HudBackButton
               onClick={handleBackToList}
               label={t("player.backToList")}
