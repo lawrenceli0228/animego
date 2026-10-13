@@ -363,9 +363,10 @@ test.describe("episode display — the library grid", () => {
     expect(page.url()).toContain(`seriesId=${SEQUEL_ID}`);
 
     // ── the player ───────────────────────────────────────────────────────
-    // The playing header carries an untranslated `EPISODE / 集` eyebrow, which
-    // is what tells it apart from the site header without a testid.
-    const playHeader = page.locator("header").filter({ hasText: "EPISODE / 集" });
+    // The playing header, told apart from the site header by its testid. It
+    // used to be found by its untranslated `EPISODE / 集` eyebrow; the header
+    // now reads as one line (`EP01 · title`) and that eyebrow is gone.
+    const playHeader = page.getByTestId("player-header");
     // Resolved first so a second matching <header> fails as a count mismatch
     // rather than as an opaque strict-mode violation on the assertion below.
     await expect(playHeader).toHaveCount(1, { timeout: 60_000 });

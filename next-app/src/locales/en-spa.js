@@ -853,18 +853,11 @@ const en = {
     supplementary: 'Supplementary',
     desktopOnly: 'Desktop only',
     desktopHint: 'The video player requires a desktop browser',
-    // VideoPlayer artplayer settings panel labels
-    subtitleSize: 'Subtitle size',
-    subtitlePosition: 'Subtitle position',
+    // VideoPlayer artplayer settings menu labels
     playbackSpeed: 'Speed',
     danmakuToggle: 'Danmaku',
     danmakuOn: 'On',
     danmakuOff: 'Off',
-    loadSubtitleFile: 'Load subtitle file',
-    subtitleFileTooltip: 'Local .vtt / .srt / .ass',
-    clickToSelect: 'Click to select…',
-    subtitleLoadFailed: 'Subtitle load failed: ',
-    subtitleLoaded: 'Loaded subtitle: ',
     // PlayerShell
     backToLibrary: 'Back to library',
     // DropZone (keys used with defaultValue fallback)
@@ -874,6 +867,43 @@ const en = {
     epSuffix: 'eps',
     // page.tsx skeleton
     loadingPlayer: 'Loading player…',
+    // SubtitlePanel
+    subs: {
+      button: 'Subtitles',
+      title: 'Subtitles',
+      off: 'Off',
+      loadFile: 'Load a subtitle file…',
+      loadFileHint: '.ass / .ssa / .srt / .vtt',
+      embedded: 'Embedded',
+      sidecar: 'External',
+      user: 'Loaded',
+      isDefault: 'Default',
+      forced: 'Forced',
+      bilingual: 'Bilingual',
+      loading: 'Reading…',
+      partial: 'Opening read',
+      error: 'Could not read',
+      unsupported: 'Image subtitles, not supported',
+      scanning: 'Reading embedded subtitles {{pct}}%',
+      none: 'No subtitles for this episode',
+      untitled: 'Untitled track',
+      timing: 'Timing',
+      later: 'Delay 0.5 s',
+      earlier: 'Advance 0.5 s',
+      reset: 'Reset',
+      timingHint: 'Subtitles early? Press +. Late? Press −.',
+      size: 'Size',
+      position: 'Height',
+      styledHint: 'Styled ASS subtitles use the file\'s own styles; size and height apply to plain-text subtitles',
+      lang: {
+        'zh-Hans': 'Chinese (Simplified)',
+        'zh-Hant': 'Chinese (Traditional)',
+        zh: 'Chinese',
+        ja: 'Japanese',
+        en: 'English',
+        ko: 'Korean',
+      },
+    },
   },
   // Landing / About page
   landing: {

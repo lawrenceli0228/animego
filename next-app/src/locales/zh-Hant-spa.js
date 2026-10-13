@@ -908,18 +908,11 @@ const zhHant = {
     supplementary: '補充內容',
     desktopOnly: '請在電腦上使用此功能',
     desktopHint: '影片播放器需要在桌面瀏覽器上使用',
-    // VideoPlayer artplayer settings panel labels
-    subtitleSize: '字幕大小',
-    subtitlePosition: '字幕位置',
+    // VideoPlayer artplayer settings menu labels
     playbackSpeed: '倍速',
     danmakuToggle: '彈幕開關',
     danmakuOn: '開',
     danmakuOff: '關',
-    loadSubtitleFile: '載入字幕檔案',
-    subtitleFileTooltip: '本地 .vtt / .srt / .ass',
-    clickToSelect: '點選選擇…',
-    subtitleLoadFailed: '字幕載入失敗: ',
-    subtitleLoaded: '已載入字幕: ',
     // PlayerShell
     backToLibrary: '返回庫',
     // DropZone (keys used with defaultValue fallback)
@@ -929,6 +922,43 @@ const zhHant = {
     epSuffix: '集',
     // page.tsx skeleton
     loadingPlayer: '正在載入播放器…',
+    // SubtitlePanel
+    subs: {
+      button: '字幕',
+      title: '字幕',
+      off: '關閉字幕',
+      loadFile: '載入本機字幕…',
+      loadFileHint: '.ass / .ssa / .srt / .vtt',
+      embedded: '內封',
+      sidecar: '外掛',
+      user: '本機',
+      isDefault: '預設',
+      forced: '強制',
+      bilingual: '雙語',
+      loading: '讀取中…',
+      partial: '已讀取開頭',
+      error: '讀取失敗',
+      unsupported: '圖形字幕，暫不支援',
+      scanning: '正在讀取內封字幕 {{pct}}%',
+      none: '這一集沒有可用字幕',
+      untitled: '未命名軌道',
+      timing: '時間',
+      later: '延後 0.5 秒',
+      earlier: '提前 0.5 秒',
+      reset: '重設',
+      timingHint: '字幕比台詞早出現就點 +，晚了就點 −',
+      size: '大小',
+      position: '高度',
+      styledHint: 'ASS 特效字幕使用檔案內建的樣式，大小和高度只對純文字字幕生效',
+      lang: {
+        'zh-Hans': '簡體中文',
+        'zh-Hant': '繁體中文',
+        zh: '中文',
+        ja: '日語',
+        en: '英語',
+        ko: '韓語',
+      },
+    },
   },
   // Landing / About page
   landing: {

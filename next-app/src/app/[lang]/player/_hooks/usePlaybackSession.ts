@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLang } from "@/lib/lang-client";
 import {
-  resolveSubtitle,
-  type SubtitleTask,
-  type PlaybackFileItemLike,
-} from "../_services/resolveSubtitle";
+  useSubtitleTracks,
+  type SubtitleSourceItem,
+  type UseSubtitleTracksResult,
+} from "./useSubtitleTracks";
 
 /**
  * Owns the playback half of PlayerPage.
@@ -18,10 +19,12 @@ import {
  *   6. pending subtitle resolution canceled before next play / on back /
  *      unmount, and a stale task's late resolve is ignored.
  *
- * Both invariants used to say "mkv", because MKV extraction was the only
- * thing that resolved asynchronously. Reading and converting a sidecar
- * .srt/.ass is async too now — same task shape, same guards, same blob
- * ownership — so the names no longer name one source. See resolveSubtitle.
+ * Subtitles are a list now, not one url: every text track in an MKV, every
+ * matching sidecar, and any file the reader loads (useSubtitleTracks). #6 is
+ * kept there — the scan worker is terminated on the next play, back and
+ * unmount, and every result carries the playback key it was started for.
+ * #1 moved to VideoPlayer, which now makes the one blob url it shows (it
+ * needs the VTT text anyway, to apply the reader's timing offset).
  *
  * P2 session-resume surface:
  *   lastTimeRef — volatile Map<fileId, seconds>; cleared only on unmount.
@@ -31,8 +34,7 @@ import {
  *   resumeAt — read once by VideoPlayer on loadedmetadata; set by play() from Map.
  */
 
-export interface PlaybackFileItem extends PlaybackFileItemLike {
-  fileId: string;
+export interface PlaybackFileItem extends SubtitleSourceItem {
   episode: number | null;
   parsedKind?: string | null;
   /**
@@ -56,7 +58,6 @@ export type EpisodeMap = Record<
 
 interface UsePlaybackSessionArgs {
   getVideoUrl: (file: File) => string;
-  getSubtitleUrl: (file: File) => string;
   loadComments: (episodeId: number | string) => void | Promise<void>;
   clearComments: () => void;
 }
@@ -72,9 +73,7 @@ export interface UsePlaybackSessionResult {
   playingFile: PlaybackFileItem | null;
   playingEp: number | null;
   videoUrl: string | null;
-  subtitleUrl: string | null;
-  subtitleType: string | null;
-  subtitleContent: string | null;
+  subtitles: UseSubtitleTracksResult;
   resumeAt: number | null;
   play: (fileItem: PlaybackFileItem, episodeMap?: EpisodeMap) => void;
   back: () => void;
@@ -84,44 +83,23 @@ export interface UsePlaybackSessionResult {
 
 export function usePlaybackSession({
   getVideoUrl,
-  getSubtitleUrl,
   loadComments,
   clearComments,
 }: UsePlaybackSessionArgs): UsePlaybackSessionResult {
+  const { lang } = useLang();
   const [playingFile, setPlayingFile] = useState<PlaybackFileItem | null>(null);
   const [playingEp, setPlayingEp] = useState<number | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null);
-  const [subtitleType, setSubtitleType] = useState<string | null>(null);
-  const [subtitleContent, setSubtitleContent] = useState<string | null>(null);
   const [resumeAt, setResumeAt] = useState<number | null>(null);
+  const subtitles = useSubtitleTracks(lang);
+  const { start: startSubtitles, stop: stopSubtitles } = subtitles;
 
-  const subtitleBlobUrlRef = useRef<string | null>(null);
-  const subtitleTaskRef = useRef<SubtitleTask | null>(null);
   const lastTimeRef = useRef<Map<string, number>>(new Map());
 
-  const cancelSubtitleTask = useCallback(() => {
-    if (subtitleTaskRef.current) {
-      subtitleTaskRef.current.cancel();
-      subtitleTaskRef.current = null;
-    }
+  useEffect(() => {
+    const times = lastTimeRef.current;
+    return () => times.clear();
   }, []);
-
-  const cleanupSubtitleBlob = useCallback(() => {
-    if (subtitleBlobUrlRef.current) {
-      URL.revokeObjectURL(subtitleBlobUrlRef.current);
-      subtitleBlobUrlRef.current = null;
-    }
-  }, []);
-
-  useEffect(
-    () => () => {
-      cancelSubtitleTask();
-      cleanupSubtitleBlob();
-      lastTimeRef.current.clear();
-    },
-    [cancelSubtitleTask, cleanupSubtitleBlob],
-  );
 
   const getLastTime = useCallback((episodeId: string) => {
     const val = lastTimeRef.current.get(episodeId);
@@ -138,8 +116,6 @@ export function usePlaybackSession({
 
   const play = useCallback(
     (fileItem: PlaybackFileItem, episodeMap?: EpisodeMap) => {
-      cancelSubtitleTask();
-      cleanupSubtitleBlob();
 
       // Pre-flight readability probe: read the first 16 bytes so any FSA-handle
       // failure surfaces here as a tagged warning instead of downstream as the
@@ -187,11 +163,9 @@ export function usePlaybackSession({
         typeof window !== "undefined"
           ? (window as Window & QueryLocalFontsWindow)
           : null;
-      const sidecarFormat = (fileItem.subtitle?.type || "").toLowerCase();
       const mayUseLibass =
         /\.mkv$/i.test(fileItem.fileName) ||
-        sidecarFormat === "ass" ||
-        sidecarFormat === "ssa";
+        (fileItem.subtitles ?? []).some((sub) => /^(ass|ssa)$/i.test(sub.type));
       if (win && mayUseLibass && typeof win.queryLocalFonts === "function") {
         try {
           win.queryLocalFonts().catch(() => {});
@@ -212,70 +186,27 @@ export function usePlaybackSession({
       if (epData?.dandanEpisodeId) loadComments(epData.dandanEpisodeId);
       else clearComments();
 
-      const sub = resolveSubtitle(fileItem, getSubtitleUrl);
-      if (sub.kind === "sync") {
-        setSubtitleUrl(sub.state.url);
-        setSubtitleType(sub.state.type);
-        setSubtitleContent(sub.state.content);
-        return;
-      }
-
-      setSubtitleUrl(null);
-      setSubtitleType(null);
-      setSubtitleContent(null);
-
-      if (sub.kind !== "async") return;
-
-      subtitleTaskRef.current = sub.task;
-      sub.task.promise.then((result) => {
-        // Stale task from a previous play() — ignore (invariant #6).
-        if (subtitleTaskRef.current !== sub.task) {
-          if (result?.isBlob) URL.revokeObjectURL(result.url);
-          return;
-        }
-        subtitleTaskRef.current = null;
-        if (!result) return;
-        if (result.isBlob) {
-          cleanupSubtitleBlob();
-          subtitleBlobUrlRef.current = result.url;
-        }
-        setSubtitleUrl(result.url);
-        setSubtitleType(result.type);
-        if (result.content != null) setSubtitleContent(result.content);
-      });
+      startSubtitles(fileItem);
     },
-    [
-      getVideoUrl,
-      getSubtitleUrl,
-      loadComments,
-      clearComments,
-      cancelSubtitleTask,
-      cleanupSubtitleBlob,
-    ],
+    [getVideoUrl, loadComments, clearComments, startSubtitles],
   );
 
   const back = useCallback(() => {
-    cancelSubtitleTask();
-    cleanupSubtitleBlob();
+    stopSubtitles();
     setPlayingFile(null);
     setPlayingEp(null);
     setVideoUrl(null);
-    setSubtitleUrl(null);
-    setSubtitleType(null);
-    setSubtitleContent(null);
     setResumeAt(null);
     clearComments();
     // lastTimeRef is intentionally NOT cleared — resume survives back→play within session.
-  }, [cancelSubtitleTask, cleanupSubtitleBlob, clearComments]);
+  }, [stopSubtitles, clearComments]);
 
   return {
     phase: playingFile ? "playing" : "none",
     playingFile,
     playingEp,
     videoUrl,
-    subtitleUrl,
-    subtitleType,
-    subtitleContent,
+    subtitles,
     resumeAt,
     play,
     back,

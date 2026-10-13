@@ -31,11 +31,7 @@ import Link, { useLocaleRouter } from "@/components/ui/LocaleLink";
 import toast from "react-hot-toast";
 
 import { useLang } from "@/lib/lang-client";
-import {
-  ChapterBar,
-  CornerBrackets,
-  SectionNum,
-} from "@/components/landing/shared/hud";
+import { CornerBrackets } from "@/components/landing/shared/hud";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 
 // Library lib (P6.2 ported)
@@ -74,6 +70,10 @@ import {
 } from "@/app/[lang]/library/_services/resolveSeriesBinding";
 import { useSeriesDetail } from "@/app/[lang]/library/_hooks/useSeriesDetail";
 import { useVideoFiles } from "@/app/[lang]/library/_hooks/useVideoFiles";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — JSDoc-only JS module
+import { getSubtitleType, parseEpisodeNumber } from "@/app/[lang]/library/_hooks/episodeParser.js";
+import { dirOf, matchSidecars, sidecarDescriptor } from "@/lib/subtitles/sidecars";
 import {
   buildEpisodeNavNumbers,
   normalizeEpisodeNumbers,
@@ -107,6 +107,7 @@ import { PlayerHudFrame } from "./PlayerHudFrame";
 import { HeatmapTuner } from "./HeatmapTuner";
 
 const FADE_UP_CSS = `@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`;
+
 const fadeUp: CSSProperties = {
   animation: "fadeUp 300ms cubic-bezier(0.4,0,0.2,1) both",
 };
@@ -229,13 +230,10 @@ const s = {
     display: "grid",
     gridTemplateColumns: "auto 1fr auto",
     alignItems: "center",
-    gap: 24,
+    gap: 20,
     maxWidth: 1400,
-    margin: "16px auto 12px",
-    padding: "20px 28px 20px 56px",
-    background: `linear-gradient(180deg, oklch(14% 0.04 ${HUE} / 0.55) 0%, rgba(20,20,22,0.55) 100%)`,
-    border: `1px solid oklch(46% 0.06 ${HUE} / 0.36)`,
-    borderRadius: 4,
+    margin: "0 auto",
+    padding: "14px 2px 14px",
   } as CSSProperties,
   epEyebrow: {
     ...mono,
@@ -248,17 +246,19 @@ const s = {
   epTitle: {
     fontFamily: "var(--font-display)",
     fontWeight: 600,
-    fontSize: 18,
+    fontSize: 17,
     color: "#ffffff",
     letterSpacing: "-0.01em",
     lineHeight: 1.25,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   } as CSSProperties,
   epSubtitle: {
-    fontSize: 13,
-    color: "rgba(235,235,245,0.45)",
-    marginTop: 4,
-    fontFamily: "'JetBrains Mono',monospace",
-    letterSpacing: "0.04em",
+    fontSize: 14,
+    fontWeight: 400,
+    color: "rgba(235,235,245,0.55)",
+    marginLeft: 10,
   } as CSSProperties,
   danmakuChip: {
     ...mono,
@@ -287,14 +287,12 @@ const s = {
     flexShrink: 0,
   } as CSSProperties,
   playerWrap: { maxWidth: 1400, margin: "0 auto" } as CSSProperties,
-  danmakuInfo: {
-    ...mono,
-    fontSize: 11,
-    color: "rgba(235,235,245,0.30)",
-    textAlign: "center",
-    padding: "8px 0",
-    textTransform: "uppercase",
-    letterSpacing: "0.14em",
+  // The player fits the window: its width is capped at what 16:9 allows for
+  // the height left under the nav bar, the header and the episode chips, so
+  // the controls and the chips are on screen without scrolling.
+  playerFit: {
+    width: "min(100%, calc((100vh - var(--nav-h) - 160px) * 16 / 9))",
+    margin: "0 auto",
   } as CSSProperties,
   errorBox: {
     maxWidth: 600,
@@ -463,6 +461,7 @@ function PlayerShellInner() {
   }, [resumeEpisodeRaw]);
 
   const fileHandles = useFileHandles({ db });
+  const { listSubtitlesNear } = fileHandles;
   const seriesDetail = useSeriesDetail(locationSeriesId, { db, fileHandles });
 
   // Becomes true once a library getFile() returns null while permissions are
@@ -481,7 +480,6 @@ function PlayerShellInner() {
     keyword,
     processFiles,
     getVideoUrl,
-    getSubtitleUrl,
     clear: clearFiles,
   } = useVideoFiles();
   const {
@@ -503,7 +501,6 @@ function PlayerShellInner() {
   } = useDandanComments();
   const playback = usePlaybackSession({
     getVideoUrl,
-    getSubtitleUrl,
     loadComments,
     clearComments,
   });
@@ -512,9 +509,7 @@ function PlayerShellInner() {
     playingFile,
     playingEp,
     videoUrl,
-    subtitleUrl,
-    subtitleType,
-    subtitleContent,
+    subtitles,
     play: startPlayback,
     back: stopPlayback,
     resumeAt,
@@ -1000,11 +995,30 @@ function PlayerShellInner() {
         }
       }
 
+      const fileName = fileRef.relPath.split("/").pop() || fileRef.relPath;
+      // Sidecars are not stored at import; they are matched here, against
+      // whatever sits in the video's folder now.
+      const nearby: { file: File; relPath: string }[] =
+        await listSubtitlesNear(fileRef.libraryId, fileRef.relPath);
+      const subtitleFiles = matchSidecars(
+        { fileName, episode: parseEpisodeNumber(fileName), dir: dirOf(fileRef.relPath) },
+        nearby.map((n) => {
+          const name = n.relPath.split("/").pop() || n.relPath;
+          return {
+            file: n.file,
+            fileName: name,
+            episode: parseEpisodeNumber(name),
+            type: getSubtitleType(name),
+            dir: dirOf(n.relPath),
+          };
+        }),
+      ).map((sub) => ({ ...sub, descriptor: sidecarDescriptor(fileName, sub.fileName) }));
+
       const fileItem = {
         fileId: fileRef.id,
         file,
-        fileName:
-          fileRef.relPath.split("/").pop() || fileRef.relPath,
+        fileName,
+        subtitles: subtitleFiles,
         relativePath: fileRef.relPath,
         episode: ep.number,
         parsedKind: ep.kind || "main",
@@ -1022,6 +1036,7 @@ function PlayerShellInner() {
       startPlayback,
       t,
       fileHandles.status,
+      listSubtitlesNear,
       matchResult,
       locationSeriesId,
     ],
@@ -1454,36 +1469,23 @@ function PlayerShellInner() {
       {/* PLAYING */}
       {uiPhase === "playing" && (
         <div style={fadeUp}>
-          <header style={s.playHeader}>
-            <ChapterBar
-              hue={HUE}
-              height={56}
-              top={8}
-              left={20}
-              trigger="mount"
-            />
-            <SectionNum n="01" style={{ top: 12, right: 16, fontSize: 10 }} />
-            <CornerBrackets inset={6} size={8} opacity={0.32} />
-
+          <header style={s.playHeader} data-testid="player-header">
             <HudBackButton
               onClick={handleBackToList}
               label={t("player.backToList")}
             />
 
-            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-              <div style={s.epEyebrow} aria-hidden>
-                EPISODE / 集
-              </div>
-              <div style={s.epTitle}>
+            <div style={{ minWidth: 0, overflow: "hidden" }}>
+              <div style={s.epTitle} data-testid="playing-title">
                 EP{String(playingDisplayEp).padStart(2, "0")}
                 {matchResult?.anime?.titleChinese &&
                   ` · ${matchResult.anime.titleChinese}`}
+                {matchResult?.episodeMap?.[playingEp]?.title && (
+                  <span style={s.epSubtitle}>
+                    {matchResult.episodeMap[playingEp].title}
+                  </span>
+                )}
               </div>
-              {matchResult?.episodeMap?.[playingEp]?.title && (
-                <div style={s.epSubtitle}>
-                  {matchResult.episodeMap[playingEp].title}
-                </div>
-              )}
             </div>
 
             <div style={s.headerActions}>
@@ -1493,7 +1495,9 @@ function PlayerShellInner() {
                 <span style={s.danmakuChip}>
                   {danmakuCount.toLocaleString()} {t("player.danmakuCount")}
                 </span>
-              ) : null}
+              ) : (
+                <span style={s.loadingChip}>{t("player.noDanmaku")}</span>
+              )}
               <HudDanmakuButton
                 onClick={() => setPickerEp(playingEp)}
                 label={t("player.setDanmaku")}
@@ -1502,24 +1506,19 @@ function PlayerShellInner() {
           </header>
 
           <div style={s.playerWrap}>
-            <PlayerHudFrame
-              videoUrl={videoUrl}
-              danmakuList={danmakuList}
-              subtitleUrl={subtitleUrl}
-              subtitleType={subtitleType}
-              subtitleContent={subtitleContent}
-              onEnded={handleVideoEnded}
-              onPlaybackError={handlePlaybackError}
-              progressKey={progressKey}
-              episode={playingEp}
-              danmakuCount={danmakuCount}
-              resumeAt={resumeAt}
-              onProgressTick={handleProgressTick}
-              onWatchTick={handleTick}
-            />
-            {danmakuCount === 0 && (
-              <div style={s.danmakuInfo}>{t("player.noDanmaku")}</div>
-            )}
+            <div style={s.playerFit}>
+              <PlayerHudFrame
+                videoUrl={videoUrl}
+                danmakuList={danmakuList}
+                subtitles={subtitles}
+                onEnded={handleVideoEnded}
+                onPlaybackError={handlePlaybackError}
+                progressKey={progressKey}
+                resumeAt={resumeAt}
+                onProgressTick={handleProgressTick}
+                onWatchTick={handleTick}
+              />
+            </div>
             {/* Display numbers on the library path, so the strip and the
                 header above agree with the chip the user clicked in the
                 library. The drop-zone path has no series to normalise

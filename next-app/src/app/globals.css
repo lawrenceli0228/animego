@@ -494,8 +494,28 @@ h4 {
   backface-visibility: hidden;
   contain: layout paint;
 }
+/* The danmaku heatmap sits on the progress bar, not 11.5px above it.
+   artplayer-plugin-danmuku pins the heatmap's bottom edge to the top of
+   .art-progress (inline `top: -100px; height: 100px`), but artplayer pads
+   that box with --art-progress-top-gap before the bar starts, and the bar
+   you see (.art-control-progress-inner) is the middle half of a
+   --art-progress-height track. So the curve ended gap + height/4 short of
+   the bar — 10px + 1.5px at the defaults — and read as a separate strip.
+   Moving it down by exactly that lands its base on the bar's top edge; the
+   curve is filled in the bar's own colours, so the two now read as one
+   shape. Derived from artplayer's variables rather than hard-coded so a
+   theme or mobile override of either one keeps them flush. translateZ(0)
+   is the fullscreen flicker hint described above, kept in the same
+   transform. */
 .art-video-player .art-control-heatmap {
-  transform: translateZ(0);
+  transform: translateY(calc(var(--art-progress-top-gap) + var(--art-progress-height) / 4))
+    translateZ(0);
+  transition: transform var(--art-transition-duration) ease;
+}
+/* Hovering the progress area grows the bar to the full track height, so its
+   top edge moves up by height/4; the heatmap follows it in step. */
+.art-video-player .art-bottom .art-progress:hover .art-control-heatmap {
+  transform: translateY(var(--art-progress-top-gap)) translateZ(0);
 }
 
 /* ── Card hover lift (relation / recommendation cards on /anime/[id]) ──────
