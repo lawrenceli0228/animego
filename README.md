@@ -308,6 +308,7 @@ cd next-app && bun test
 - [Bangumi](https://bgm.tv/) — Chinese titles, scores, characters, and episode data
 - [dandanplay](https://www.dandanplay.com/) — danmaku matching API and episode comment database. Special thanks to the dandanplay developers for their support.
 - [ACG.rip](https://acg.rip/) — torrent RSS feed
+- [bangumi-data](https://github.com/bangumi-data/bangumi-data) — the AniList / Bangumi → Mikan Project id map behind the magnet search's per-show Mikan feeds (`go-api/internal/mikanidmap/mikan_map.json`, regenerated weekly), used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 
 ---
 
@@ -319,4 +320,4 @@ AnimeGo is open source under the **GNU AGPL-3.0** license, and contributions are
 
 ## License
 
-AnimeGo is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0). You may use, study, modify, and redistribute it under the terms of that license; in particular, if you run a modified version as a network service, you must make your modified source available to its users. See [LICENSE](LICENSE) for the full text. © 2026 lawrenceli0228 (AnimeGo · animegoclub.com). This license covers only the original code in this repository, not the third-party data/APIs it integrates (AniList, Bangumi, MyAnimeList, dandanplay, ACG.rip), which remain subject to their owners' terms.
+AnimeGo is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0). You may use, study, modify, and redistribute it under the terms of that license; in particular, if you run a modified version as a network service, you must make your modified source available to its users. See [LICENSE](LICENSE) for the full text. © 2026 lawrenceli0228 (AnimeGo · animegoclub.com). This license covers only the original code in this repository, not the third-party data/APIs it integrates (AniList, Bangumi, bangumi-data, MyAnimeList, dandanplay, ACG.rip), which remain subject to their owners' terms.

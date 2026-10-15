@@ -56,6 +56,7 @@ project owner** for legal and maintenance reasons, and is **not open to external
 code contributions**. This covers:
 
 - `go-api/internal/torrents/**`
+- `go-api/internal/mikanidmap/**` and `go-api/cmd/mikanmap/**` (the Mikan id map the magnet search reads)
 - `next-app/src/components/anime/TorrentModal.tsx`
 - `next-app/src/components/anime/torrentModalLogic.ts` (and its tests)
 - any new or modified magnet/torrent **source adapters**

@@ -1,0 +1,108 @@
+{
+  "siteMeta": {
+    "mikan": {"title": "蜜柑计划", "urlTemplate": "https://mikanani.me/Home/Bangumi/{{id}}", "type": "resource"},
+    "aniList": {"title": "AniList", "urlTemplate": "https://anilist.co/anime/{{id}}", "type": "info"},
+    "bangumi": {"title": "番组计划", "urlTemplate": "https://bangumi.tv/subject/{{id}}", "type": "info"}
+  },
+  "items": [
+    {
+      "title": "葬送のフリーレン",
+      "titleTranslate": {"zh-Hans": ["葬送的芙莉莲"]},
+      "type": "tv",
+      "begin": "2023-09-29T14:00:00.000Z",
+      "sites": [
+        {"site": "bangumi", "id": "400602"},
+        {"site": "aniList", "id": "154587"},
+        {"site": "mikan", "id": "3141"},
+        {"site": "dmhy", "id": "葬送的芙莉莲"},
+        {"site": "bilibili", "id": "28339774", "begin": "2023-09-29T15:00:00.000Z"}
+      ]
+    },
+    {
+      "title": "葬送のフリーレン(第2期)",
+      "titleTranslate": {"zh-Hans": ["葬送的芙莉莲 第二季"]},
+      "type": "tv",
+      "begin": "2026-01-16T14:00:00.000Z",
+      "sites": [
+        {"site": "aniList", "id": "182255"},
+        {"site": "mikan", "id": "3821"},
+        {"site": "bangumi", "id": "515759"}
+      ]
+    },
+    {
+      "title": "Bangumi-only show",
+      "titleTranslate": {},
+      "type": "tv",
+      "begin": "2025-04-01T00:00:00.000Z",
+      "sites": [
+        {"site": "bangumi", "id": "999001"},
+        {"site": "mikan", "id": "4001"}
+      ]
+    },
+    {
+      "title": "ONE PIECE",
+      "titleTranslate": {"zh-Hans": ["海贼王", "航海王"]},
+      "type": "tv",
+      "begin": "1999-10-20T00:00:00.000Z",
+      "sites": [
+        {"site": "bangumi", "id": "975"},
+        {"site": "aniList", "id": "21"},
+        {"site": "mikan", "id": "228"}
+      ]
+    },
+    {
+      "title": "ONE PIECE エルバフ編",
+      "titleTranslate": {"zh-Hans": ["航海王 埃鲁巴夫篇"]},
+      "type": "tv",
+      "begin": "2026-04-05T00:00:00.000Z",
+      "sites": [
+        {"site": "bangumi", "id": "602059"},
+        {"site": "aniList", "id": "21"},
+        {"site": "mikan", "id": "3977"}
+      ]
+    },
+    {
+      "title": "Two pages, one subject (first)",
+      "titleTranslate": {},
+      "type": "tv",
+      "begin": "2024-01-01T00:00:00.000Z",
+      "sites": [
+        {"site": "bangumi", "id": "777"},
+        {"site": "aniList", "id": "9001"},
+        {"site": "mikan", "id": "501"}
+      ]
+    },
+    {
+      "title": "Two pages, one subject (second)",
+      "titleTranslate": {},
+      "type": "tv",
+      "begin": "2024-04-01T00:00:00.000Z",
+      "sites": [
+        {"site": "bangumi", "id": "777"},
+        {"site": "aniList", "id": "9002"},
+        {"site": "mikan", "id": "502"}
+      ]
+    },
+    {
+      "title": "FAIRY TAIL",
+      "titleTranslate": {"zh-Hans": ["妖精的尾巴"]},
+      "type": "tv",
+      "begin": "2009-10-12T00:00:00.000Z",
+      "sites": [
+        {"site": "bangumi", "id": "2609"},
+        {"site": "aniList", "id": "6702"}
+      ]
+    },
+    {
+      "title": "Broken links",
+      "titleTranslate": {},
+      "type": "tv",
+      "begin": "2020-01-01T00:00:00.000Z",
+      "sites": [
+        {"site": "bangumi", "id": "not-a-number"},
+        {"site": "aniList", "id": "0"},
+        {"site": "mikan", "id": "6001"}
+      ]
+    }
+  ]
+}

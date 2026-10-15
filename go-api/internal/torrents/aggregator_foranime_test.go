@@ -82,7 +82,7 @@ func TestFetchForAnime_VariantFanOut_RunsEachSourcePerVariant(t *testing.T) {
 		WithNyaaFn(uniqueFn(SourceNyaa, &nc)),
 	)
 
-	out, err := a.FetchForAnime(context.Background(), []string{"Naruto", "ナルト"}, nil)
+	out, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"Naruto", "ナルト"}})
 	require.NoError(t, err)
 
 	// 3 stubbed sources × 2 variants = 6 invocations, 6 rows (all unique).
@@ -111,7 +111,7 @@ func TestFetchForAnime_DedupsAcrossVariants(t *testing.T) {
 		WithNyaaFn(staticFn(nil, nil)),
 	)
 
-	out, err := a.FetchForAnime(context.Background(), []string{"title-a", "title-b"}, nil)
+	out, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"title-a", "title-b"}})
 	require.NoError(t, err)
 	require.Len(t, out, 1, "the same infohash under two variants dedups to one row")
 	assert.Equal(t, parseInfohash(shared.Magnet), out[0].Infohash, "survivor carries the normalised infohash")
@@ -148,7 +148,7 @@ func TestFetchForAnime_FoldsInAniDBFeed(t *testing.T) {
 	)
 
 	aid := int32(17389)
-	out, err := a.FetchForAnime(context.Background(), []string{"some-title"}, &aid)
+	out, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"some-title"}, AnidbID: &aid})
 	require.NoError(t, err)
 	require.True(t, sawAid.Load(), "the aid feed must be requested with ?aid=<id>")
 	require.Len(t, out, 1, "the aid-feed row is merged into the result")
@@ -188,7 +188,7 @@ func TestFetchForAnime_AniDBFeedOverlapDedups(t *testing.T) {
 	)
 
 	aid := int32(555)
-	out, err := a.FetchForAnime(context.Background(), []string{"dup-title"}, &aid)
+	out, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"dup-title"}, AnidbID: &aid})
 	require.NoError(t, err)
 	require.Len(t, out, 1, "keyword hit + aid-feed hit for the same torrent dedups to one row")
 	require.NotNil(t, out[0].Seeders, "the seeder-bearing copy wins the dedup")
@@ -209,7 +209,7 @@ func TestFetchForAnime_CacheSharedAcrossVariantOrder(t *testing.T) {
 		WithNyaaFn(staticFn(nil, nil)),
 	)
 
-	first, err := a.FetchForAnime(context.Background(), []string{"Alpha", "Beta"}, nil)
+	first, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"Alpha", "Beta"}})
 	require.NoError(t, err)
 	require.Len(t, first, 1)
 	require.Equal(t, int32(2), gc.Load(), "two variants → garden ran twice on the miss")
@@ -217,7 +217,7 @@ func TestFetchForAnime_CacheSharedAcrossVariantOrder(t *testing.T) {
 	a.cache.Wait()
 
 	// Same variant SET, reversed order + different casing → same cache key.
-	second, err := a.FetchForAnime(context.Background(), []string{"beta", "ALPHA"}, nil)
+	second, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"beta", "ALPHA"}})
 	require.NoError(t, err)
 	require.Len(t, second, 1, "cache hit returns the same shape")
 	assert.Equal(t, int32(2), gc.Load(), "reordered/recased variant set must reuse the cached entry")
@@ -242,7 +242,7 @@ func TestFetchForAnime_DoesNotAliasFetchKey(t *testing.T) {
 
 	// Same string via the anime path — must MISS (distinct namespace), so
 	// garden runs again rather than serving Fetch's cached entry.
-	_, err = a.FetchForAnime(context.Background(), []string{"naruto"}, nil)
+	_, err = a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"naruto"}})
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), gc.Load(), "anime-keyed lookup must not alias the plain Fetch key")
 }
@@ -262,7 +262,7 @@ func TestFetchForAnime_NoVariantsNoAid_ShortCircuits(t *testing.T) {
 	)
 
 	// Only blank variants and no aid → nothing to search.
-	out, err := a.FetchForAnime(context.Background(), []string{"", "   ", "\t"}, nil)
+	out, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"", "   ", "\t"}})
 	require.NoError(t, err)
 	assert.Empty(t, out)
 	assert.Equal(t, int32(0), gc.Load(), "no fan-out when there is nothing to search")
@@ -287,7 +287,7 @@ func TestFetchForAnime_NilAniDB_NoFeedRequested(t *testing.T) {
 		WithHTTPClient(newRewriteClient(srv.URL)),
 	)
 
-	out, err := a.FetchForAnime(context.Background(), []string{"title"}, nil)
+	out, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"title"}})
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	assert.False(t, hitServer.Load(), "nil anidbID must NOT issue an aid-feed request")
@@ -308,7 +308,7 @@ func TestFetchForAnime_EmptyResult_ShortTTL_ReFetches(t *testing.T) {
 		WithEmptyCacheTTL(50*time.Millisecond),
 	)
 
-	out, err := a.FetchForAnime(context.Background(), []string{"obscure"}, nil)
+	out, err := a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"obscure"}})
 	require.NoError(t, err)
 	require.Empty(t, out)
 	require.Equal(t, int32(1), gc.Load())
@@ -316,13 +316,13 @@ func TestFetchForAnime_EmptyResult_ShortTTL_ReFetches(t *testing.T) {
 	a.cache.Wait()
 
 	// Within the short window: cached empty, no re-fetch.
-	_, err = a.FetchForAnime(context.Background(), []string{"obscure"}, nil)
+	_, err = a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"obscure"}})
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), gc.Load(), "empty result cached within its short TTL")
 
 	// After expiry: re-fetch.
 	time.Sleep(150 * time.Millisecond)
-	_, err = a.FetchForAnime(context.Background(), []string{"obscure"}, nil)
+	_, err = a.FetchForAnime(context.Background(), AnimeQuery{Variants: []string{"obscure"}})
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), gc.Load(), "empty anime result must expire fast and re-fetch")
 }
@@ -341,11 +341,11 @@ func TestCleanVariants_TrimsAndDropsEmpties(t *testing.T) {
 func TestAnimeCacheKey_OrderAndCaseInsensitive(t *testing.T) {
 	t.Parallel()
 
-	k1 := animeCacheKey([]string{"Alpha", "Beta"}, nil)
-	k2 := animeCacheKey([]string{"beta", "ALPHA"}, nil)
+	k1 := animeCacheKey([]string{"Alpha", "Beta"}, nil, nil)
+	k2 := animeCacheKey([]string{"beta", "ALPHA"}, nil, nil)
 	assert.Equal(t, k1, k2, "key is sorted + lowercased so order/case don't matter")
 
 	aid := int32(7)
-	withAid := animeCacheKey([]string{"Alpha", "Beta"}, &aid)
+	withAid := animeCacheKey([]string{"Alpha", "Beta"}, &aid, nil)
 	assert.NotEqual(t, k1, withAid, "adding an aid changes the key")
 }

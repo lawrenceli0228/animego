@@ -1169,8 +1169,10 @@ type Querier interface {
 	GetTitleChineseByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetTitleChineseByAnilistIDsRow, error)
 	// Resolves the inputs the magnet aggregator needs to search by AniList id
 	// instead of a raw keyword.  Backs the /api/anime/torrents?anilistId=N path:
-	// the handler turns the four titles into deduped search variants and uses
-	// anidb_id (when present) to pull AnimeTosho's complete aid feed.
+	// the handler turns the four titles into deduped search variants, uses
+	// anidb_id (when present) to pull AnimeTosho's complete aid feed, and falls
+	// back to bgm_id when the AniList id alone does not name the show's Mikan
+	// bangumi page (internal/mikanidmap).
 	//
 	// anidb_id comes from anidb_id_map (Fribb's AniList->AniDB pairs), not from
 	// bgm_id_map: whether Bangumi agrees about a show says nothing about its

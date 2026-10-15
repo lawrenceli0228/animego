@@ -122,6 +122,13 @@ type Aggregator struct {
 	mikanFn  fetchFn
 	toshoFn  fetchFn
 
+	// mikanBangumiFn fetches Mikan's per-bangumi feed for FetchForAnime.
+	// It is not a registry source (it is keyed by an id, not the query the
+	// Fetcher interface carries), so it has its own slot: New() fills it
+	// with FetchMikanByBangumi over a.httpClient unless WithMikanBangumiFn
+	// supplied a stub.
+	mikanBangumiFn mikanBangumiFetchFn
+
 	// ownsCache marks whether New created the cache (and therefore
 	// must Close it on Aggregator teardown) versus the caller
 	// supplying one via WithCache.  Close() consults this flag.
@@ -257,6 +264,19 @@ func WithToshoFn(f fetchFn) Option {
 	}
 }
 
+// mikanBangumiFetchFn is the shape of the per-bangumi Mikan feed fetch.
+type mikanBangumiFetchFn func(ctx context.Context, mikanID int) ([]TorrentItem, error)
+
+// WithMikanBangumiFn overrides the fetch of Mikan's per-bangumi feed with
+// a stub.  Test-only.  See WithGardenFn.  FetchForAnime calls it whenever
+// the request carries a Mikan id, so the aggregator's own tests and the
+// anime handler tests use this to keep that feed off the network.
+func WithMikanBangumiFn(f func(ctx context.Context, mikanID int) ([]TorrentItem, error)) Option {
+	return func(a *Aggregator) {
+		a.mikanBangumiFn = f
+	}
+}
+
 // New constructs an Aggregator with sensible production defaults:
 //
 //   - 1-hour TTL cache sized to 500 entries
@@ -325,6 +345,13 @@ func New(opts ...Option) (*Aggregator, error) {
 	a.dmhyFn = a.resolveSource(SourceDmhy, a.dmhyFn)
 	a.mikanFn = a.resolveSource(SourceMikan, a.mikanFn)
 	a.toshoFn = a.resolveSource(SourceTosho, a.toshoFn)
+
+	if a.mikanBangumiFn == nil {
+		client := a.httpClient
+		a.mikanBangumiFn = func(ctx context.Context, mikanID int) ([]TorrentItem, error) {
+			return FetchMikanByBangumi(ctx, client, mikanID)
+		}
+	}
 
 	return a, nil
 }
@@ -395,7 +422,7 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 		return cached, nil
 	}
 
-	merged, err := a.fanOut(ctx, q)
+	merged, err := a.fanOut(ctx, q, a.registry.Sources())
 	if err != nil {
 		// fanOut only surfaces an error when the parent ctx was cancelled
 		// before any goroutine completed (runOne never returns non-nil).
@@ -412,27 +439,43 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 	return merged, nil
 }
 
+// AnimeQuery is what FetchForAnime searches one anime by.
+type AnimeQuery struct {
+	// Variants are the title keywords the registry fans out over.
+	Variants []string
+	// AnidbID, when set, folds in AnimeTosho's complete feed for that
+	// AniDB id.
+	AnidbID *int32
+	// MikanID, when set, is the anime's Mikan Project bangumi id.  Its
+	// per-bangumi feed then stands in for Mikan's keyword search: that feed
+	// lists every release for the season, so for this request Mikan is not
+	// searched by title.  The other sources still are.
+	MikanID *int32
+}
+
 // FetchForAnime is the id-keyed counterpart to Fetch: instead of a single
 // caller-supplied keyword it runs the registry fan-out once PER title
-// variant and, when anidbID is non-nil, folds in AnimeTosho's complete
-// AniDB-id feed (?aid=).  The combined rows are deduped (by infohash, so
-// the inevitable overlap between AnimeTosho's keyword hits and its aid
-// feed collapses harmlessly) and ranked by seeders exactly like Fetch.
+// variant and folds in the feeds keyed by the anime's ids: AnimeTosho's
+// complete AniDB-id feed (?aid=) when q.AnidbID is set, Mikan's
+// per-bangumi feed when q.MikanID is set.  The combined rows are deduped
+// (by infohash, so the overlap between an id feed and the keyword hits
+// collapses harmlessly) and ranked by seeders exactly like Fetch.
 //
 // Behaviour:
 //
 //  1. Variants are trimmed of surrounding whitespace and empties dropped.
-//     With no usable variant AND no anidbID there is nothing to search →
+//     With no usable variant AND no id feed there is nothing to search →
 //     return [] immediately (no upstream calls, no cache).
 //  2. Cache key is the sorted-join of the cleaned variant set plus the
-//     optional aid, so a show whose four titles produce the same variant
-//     set shares ONE cache entry rather than caching each variant
-//     separately.  A hit returns the cached slice as-is.
+//     optional aid and Mikan id, so a show whose four titles produce the
+//     same variant set shares ONE cache entry rather than caching each
+//     variant separately.  A hit returns the cached slice as-is.
 //  3. Cache miss → fan out the registry over every variant concurrently
-//     (errgroup), plus one AnimeTosho aid-feed call when anidbID != nil.
-//     Per-variant / per-source failures are absorbed exactly as in Fetch
-//     (logged, treated as empty) — only a parent-ctx cancellation surfaces
-//     as a top-level error.
+//     (errgroup), plus one AnimeTosho aid-feed call and one Mikan
+//     per-bangumi call when their ids are set.  With a Mikan id the
+//     fan-out leaves Mikan's keyword source out.  Per-variant / per-source
+//     failures are absorbed exactly as in Fetch (logged, treated as empty)
+//     — only a parent-ctx cancellation surfaces as a top-level error.
 //  4. Merge → dedup → rank → cache, sharing finalise + cacheResult with
 //     Fetch (same quality-aware TTL: long for a non-empty result, short
 //     for an all-source miss).
@@ -440,29 +483,35 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 // The per-source outbound throttle (runOne → limiterFor) still paces each
 // upstream, so even though this issues variants × sources requests the
 // token buckets keep any single source's outbound rate bounded.
-func (a *Aggregator) FetchForAnime(ctx context.Context, variants []string, anidbID *int32) ([]TorrentItem, error) {
-	clean := cleanVariants(variants)
-	if len(clean) == 0 && anidbID == nil {
-		// Nothing to search on — neither a keyword variant nor an aid feed.
+func (a *Aggregator) FetchForAnime(ctx context.Context, q AnimeQuery) ([]TorrentItem, error) {
+	clean := cleanVariants(q.Variants)
+	if len(clean) == 0 && q.AnidbID == nil && q.MikanID == nil {
+		// Nothing to search on — neither a keyword variant nor an id feed.
 		return []TorrentItem{}, nil
 	}
 
-	key := animeCacheKey(clean, anidbID)
+	key := animeCacheKey(clean, q.AnidbID, q.MikanID)
 	if cached, hit := a.cache.Get(key); hit {
 		return cached, nil
 	}
 
-	// Collect every variant's fan-out result plus the optional aid feed into
+	sources := a.registry.Sources()
+	if q.MikanID != nil {
+		sources = withoutSource(sources, SourceMikan)
+	}
+
+	// Collect every variant's fan-out result plus the optional id feeds into
 	// position-indexed slots so the merge order is deterministic regardless
 	// of which goroutine finishes first: variants in their (cleaned) order,
-	// then the aid feed last.
-	results := make([][]TorrentItem, len(clean)+1)
+	// then the aid feed, then the Mikan feed.
+	aidSlot, mikanSlot := len(clean), len(clean)+1
+	results := make([][]TorrentItem, len(clean)+2)
 
 	g, gctx := errgroup.WithContext(ctx)
 	for i, v := range clean {
 		i, v := i, v
 		g.Go(func() error {
-			items, err := a.fanOut(gctx, v)
+			items, err := a.fanOut(gctx, v, sources)
 			if err != nil {
 				return err
 			}
@@ -470,17 +519,24 @@ func (a *Aggregator) FetchForAnime(ctx context.Context, variants []string, anidb
 			return nil
 		})
 	}
-	if anidbID != nil {
-		aid := int(*anidbID)
+	if q.AnidbID != nil {
+		aid := int(*q.AnidbID)
 		g.Go(func() error {
-			results[len(clean)] = a.runToshoAniDB(gctx, aid)
+			results[aidSlot] = a.runToshoAniDB(gctx, aid)
+			return nil
+		})
+	}
+	if q.MikanID != nil {
+		mikanID := int(*q.MikanID)
+		g.Go(func() error {
+			results[mikanSlot] = a.runMikanBangumi(gctx, mikanID)
 			return nil
 		})
 	}
 
 	if err := g.Wait(); err != nil {
-		// Only a parent-ctx cancellation reaches here (fanOut/runToshoAniDB
-		// absorb per-source failures).  Propagate as-is.
+		// Nothing returns an error today: fanOut and the id-feed runners
+		// absorb every per-source failure.  Propagate one if that changes.
 		return nil, err
 	}
 
@@ -499,18 +555,17 @@ func (a *Aggregator) FetchForAnime(ctx context.Context, variants []string, anidb
 	return merged, nil
 }
 
-// fanOut runs the registry fan-out for a SINGLE query q: one goroutine per
-// registered source (errgroup, per-source 8s timeout + partial-failure
-// tolerance via runOne), merged in registration order.  It does NOT dedup,
+// fanOut runs the fan-out for a SINGLE query q over sources (the registry,
+// or for FetchForAnime with a Mikan id the registry minus Mikan): one
+// goroutine per source (errgroup, per-source 8s timeout + partial-failure
+// tolerance via runOne), merged in the order given.  It does NOT dedup,
 // rank, or cache — the callers (Fetch for one query, FetchForAnime for many
 // variants) own that so a multi-variant result is deduped across variants
 // rather than within each.
 //
 // Returns (nil, ctx.Err()) only when the caller's context is cancelled
 // before any goroutine completes — per-source failures are never errors.
-func (a *Aggregator) fanOut(ctx context.Context, q string) ([]TorrentItem, error) {
-	sources := a.registry.Sources()
-
+func (a *Aggregator) fanOut(ctx context.Context, q string, sources []Fetcher) ([]TorrentItem, error) {
 	// errgroup.WithContext gives each goroutine a derived context that
 	// is cancelled the moment any goroutine returns an error.  We never
 	// return non-nil from a goroutine (per-source errors are absorbed
@@ -605,6 +660,47 @@ func (a *Aggregator) runToshoAniDB(parent context.Context, aid int) []TorrentIte
 	return items
 }
 
+// runMikanBangumi is runToshoAniDB's counterpart for Mikan's per-bangumi
+// feed: the same per-source timeout, the same partial-failure contract
+// (logged, empty on failure, never panics), and SourceMikan's limiter, the
+// one Mikan's keyword search goes through.
+func (a *Aggregator) runMikanBangumi(parent context.Context, mikanID int) []TorrentItem {
+	ctx, cancel := context.WithTimeout(parent, perSourceTimeout)
+	defer cancel()
+
+	if err := a.limiterFor(SourceMikan).Wait(ctx); err != nil {
+		if a.logger != nil {
+			a.logger.Warn("torrents: mikan bangumi-feed rate-limit wait aborted", "mikan_id", mikanID, "error", err.Error())
+		}
+		return nil
+	}
+
+	items, err := a.mikanBangumiFn(ctx, mikanID)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("torrents: mikan bangumi-feed failed", "mikan_id", mikanID, "error", err.Error())
+		}
+		return nil
+	}
+	// A feed the deadline cut still returns the items read by then; note it,
+	// so a short Mikan list can be traced to the cut.
+	if ctx.Err() != nil && a.logger != nil {
+		a.logger.Warn("torrents: mikan bangumi-feed stopped at its deadline", "mikan_id", mikanID, "kept", len(items))
+	}
+	return items
+}
+
+// withoutSource returns sources minus the one named name, order kept.
+func withoutSource(sources []Fetcher, name Source) []Fetcher {
+	out := make([]Fetcher, 0, len(sources))
+	for _, s := range sources {
+		if s.Name() != name {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // runOne wraps a single Fetcher with the per-source 8s timeout and the
 // partial-failure tripwire.  Always returns a non-nil slice (possibly
 // empty) so the caller can append unconditionally.
@@ -657,16 +753,17 @@ func cleanVariants(variants []string) []string {
 }
 
 // animeCacheKey builds the FetchForAnime cache key from a cleaned variant
-// set plus the optional AniDB id.  The variants are lower-cased and SORTED
-// before joining so a show whose titles arrive in any order — or whose
-// variant set is identical to another request's — collapses to ONE cache
-// entry rather than caching per variant or per ordering.  The aid (when
-// present) is appended so a keyword-only request and an aid-augmented one
-// for the same titles don't collide (the aid feed can add rows the keyword
-// search misses).  A leading marker namespaces these keys away from Fetch's
-// single-query keys so a one-keyword Fetch and a single-variant
+// set plus the optional AniDB and Mikan ids.  The variants are lower-cased
+// and SORTED before joining so a show whose titles arrive in any order — or
+// whose variant set is identical to another request's — collapses to ONE
+// cache entry rather than caching per variant or per ordering.  Each id
+// (when present) is appended so a keyword-only request and an id-augmented
+// one for the same titles don't collide: the aid feed can add rows the
+// keyword search misses, and a Mikan id swaps Mikan's keyword search for
+// its per-bangumi feed.  A leading marker namespaces these keys away from
+// Fetch's single-query keys so a one-keyword Fetch and a single-variant
 // FetchForAnime never alias.
-func animeCacheKey(clean []string, anidbID *int32) string {
+func animeCacheKey(clean []string, anidbID, mikanID *int32) string {
 	lowered := make([]string, len(clean))
 	for i, v := range clean {
 		lowered[i] = strings.ToLower(v)
@@ -676,6 +773,9 @@ func animeCacheKey(clean []string, anidbID *int32) string {
 	key := "anime:" + strings.Join(lowered, "\x00")
 	if anidbID != nil {
 		key += "|aid=" + strconv.Itoa(int(*anidbID))
+	}
+	if mikanID != nil {
+		key += "|mikan=" + strconv.Itoa(int(*mikanID))
 	}
 	return key
 }

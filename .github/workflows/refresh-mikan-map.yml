@@ -1,0 +1,74 @@
+name: Refresh AniList/Bangumi→Mikan map
+
+# Regenerates the vendored map from AniList ids and Bangumi subject ids to
+# Mikan Project bangumi ids (go-api/internal/mikanidmap/mikan_map.json) from
+# bangumi-data (https://github.com/bangumi-data/bangumi-data, CC BY 4.0):
+# cmd/mikanmap asks the npm registry for the latest bangumi-data release,
+# downloads that release's dist/data.json from its git tag, and records the
+# release in the file next to the attribution.
+#
+# The magnet handler uses the map to read a show's per-bangumi Mikan feed
+# instead of searching Mikan by title.  An id that bangumi-data links to more
+# than one Mikan page is left out; the PR body is cmd/mikanmap's report, which
+# lists those conflicts and every changed and removed id with the pages they
+# name, so a refresh can be reviewed instead of rubber-stamped.
+#
+# A sibling of refresh-bgm-map.yml, for the same reasons: the go-api binary
+# embeds the map (go:embed), so prod needs no runtime fetch, and every refresh
+# is a reviewable diff you can roll back.  Separate so each map gets its own
+# PR and report, and one failing upstream cannot hold up the other.
+#
+# Opening the PR needs the repo setting Settings → Actions → General →
+# "Allow GitHub Actions to create and approve pull requests"; see the note in
+# refresh-bgm-map.yml.
+
+on:
+  schedule:
+    # Mondays 03:30 UTC, half an hour after the bgm map refresh.
+    - cron: "30 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-mikan-map
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Regenerate + open PR if changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go-api/go.mod
+
+      - name: Regenerate map
+        working-directory: go-api
+        run: go run ./cmd/mikanmap -report "$RUNNER_TEMP/mikanmap-report.md"
+
+      # A PR opened with GITHUB_TOKEN triggers no workflows, so the unit-test
+      # gate never sees this file.  Check here that the embedded map still
+      # parses and that the generator's own tests pass.
+      - name: Check the regenerated map
+        working-directory: go-api
+        run: go test -count=1 ./cmd/mikanmap/ ./internal/mikanidmap/
+
+      - name: Open PR if the map changed
+        uses: peter-evans/create-pull-request@v8
+        with:
+          # Only fires when the regenerated JSON differs from what's vendored.
+          add-paths: |
+            go-api/internal/mikanidmap/mikan_map.json
+          branch: chore/refresh-mikan-map
+          commit-message: "chore(torrents): refresh AniList/Bangumi→Mikan map"
+          title: "chore(torrents): refresh AniList/Bangumi→Mikan map"
+          body-path: ${{ runner.temp }}/mikanmap-report.md
+          delete-branch: true
