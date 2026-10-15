@@ -15,7 +15,7 @@
 //     Priority (the only Capable source in the package)
 //
 // Fixtures are small hand-written JSON modelled on real
-// feed.animetosho.org output; nothing here touches the network
+// AnimeTosho feed output; nothing here touches the network
 // (newRewriteClient redirects to an httptest server — same trick the other
 // source tests use, and it preserves path + query so we can assert on q /
 // aid / only_tor).
@@ -344,7 +344,7 @@ func TestBuildToshoSearchURL_EncodesQuery(t *testing.T) {
 
 	got, err := buildToshoSearchURL("葬送的 芙莉莲")
 	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(got, toshoEndpoint+"?"), "endpoint base preserved")
+	assert.True(t, strings.HasPrefix(got, "https://animetosho.org/feed/json?"), "the feed path on the main host: %s", got)
 	assert.Contains(t, got, "only_tor=1", "only_tor flag present")
 	assert.Contains(t, got, "q=", "q param present")
 	assert.NotContains(t, got, "葬送", "CJK must be percent-encoded")
@@ -356,7 +356,7 @@ func TestBuildToshoAniDBURL_EncodesID(t *testing.T) {
 
 	got, err := buildToshoAniDBURL(17389)
 	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(got, toshoEndpoint+"?"), "endpoint base preserved")
+	assert.True(t, strings.HasPrefix(got, "https://animetosho.org/feed/json?"), "the feed path on the main host: %s", got)
 	assert.Contains(t, got, "aid=17389", "aid param present")
 	assert.Contains(t, got, "only_tor=1", "only_tor flag present")
 	assert.NotContains(t, got, "q=", "aid feed must not carry a keyword param")
