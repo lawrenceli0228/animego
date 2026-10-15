@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { runImport } from "@/app/[lang]/library/_services/importPipeline.js";
+import { fileRefId } from "@/lib/library/recordFactory.js";
+import { memoryDb } from "./memoryDb.js";
 
 // Cross-batch home guards (watch-folder duplicate-card fix):
 // a NEW file (unknown hash, dandan can't identify it) must join an existing
@@ -283,6 +285,246 @@ describe("AniList identity", () => {
     );
     expect(writes.seriesPuts).toHaveLength(0);
     expect(writes.episodes[0].seriesId).toBe("sr-s1");
+  });
+});
+// ─── the match speaks for one file ──────────────────────────────────────────
+//
+// dandanplay is asked about the cluster's representative and nothing else. The
+// clusterizer merges folders whose titles normalize alike, and "+ add folder"
+// hands over every file, known or not, so a cluster can hold a season-one
+// folder the library already filed plus a sequel's "- 16" at the root — and the
+// root sorts first, so "- 16" is the one asked. Routing the whole cluster by
+// that answer re-pointed all fourteen filed season-one files at the second
+// season's card. These run the real clusterizer and persistence against an
+// in-memory database and assert where every file ends up.
+
+const S1_FOLDER = "[Sakurato] Koori no Jouheki [01 -14][AVC-8bit 1080P AAC][CHS]";
+
+function s1Item(n, overrides = {}) {
+  const name = `[Sakurato] Koori no Jouheki [${String(n).padStart(2, "0")}][AVC-8bit 1080P AAC][CHS].mp4`;
+  return item({
+    fileId: `${name}|1000|0`,
+    file: { size: 1000, lastModified: 0 },
+    fileName: name,
+    relativePath: `${S1_FOLDER}/${name}`,
+    parsedTitle: "Koori no Jouheki",
+    episode: n,
+    hash16M: `s1e${n}`,
+    ...overrides,
+  });
+}
+
+/** A row for a file the library already filed, keyed the way the pipeline keys it. */
+function filedRef(it, episodeId) {
+  return {
+    id: fileRefId(it),
+    libraryId: "lib-1",
+    relPath: it.relativePath,
+    size: it.file.size,
+    mtime: 0,
+    matchStatus: "matched",
+    episodeId,
+    hash16M: it.hash16M,
+  };
+}
+
+function episodeRow(id, seriesId, number, primaryFileId) {
+  return { id, seriesId, number, kind: "main", primaryFileId, alternateFileIds: [] };
+}
+
+/** dandanplay answering per file, the way prod answers these files. */
+function dandanByHash(answers) {
+  return { match: async (hash) => answers[hash] ?? null };
+}
+
+function seriesOfFile(db, it) {
+  const ref = db.fileRefs.rows.get(fileRefId(it));
+  return ref ? db.episodes.rows.get(ref.episodeId)?.seriesId : undefined;
+}
+
+const KOORI_S2_CARD = {
+  series: { id: "sr-s2", titleEn: "Koori no Jouheki 2nd Season", anilistId: 213805, updatedAt: 0 },
+  episode: episodeRow("s2-ep1", "sr-s2", 1, "s2e01-ref"),
+  ref: {
+    id: "s2e01-ref",
+    libraryId: "lib-1",
+    relPath: "The.Ramparts.of.Ice.S02E01.mkv",
+    size: 5,
+    mtime: 0,
+    matchStatus: "matched",
+    episodeId: "s2-ep1",
+  },
+};
+
+describe("the match routes a cluster only when it speaks for every file", () => {
+  test("★ files already filed stay put when a new file elsewhere in their cluster matches another card", async () => {
+    // "+ add folder" after "- 16" arrived: the filed first season and the new
+    // root file are one cluster, and "- 16" is its representative.
+    const filed = [s1Item(1), s1Item(2)];
+    const db = memoryDb({
+      series: [{ ...KOORI.series[0], id: "sr-s1" }, KOORI_S2_CARD.series],
+      episodes: [
+        episodeRow("s1-ep1", "sr-s1", 1, fileRefId(filed[0])),
+        episodeRow("s1-ep2", "sr-s1", 2, fileRefId(filed[1])),
+        KOORI_S2_CARD.episode,
+      ],
+      fileRefs: [filedRef(filed[0], "s1-ep1"), filedRef(filed[1], "s1-ep2"), KOORI_S2_CARD.ref],
+    });
+    await runImport(
+      { items: [...filed, kooriItem()], libraryId: "lib-1" },
+      {
+        db,
+        dandan: dandanByHash({
+          koori16: matchedAs(213805, "冰之城墙 第二季"),
+          s1e1: matchedAs(186497, "冰之城墙"),
+          s1e2: matchedAs(186497, "冰之城墙"),
+        }),
+      },
+    );
+    expect(seriesOfFile(db, filed[0])).toBe("sr-s1");
+    expect(seriesOfFile(db, filed[1])).toBe("sr-s1");
+    const s2Episodes = [...db.episodes.rows.values()].filter((e) => e.seriesId === "sr-s2");
+    expect(s2Episodes.map((e) => e.id)).toEqual(["s2-ep1"]);
+    expect(db.episodes.rows.get("s2-ep1").alternateFileIds).toEqual([]);
+  });
+
+  test("★ a file already filed stays put when a new file in its own folder is the one asked", async () => {
+    // One folder: "05" is filed on card A, "01" is new and, being the lowest
+    // number, is the representative. Its match names card B.
+    const filed = item({
+      fileId: "f5|700|0",
+      fileName: "[Sub] Frieren - 05.mkv",
+      relativePath: "Frieren/[Sub] Frieren - 05.mkv",
+      episode: 5,
+      hash16M: "frieren05",
+    });
+    const fresh = item({
+      fileId: "f1|700|0",
+      fileName: "[Sub] Frieren - 01.mkv",
+      relativePath: "Frieren/[Sub] Frieren - 01.mkv",
+      episode: 1,
+      hash16M: "frieren01",
+    });
+    const db = memoryDb({
+      series: [
+        { id: "sr-a", titleEn: "Frieren", anilistId: 100, updatedAt: 0 },
+        { id: "sr-b", titleEn: "Something Else", anilistId: 200, updatedAt: 0 },
+      ],
+      episodes: [episodeRow("a-ep5", "sr-a", 5, fileRefId(filed))],
+      fileRefs: [filedRef(filed, "a-ep5")],
+    });
+    await runImport(
+      { items: [filed, fresh], libraryId: "lib-1" },
+      { db, dandan: dandanByHash({ frieren01: matchedAs(200, "Something Else") }) },
+    );
+    expect(seriesOfFile(db, filed)).toBe("sr-a");
+    expect(seriesOfFile(db, fresh)).toBe("sr-a");
+  });
+
+  test("★ a cluster merged across folders is not filed on the card its representative matched", async () => {
+    // Deleting the misfiled first-season card and rescanning: every file is
+    // new, the folders merge by title, and "- 16" is asked. The first season
+    // must not be filed on the second season's card.
+    const fresh = [s1Item(1), s1Item(2)];
+    const db = memoryDb({
+      series: [KOORI_S2_CARD.series],
+      episodes: [KOORI_S2_CARD.episode],
+      fileRefs: [KOORI_S2_CARD.ref],
+    });
+    await runImport(
+      { items: [...fresh, kooriItem()], libraryId: "lib-1" },
+      {
+        db,
+        dandan: dandanByHash({
+          koori16: matchedAs(213805, "冰之城墙 第二季"),
+          s1e1: matchedAs(186497, "冰之城墙"),
+          s1e2: matchedAs(186497, "冰之城墙"),
+        }),
+      },
+    );
+    expect(seriesOfFile(db, fresh[0])).not.toBe("sr-s2");
+    expect(seriesOfFile(db, fresh[1])).not.toBe("sr-s2");
+    expect(db.episodes.rows.get("s2-ep1").alternateFileIds).toEqual([]);
+  });
+
+  test("a binding made by a cluster merged across folders steers no later cluster", async () => {
+    // A first import of all three files. However the clusters are ordered, no
+    // file may end up hidden as another episode's alternate.
+    const netflix = item({
+      fileId: "nf|900|0",
+      file: { size: 900, lastModified: 0 },
+      fileName: "The.Ramparts.of.Ice.S02E01.Clouds.and.Rain.1080p.NF.WEB-DL.mkv",
+      relativePath: "The.Ramparts.of.Ice.S02E01.Clouds.and.Rain.1080p.NF.WEB-DL.mkv",
+      parsedTitle: "The Ramparts of Ice",
+      parsedSeason: 2,
+      episode: 1,
+      hash16M: "nf-s2e01",
+    });
+    const db = memoryDb({});
+    await runImport(
+      { items: [s1Item(1), kooriItem(), netflix], libraryId: "lib-1" },
+      {
+        db,
+        dandan: dandanByHash({
+          koori16: matchedAs(213805, "冰之城墙 第二季"),
+          s1e1: matchedAs(186497, "冰之城墙"),
+          "nf-s2e01": matchedAs(213805, "冰之城墙 第二季"),
+        }),
+      },
+    );
+    for (const ep of db.episodes.rows.values()) {
+      expect(ep.alternateFileIds ?? []).toEqual([]);
+    }
+  });
+
+  test("a special in a bound show's folder still joins the show", async () => {
+    // Specials are often their own AniList entry. The folder says which show
+    // they belong to, the push only ever sends main episodes, and a card split
+    // off here has no tool that would move it back.
+    const special = item({
+      fileId: "sp|700|0",
+      fileName: "[Sub] Frieren - SP01.mkv",
+      relativePath: "Frieren/[Sub] Frieren - SP01.mkv",
+      episode: 1,
+      parsedKind: "sp",
+      hash16M: "frierenSP1",
+    });
+    const db = memoryDb({
+      series: [{ ...EXISTING.series[0], anilistId: 154587 }],
+      episodes: [{ ...EXISTING.episodes[0], seriesId: "sr-1" }],
+      fileRefs: [{ ...EXISTING.fileRefs[0], libraryId: "lib-1" }],
+    });
+    await runImport(
+      { items: [special], libraryId: "lib-1" },
+      { db, dandan: dandanByHash({ frierenSP1: matchedAs(999001, "Frieren Special") }) },
+    );
+    expect(seriesOfFile(db, special)).toBe("sr-1");
+  });
+
+  test("a card merged into another does not lend its binding to new files", async () => {
+    // watch sync already treats a merged-in card's binding as possibly stale;
+    // filing by it would hide the real show's episode on someone else's card.
+    const gamma = item({
+      fileId: "g1|700|0",
+      fileName: "[Sub] Gamma - 01.mkv",
+      relativePath: "[Sub] Gamma - 01.mkv",
+      parsedTitle: "Gamma",
+      episode: 1,
+      hash16M: "gamma01",
+    });
+    const db = memoryDb({
+      series: [
+        { id: "sr-root", titleEn: "Alpha", anilistId: 100, updatedAt: 0 },
+        { id: "sr-merged", titleEn: "Beta", anilistId: 2002, updatedAt: 0 },
+      ],
+      userOverride: [{ seriesId: "sr-root", mergedFrom: ["sr-merged"], updatedAt: 0 }],
+    });
+    await runImport(
+      { items: [gamma], libraryId: "lib-1" },
+      { db, dandan: dandanByHash({ gamma01: matchedAs(2002, "Gamma") }) },
+    );
+    expect(seriesOfFile(db, gamma)).not.toBe("sr-merged");
+    expect(seriesOfFile(db, gamma)).not.toBe("sr-root");
   });
 });
 // (content-hash home precedence is locked by importPipeline.hardening.test.js)
