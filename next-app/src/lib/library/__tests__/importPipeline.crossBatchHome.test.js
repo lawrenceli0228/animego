@@ -47,6 +47,7 @@ function fakeDb({
     userOverride: { toArray: async () => [] },
     series: {
       toArray: async () => series,
+      get: async (id) => series.find((s) => s.id === id),
       put: async (row) => {
         writes.seriesPuts.push(row);
       },
@@ -188,6 +189,100 @@ describe("precedence", () => {
     );
     expect(writes.seriesPuts).toHaveLength(1);
     expect(writes.seriesUpdates).toHaveLength(0);
+  });
+});
+
+// What the real client returns for a match: `/api/dandanplay/match` emits no
+// dandanplay animeId, so `animes[0].animeId` is 0 on every matched import and
+// the AniList id is the only identity the pipeline learns. The precedence test
+// above models an `animeId` the client never produces, which is how a title
+// guard overriding a positive identity went unnoticed.
+function matchedAs(anilistId, title) {
+  return {
+    isMatched: true,
+    animes: [{ animeId: 0, animeTitle: title }],
+    enrichment: { titleZh: title },
+    anilistId,
+  };
+}
+
+// The reported case: "Koori no Jouheki - 16" against a library holding the
+// first season (titled "Koori no Jouheki") and a second-season card made from
+// a Netflix-named file, so only the first season's title matches the filename.
+const KOORI = {
+  series: [
+    { id: "sr-s1", titleEn: "Koori no Jouheki", anilistId: 186497, updatedAt: 0 },
+    { id: "sr-s2", titleEn: "Koori no Jouheki 2nd Season", anilistId: 213805, updatedAt: 0 },
+  ],
+};
+
+function kooriItem(overrides = {}) {
+  return item({
+    fileName: "[SweetSub&LoliHouse] Koori no Jouheki - 16 [WebRip 1080p].mkv",
+    relativePath: "[SweetSub&LoliHouse] Koori no Jouheki - 16 [WebRip 1080p].mkv",
+    parsedTitle: "Koori no Jouheki",
+    episode: 16,
+    hash16M: "koori16",
+    ...overrides,
+  });
+}
+
+describe("AniList identity", () => {
+  test("★ a match joins the card bound to its AniList id, not the card its title matches", async () => {
+    const { db, writes } = fakeDb(KOORI);
+    await runImport(
+      { items: [kooriItem()], libraryId: "lib-1" },
+      { db, dandan: dandanReturning(matchedAs(213805, "冰之城墙 第二季")) },
+    );
+    expect(writes.seriesPuts).toHaveLength(0);
+    expect(writes.episodes).toHaveLength(1);
+    expect(writes.episodes[0].seriesId).toBe("sr-s2");
+  });
+
+  test("★ a title home bound to a different AniList id is refused", async () => {
+    // Only the first season is in the library. The match names a show no card
+    // is bound to, so it mints its own card instead of filing under season 1.
+    const { db, writes } = fakeDb({ series: [KOORI.series[0]] });
+    await runImport(
+      { items: [kooriItem()], libraryId: "lib-1" },
+      { db, dandan: dandanReturning(matchedAs(213805, "冰之城墙 第二季")) },
+    );
+    expect(writes.seriesPuts).toHaveLength(1);
+    expect(writes.episodes[0].seriesId).not.toBe("sr-s1");
+  });
+
+  test("a folder home bound to a different AniList id is refused", async () => {
+    const { db, writes } = fakeDb({
+      ...EXISTING,
+      series: [{ ...EXISTING.series[0], anilistId: 154587 }],
+    });
+    await runImport(
+      { items: [item({ parsedTitle: "Some Other Show" })], libraryId: "lib-1" },
+      { db, dandan: dandanReturning(matchedAs(999999, "Some Other Show")) },
+    );
+    expect(writes.seriesPuts).toHaveLength(1);
+  });
+
+  test("a title home with no binding of its own still takes a matched file", async () => {
+    // An unbound card is not evidence against the match; it is the card the
+    // title guard exists to find.
+    const { db, writes } = fakeDb({ series: [{ id: "sr-1", titleZh: "Frieren", updatedAt: 0 }] });
+    await runImport(
+      { items: [item({ relativePath: "Downloads/[Sub] Frieren - 07.mkv" })], libraryId: "lib-1" },
+      { db, dandan: dandanReturning(matchedAs(154587, "Frieren")) },
+    );
+    expect(writes.seriesPuts).toHaveLength(0);
+    expect(writes.episodes[0].seriesId).toBe("sr-1");
+  });
+
+  test("the same title home with the same AniList id joins it", async () => {
+    const { db, writes } = fakeDb({ series: [{ ...KOORI.series[0] }] });
+    await runImport(
+      { items: [kooriItem({ episode: 14, hash16M: "koori14" })], libraryId: "lib-1" },
+      { db, dandan: dandanReturning(matchedAs(186497, "冰之城墙")) },
+    );
+    expect(writes.seriesPuts).toHaveLength(0);
+    expect(writes.episodes[0].seriesId).toBe("sr-s1");
   });
 });
 // (content-hash home precedence is locked by importPipeline.hardening.test.js)

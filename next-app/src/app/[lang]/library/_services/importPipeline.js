@@ -415,25 +415,46 @@ async function processCluster(p) {
     }
   }
 
-  // Home guards — structural signals, strongest first, that stop a 'new'
-  // verdict from minting a duplicate card:
+  // Home guards — signals, strongest first, that stop a 'new' verdict from
+  // minting a duplicate card:
   //
   //   1. content hash  — every file already homed on one series (re-import).
   //                      Checked first of all, above, as `knownHome`.
-  //   2. same folder   — the new episode landed in a directory whose existing
+  //   2. AniList id    — the match named a show a card is already bound to.
+  //   3. same folder   — the new episode landed in a directory whose existing
   //                      files all belong to one series (the watch-folder
   //                      case: a brand-new episode dandanplay can't match yet)
-  //   3. same title    — normalized title tokens uniquely match one existing
+  //   4. same title    — normalized title tokens uniquely match one existing
   //                      series, season-compatible (flat download folders)
   //
-  // 2 and 3 only apply when the verdict carries NO dandan identity
-  // (seasonRecord.animeId): when dandanplay positively identified the content
-  // as something new, its answer outranks folder/title heuristics. All three
-  // bail to 'new' (manual merge stays the fallback) on any ambiguity.
+  // 3 and 4 only apply when the verdict carries NO dandan identity
+  // (seasonRecord.animeId), and never land on a card bound to a different
+  // AniList id than the match carried: when the content was positively
+  // identified as something else, that answer outranks folder/title
+  // heuristics. All of them bail to 'new' (manual merge stays the fallback) on
+  // any ambiguity.
+  //
+  // 2 exists because the identity in 3 and 4's precondition is never there:
+  // `/api/dandanplay/match` emits no dandanplay animeId, so a matched import
+  // carries only its AniList id. Without it, a sequel's "Show - 16" filed under
+  // the first season's card because only that card's title matched the name.
+  if (verdict.kind === 'new' && matchedAnilistId && p.homeIndexes) {
+    const bound = deriveBoundHome(matchedAnilistId, p.homeIndexes, clusterSeason);
+    if (bound) {
+      verdict = {
+        kind: 'reuse',
+        seriesId: bound.seriesId,
+        seasonId: bound.seasonId,
+        animeId: bound.animeId,
+      };
+    }
+  }
+
   if (verdict.kind === 'new' && !verdict.seasonRecord?.animeId && p.homeIndexes) {
-    const home =
-      deriveFolderHome(cluster, p.homeIndexes, clusterSeason) ??
-      deriveTitleHome(cluster, p.homeIndexes, clusterSeason);
+    const home = [
+      deriveFolderHome(cluster, p.homeIndexes, clusterSeason),
+      deriveTitleHome(cluster, p.homeIndexes, clusterSeason),
+    ].find((h) => h && !isBoundElsewhere(h.seriesId, matchedAnilistId, p.homeIndexes));
     if (home) {
       verdict = {
         kind: 'reuse',
@@ -464,6 +485,9 @@ async function processCluster(p) {
       // refuse to stomp a locked one anyway — the gate here is about not
       // claiming a reach this code does not have.
       await bindImportedSeries(p.db, verdict.seriesRecord?.id, matchedAnilistId);
+      // A later cluster in this batch matching the same show joins this card
+      // rather than minting a second one for the dedupe sweep to fold.
+      rememberBinding(p.homeIndexes, verdict.seriesRecord?.id, matchedAnilistId);
       // Push the freshly persisted season onto priorSeasons so later clusters
       // in the SAME batch can dedupe against it. Without this, three folders
       // of the same anime imported together would create three series each
@@ -535,6 +559,9 @@ async function processCluster(p) {
  *   collision so only UNIQUE titles ever match.
  * - seasonsBySeries: seriesId → Season[] for season-compatibility checks and
  *   seasonId selection.
+ * - anilistBySeries / seriesByAnilist: each card's AniList binding, both ways.
+ *   Several cards can share an id until the dedupe sweep folds them; the
+ *   first by primary key answers for all of them, so the choice is stable.
  *
  * @param {import('dexie').Dexie} db
  * @param {any[]} priorSeasons
@@ -573,6 +600,16 @@ async function buildHomeIndexes(db, priorSeasons) {
 
   /** @type {Map<string, string|null>} */
   const titleIndex = new Map();
+  /** @type {Map<string, number>} */
+  const anilistBySeries = new Map();
+  /** @type {Map<number, string>} */
+  const seriesByAnilist = new Map();
+  const byId = [...seriesRows].sort((a, b) => (a?.id < b?.id ? -1 : a?.id > b?.id ? 1 : 0));
+  for (const s of byId) {
+    if (!s?.id || !isAnilistId(s.anilistId)) continue;
+    anilistBySeries.set(s.id, s.anilistId);
+    if (!seriesByAnilist.has(s.anilistId)) seriesByAnilist.set(s.anilistId, s.id);
+  }
   for (const s of seriesRows) {
     if (!s?.id) continue;
     const titles = new Set([s.titleZh, s.titleEn, s.titleJa].filter(Boolean));
@@ -595,7 +632,52 @@ async function buildHomeIndexes(db, priorSeasons) {
     else seasonsBySeries.set(season.seriesId, [season]);
   }
 
-  return { folderIndex, titleIndex, seasonsBySeries };
+  return { folderIndex, titleIndex, seasonsBySeries, anilistBySeries, seriesByAnilist };
+}
+
+/** @param {unknown} id */
+function isAnilistId(id) {
+  return typeof id === 'number' && Number.isInteger(id) && id > 0;
+}
+
+/**
+ * Home #2 — the card already bound to the AniList id this cluster's match
+ * carried. An AniList id names one season, so this outranks the parsed season
+ * number: a conflict there only means the seasonId is left unset.
+ *
+ * @returns {{seriesId: string, seasonId: string|null, animeId: number|undefined}|null}
+ */
+function deriveBoundHome(anilistId, homeIndexes, clusterSeason) {
+  const seriesId = homeIndexes.seriesByAnilist?.get(anilistId);
+  if (!seriesId) return null;
+  const picked = pickHomeSeason(homeIndexes.seasonsBySeries.get(seriesId), clusterSeason);
+  return {
+    seriesId,
+    seasonId: picked.season?.id ?? null,
+    animeId: picked.season?.animeId,
+  };
+}
+
+/**
+ * True when the card is bound to a show other than the one the match named.
+ * An unbound card, or a cluster with no AniList id, is never evidence against.
+ */
+function isBoundElsewhere(seriesId, anilistId, homeIndexes) {
+  if (!isAnilistId(anilistId)) return false;
+  const bound = homeIndexes.anilistBySeries?.get(seriesId);
+  return bound !== undefined && bound !== anilistId;
+}
+
+/**
+ * Record a binding this import just made, for the clusters after it in the
+ * same batch. The indexes are this run's own working state, built per call.
+ */
+function rememberBinding(homeIndexes, seriesId, anilistId) {
+  if (!homeIndexes || !seriesId || !isAnilistId(anilistId)) return;
+  homeIndexes.anilistBySeries.set(seriesId, anilistId);
+  if (!homeIndexes.seriesByAnilist.has(anilistId)) {
+    homeIndexes.seriesByAnilist.set(anilistId, seriesId);
+  }
 }
 
 /**
