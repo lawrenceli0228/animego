@@ -18,7 +18,11 @@ import { join } from "node:path";
 // page. A render test cannot see this — the markup was always complete; the
 // card was hidden by CSS.
 
-const FILES = ["TodayRail.module.css", "cards.module.css"];
+// 按色调逛 holds to the same rule. Its stylesheet kept the first six cards of a
+// family on a wide screen (four, then three, as it narrowed) with
+// `.card:nth-child(n + 7) { display: none; }`, while the pill above promised
+// the whole family — and there was no way to reach the rest.
+const FILES = ["TodayRail.module.css", "HueBrowser.module.css", "cards.module.css"];
 
 /** Rules that remove an element from the page, as opposed to restyling it. */
 const HIDES = /(?:^|[;{\s])(?:display\s*:\s*none|visibility\s*:\s*hidden|content-visibility\s*:\s*hidden)/;
@@ -47,7 +51,7 @@ function hidesACard(rule: Rule): boolean {
 
 const rules = FILES.flatMap((file) => rulesOf(file, readFileSync(join(import.meta.dir, file), "utf8")));
 
-describe("the today rail's stylesheets", () => {
+describe("the homepage rails' stylesheets", () => {
   test("the scan finds the card rules at all (guards the parser, not the CSS)", () => {
     expect(rules.filter((r) => /\.card\b/.test(r.selector)).length).toBeGreaterThanOrEqual(3);
   });
@@ -60,6 +64,10 @@ describe("the today rail's stylesheets", () => {
     expect(old.some(hidesACard)).toBe(true);
     // …and lets an ordinary card rule through.
     expect(rulesOf("ok", ".card { flex: none; width: 148px; }").some(hidesACard)).toBe(false);
+  });
+
+  test("the check recognises the rule that used to cap 按色调逛 at six cards", () => {
+    expect(rulesOf("old", ".card:nth-child(n + 7) { display: none; }").some(hidesACard)).toBe(true);
   });
 
   test("no rule, at any width, hides a card", () => {

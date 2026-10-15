@@ -15,7 +15,8 @@ import { collectConsoleErrors } from "../_helpers";
  *     hidden — after which the slide's 8 seconds start over — and while it is
  *     scrolled out of view; under reduced motion it never moves on its own
  *     and offers no pause button;
- *   - 按色调逛 shows one hue family at a time.
+ *   - 按色调逛 shows one hue family at a time, as a rail holding every show
+ *     its pill counts, and the rail's end moves on to the next family.
  *
  * The rotation tests run on Playwright's fake clock: installed before the
  * page loads, so the page hydrates on time that flows, then paused and moved
@@ -165,6 +166,42 @@ test.describe("homepage", () => {
     await target.click();
     await expect(target).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("group", { name: "按色调筛选" }).locator('[aria-pressed="true"]')).toHaveCount(1);
+  });
+
+  // The pill used to say "15 部" over a panel that held 10 and drew 6 on a wide
+  // screen, with no way to the rest.
+  test("按色调逛's rail holds every show its pill counts, and its end moves on to the next family", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await page.goto("/");
+    const group = page.getByRole("group", { name: "按色调筛选" });
+    const pills = group.getByRole("button");
+    test.skip((await pills.count()) < 2, "fewer than two hue families in this stack");
+    await waitForHydration(page, '[aria-label="按色调筛选"] button');
+
+    const section = page.locator('section[aria-labelledby="home-hue"]');
+    const pressed = group.locator('[aria-pressed="true"]');
+    const before = await pressed.getAttribute("data-family");
+    const counted = Number((await pressed.locator("span").last().textContent())?.match(/\d+/)?.[0]);
+    const panel = section.locator('div[data-active="true"]');
+    const rail = panel.locator(`#home-hue-${before}`);
+    await expect(rail.locator(":scope > [data-card]")).toHaveCount(counted);
+
+    // The slider names the family it moves through.
+    await expect(panel.getByRole("slider")).toHaveAttribute("aria-controls", `home-hue-${before}`);
+
+    // At the end of the row: the next family, and the way there. The button
+    // goes inert with its panel, so focus lands on the new family's pill.
+    await rail.evaluate((r) => {
+      r.scrollLeft = r.scrollWidth;
+    });
+    const go = rail.locator(":scope > div button");
+    await go.click();
+    await expect(pressed).not.toHaveAttribute("data-family", before ?? "");
+    const after = await pressed.getAttribute("data-family");
+    await expect(group.locator(`[data-family="${after}"]`)).toBeFocused();
+    await expect(section.locator('div[data-active="true"]').locator(`#home-hue-${after}`)).toBeVisible();
+
+    expect(errors, `Unexpected console errors:\n${errors.join("\n")}`).toEqual([]);
   });
 });
 

@@ -23,7 +23,7 @@
 // a thin slider: its thumb is as wide as the share of the row in view, and is
 // dragged, or the track clicked, or the keyboard used on the range input
 // behind it. The arithmetic is lib/home/railScroll.ts; the wiring is
-// useTodayRail.ts.
+// useRail.ts, shared with 按色调逛.
 
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
@@ -44,8 +44,9 @@ import {
   useRailEntrance,
   useRailMotion,
   useRailSlider,
-} from "./useTodayRail";
+} from "./useRail";
 import cards from "./cards.module.css";
+import railSlider from "./railSlider.module.css";
 import section from "./section.module.css";
 import styles from "./TodayRail.module.css";
 
@@ -122,6 +123,7 @@ export default function TodayRail({ items, dayKey, dayLabel, tomorrow, serverNow
         prefetch={false}
         className={`${cards.card} ${styles.card}`}
         style={tone}
+        data-card
         data-state={slot.state}
       >
         <div className={`${cards.cover} ${styles.cover}`}>
@@ -216,7 +218,7 @@ export default function TodayRail({ items, dayKey, dayLabel, tomorrow, serverNow
           <input
             ref={inputRef}
             type="range"
-            className={styles.scrub}
+            className={railSlider.scrub}
             aria-label={t("home.todayScroll")}
             aria-controls={RAIL_ID}
             min={0}
@@ -226,15 +228,15 @@ export default function TodayRail({ items, dayKey, dayLabel, tomorrow, serverNow
             {...slider.inputHandlers}
           />
           <div
-            className={styles.slider}
+            className={railSlider.slider}
             data-overflow={slider.overflow ? "true" : "false"}
             data-active={slider.active ? "true" : undefined}
             data-dragging={slider.dragging ? "true" : undefined}
             aria-hidden
             {...slider.sliderHandlers}
           >
-            <span className={styles.track} />
-            <span ref={thumbRef} className={styles.thumb} />
+            <span className={railSlider.track} />
+            <span ref={thumbRef} className={railSlider.thumb} />
           </div>
         </div>
       )}

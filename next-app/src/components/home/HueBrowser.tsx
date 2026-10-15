@@ -5,17 +5,17 @@
 //
 // Families come pre-built from the server (lib/home/hueFamilies.ts), labels
 // included, so this component translates nothing through an indirect key.
-// Only the choice of family is client state. Every panel stays mounted and a
-// switch is a staggered crossfade, like the hero's.
+// Only the choice of family is client state. Every family is a sideways rail
+// holding all of its shows (HueRail.tsx); every panel stays mounted and a
+// switch is a staggered crossfade, like the hero's. A rail ends by offering
+// the next family.
 
-import Link from "@/components/ui/LocaleLink";
-import FadeImage from "@/components/ui/FadeImage";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { HueFamilyKey } from "@/lib/home/hueFamilies";
-import { cardToneVars, toneLadder } from "@/lib/home/tone";
+import { nextFamily, type HueFamilyKey } from "@/lib/home/hueFamilies";
+import { toneLadder } from "@/lib/home/tone";
 import type { HueCard } from "@/lib/home/viewModels";
+import HueRail, { type HueRailCopy } from "./HueRail";
 import SectionHeader from "./SectionHeader";
-import cards from "./cards.module.css";
 import section from "./section.module.css";
 import styles from "./HueBrowser.module.css";
 
@@ -24,7 +24,7 @@ export interface HueFamilyView {
   label: string;
   /** The family's representative angle, for its dot and its selected pill. */
   hue: number;
-  /** Everything in the family — the pill's number. `items` may be capped. */
+  /** Everything in the family — the pill's number, and the length of `items`. */
   count: number;
   items: HueCard[];
 }
@@ -37,26 +37,61 @@ interface HueBrowserProps {
   countTemplate: string;
   families: HueFamilyView[];
   defaultKey: HueFamilyKey;
+  railCopy: HueRailCopy;
 }
 
 type Vars = CSSProperties & Record<`--${string}`, string>;
 
-export default function HueBrowser({ title, note, groupLabel, countTemplate, families, defaultKey }: HueBrowserProps) {
+/**
+ * On a phone the pills scroll sideways and a pill can sit off-screen. Bring it
+ * into the row's view — by scrolling the row itself, never scrollIntoView,
+ * which would move the page.
+ */
+function revealPill(row: HTMLElement, pill: HTMLElement) {
+  if (row.scrollWidth <= row.clientWidth) return;
+  const start = pill.offsetLeft;
+  const end = start + pill.offsetWidth;
+  if (start >= row.scrollLeft && end <= row.scrollLeft + row.clientWidth) return;
+  row.scrollLeft = start - 20;
+}
+
+export default function HueBrowser({
+  title,
+  note,
+  groupLabel,
+  countTemplate,
+  families,
+  defaultKey,
+  railCopy,
+}: HueBrowserProps) {
   const [selected, setSelected] = useState<HueFamilyKey>(defaultKey);
   const pillsRef = useRef<HTMLDivElement | null>(null);
 
-  // On a phone the pills scroll sideways, and the default (largest) family
-  // can start off-screen. Bring its pill into the row's view on arrival — by
-  // scrolling the row itself, never scrollIntoView, which would move the page.
+  const pillOf = (key: HueFamilyKey) =>
+    pillsRef.current?.querySelector<HTMLElement>(`[data-family="${key}"]`) ?? null;
+
+  // The default (largest) family can start off-screen in the phone's pill row.
   useEffect(() => {
     const row = pillsRef.current;
     const pill = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
-    if (!row || !pill || row.scrollWidth <= row.clientWidth) return;
-    if (pill.offsetLeft + pill.offsetWidth <= row.clientWidth) return;
-    row.scrollLeft = pill.offsetLeft - 20;
+    if (row && pill) revealPill(row, pill);
   }, []);
 
+  // The end of a rail moves on to the next family. The button that was
+  // pressed goes inert with its panel, so focus goes to the new family's pill
+  // rather than falling back to the page.
+  const goTo = (key: HueFamilyKey) => {
+    setSelected(key);
+    const row = pillsRef.current;
+    const pill = pillOf(key);
+    if (!row || !pill) return;
+    revealPill(row, pill);
+    pill.focus({ preventScroll: true });
+  };
+
   if (families.length === 0) return null;
+
+  const byKey = new Map(families.map((f) => [f.key, f]));
 
   return (
     <section className={section.bleed} aria-labelledby="home-hue">
@@ -71,6 +106,7 @@ export default function HueBrowser({ title, note, groupLabel, countTemplate, fam
               type="button"
               className={styles.pill}
               style={vars}
+              data-family={f.key}
               aria-pressed={f.key === selected}
               onClick={() => setSelected(f.key)}
             >
@@ -83,39 +119,19 @@ export default function HueBrowser({ title, note, groupLabel, countTemplate, fam
       </div>
       <div className={styles.stage}>
         {families.map((f) => {
-          const on = f.key === selected;
+          const nextKey = nextFamily(families, f.key);
+          const next = nextKey ? (byKey.get(nextKey) ?? null) : null;
           return (
-            <div
+            <HueRail
               key={f.key}
-              className={styles.panel}
-              data-active={on}
-              aria-hidden={!on}
-              inert={!on}
-            >
-              {f.items.map((it, k) => {
-                const vars = {
-                  ...(cardToneVars(it.hue) as unknown as Vars),
-                  "--stagger": `${60 + k * 60}ms`,
-                } as Vars;
-                return (
-                  <Link key={it.id} href={it.href} prefetch={false} className={`${cards.card} ${styles.card}`} style={vars}>
-                    <div className={`${cards.cover} ${styles.cover}`}>
-                      <span className={cards.zoom}>
-                        <FadeImage src={it.cover} alt="" width={200} height={267} className={cards.img} />
-                      </span>
-                      <span className={styles.band} aria-hidden />
-                    </div>
-                    <div className={styles.body}>
-                      <span className={`${cards.title} ${cards.clamp2} ${styles.title}`}>{it.title}</span>
-                      <span className={cards.meta}>
-                        {it.score ? <span className={cards.score}>{it.score}</span> : null}
-                        <span className={cards.clamp1}>{it.meta}</span>
-                      </span>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
+              family={f}
+              active={f.key === selected}
+              next={next}
+              onNext={() => {
+                if (nextKey) goTo(nextKey);
+              }}
+              copy={railCopy}
+            />
           );
         })}
       </div>

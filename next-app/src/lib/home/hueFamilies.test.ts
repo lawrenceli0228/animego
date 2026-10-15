@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { HUE_FAMILIES, colouredFirst, defaultFamily, groupByHueFamily, hueFamilyOf } from "./hueFamilies";
+import { HUE_FAMILIES, colouredFirst, defaultFamily, groupByHueFamily, hueFamilyOf, nextFamily } from "./hueFamilies";
 
 // "按色调逛" groups the season by the hue of each cover. The ranges are half-open
 // [lo, hi) and red wraps through 0°, which is exactly where an off-by-one would
@@ -93,6 +93,29 @@ describe("defaultFamily", () => {
 
   test("is null when nothing has a hue", () => {
     expect(defaultFamily([])).toBeNull();
+  });
+});
+
+// Each family's rail ends by offering the next one, so a reader who reaches
+// the end of the blues can carry on into the purples without going back up
+// to the pills. Circle order, wrapping: purple hands on to red.
+describe("nextFamily", () => {
+  const g = (key: string) => ({ key }) as never;
+
+  test("is the family after this one, in the order given", () => {
+    expect(nextFamily([g("red"), g("yellow"), g("blue")], "yellow" as never)).toBe("blue");
+  });
+
+  test("wraps from the last family to the first", () => {
+    expect(nextFamily([g("red"), g("yellow"), g("blue")], "blue" as never)).toBe("red");
+  });
+
+  test("is null when there is only one family: nowhere else to go", () => {
+    expect(nextFamily([g("blue")], "blue" as never)).toBeNull();
+  });
+
+  test("is null for a family that is not in the list", () => {
+    expect(nextFamily([g("red"), g("blue")], "green" as never)).toBeNull();
   });
 });
 
