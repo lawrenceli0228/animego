@@ -92,20 +92,21 @@ export async function runImport(input, ctx) {
   // Stage 2: load prior seasons for animeIdHint resolution
   const priorSeasons = await db.seasons.toArray();
 
-  // Cross-batch home indexes (folder + title). Best-effort: a fake db in
-  // tests may not implement toArray on every table — degrade to null and the
-  // structural fallbacks simply stay off.
+  // Stage 2b: load userOverrides → Map<seriesId, UserOverride> for in-loop lookup.
+  // Loaded once at start; mid-run dialog edits won't affect this batch. Read
+  // before the home indexes, which leave merged-in cards out.
+  const overrideRows = db.userOverride ? await db.userOverride.toArray() : [];
+  const userOverrides = new Map(overrideRows.map((o) => [o.seriesId, o]));
+
+  // Cross-batch home indexes (folder + title + AniList). Best-effort: a fake
+  // db in tests may not implement toArray on every table — degrade to null and
+  // the structural fallbacks simply stay off.
   let homeIndexes = null;
   try {
-    homeIndexes = await buildHomeIndexes(db, priorSeasons);
+    homeIndexes = await buildHomeIndexes(db, priorSeasons, overrideRows);
   } catch {
     homeIndexes = null;
   }
-
-  // Stage 2b: load userOverrides → Map<seriesId, UserOverride> for in-loop lookup.
-  // Loaded once at start; mid-run dialog edits won't affect this batch.
-  const overrideRows = db.userOverride ? await db.userOverride.toArray() : [];
-  const userOverrides = new Map(overrideRows.map((o) => [o.seriesId, o]));
 
   // Stage 3: clusterize
   //
@@ -437,8 +438,26 @@ async function processCluster(p) {
   // 2 exists because the identity in 3 and 4's precondition is never there:
   // `/api/dandanplay/match` emits no dandanplay animeId, so a matched import
   // carries only its AniList id. Without it, a sequel's "Show - 16" filed under
-  // the first season's card because only that card's title matched the name.
-  if (verdict.kind === 'new' && matchedAnilistId && p.homeIndexes) {
+  // the first season's card because no other card's title matched the name.
+  //
+  // The match describes the representative and nothing else, so 2 — and the
+  // refusal in 3 and 4 — act on it only when it speaks for the whole cluster
+  // (`matchSpeaksForCluster`). The clusterizer merges folders whose titles
+  // normalize alike, and "+ add folder" hands over files the library already
+  // filed; routing such a cluster by one new file's answer re-pointed a filed
+  // first season at the sequel's card. Those clusters keep the folder and
+  // title homes exactly as they were. The refusal also needs a main episode
+  // to speak: a special is often its own AniList entry, but it belongs with
+  // its show, and the push never sends specials anyway.
+  const routesByMatch =
+    verdict.kind === 'new' &&
+    isAnilistId(matchedAnilistId) &&
+    p.homeIndexes != null &&
+    (await matchSpeaksForCluster(cluster, p.db));
+  const refusesFor =
+    routesByMatch && (rep?.parsedKind ?? 'main') === 'main' ? matchedAnilistId : undefined;
+
+  if (routesByMatch) {
     const bound = deriveBoundHome(matchedAnilistId, p.homeIndexes, clusterSeason);
     if (bound) {
       verdict = {
@@ -454,7 +473,7 @@ async function processCluster(p) {
     const home = [
       deriveFolderHome(cluster, p.homeIndexes, clusterSeason),
       deriveTitleHome(cluster, p.homeIndexes, clusterSeason),
-    ].find((h) => h && !isBoundElsewhere(h.seriesId, matchedAnilistId, p.homeIndexes));
+    ].find((h) => h && !isBoundElsewhere(h.seriesId, refusesFor, p.homeIndexes));
     if (home) {
       verdict = {
         kind: 'reuse',
@@ -486,8 +505,11 @@ async function processCluster(p) {
       // claiming a reach this code does not have.
       await bindImportedSeries(p.db, verdict.seriesRecord?.id, matchedAnilistId);
       // A later cluster in this batch matching the same show joins this card
-      // rather than minting a second one for the dedupe sweep to fold.
-      rememberBinding(p.homeIndexes, verdict.seriesRecord?.id, matchedAnilistId);
+      // rather than minting a second one for the dedupe sweep to fold — when
+      // the match spoke for this card's files, and so describes the card.
+      if (routesByMatch) {
+        rememberBinding(p.homeIndexes, verdict.seriesRecord?.id, matchedAnilistId);
+      }
       // Push the freshly persisted season onto priorSeasons so later clusters
       // in the SAME batch can dedupe against it. Without this, three folders
       // of the same anime imported together would create three series each
@@ -562,11 +584,15 @@ async function processCluster(p) {
  * - anilistBySeries / seriesByAnilist: each card's AniList binding, both ways.
  *   Several cards can share an id until the dedupe sweep folds them; the
  *   first by primary key answers for all of them, so the choice is stable.
+ *   A card merged into another is left out: watch sync already treats its
+ *   binding as possibly stale, and filing by it would hide a new episode on
+ *   whatever card it was merged into.
  *
  * @param {import('dexie').Dexie} db
  * @param {any[]} priorSeasons
+ * @param {{ mergedFrom?: string[] }[]} [overrideRows]
  */
-async function buildHomeIndexes(db, priorSeasons) {
+async function buildHomeIndexes(db, priorSeasons, overrideRows = []) {
   const dirnameOf = (relPath) => {
     const idx = relPath.lastIndexOf('/');
     return idx === -1 ? '__root__' : relPath.slice(0, idx);
@@ -604,9 +630,10 @@ async function buildHomeIndexes(db, priorSeasons) {
   const anilistBySeries = new Map();
   /** @type {Map<number, string>} */
   const seriesByAnilist = new Map();
+  const mergedIn = new Set(overrideRows.flatMap((o) => o?.mergedFrom ?? []));
   const byId = [...seriesRows].sort((a, b) => (a?.id < b?.id ? -1 : a?.id > b?.id ? 1 : 0));
   for (const s of byId) {
-    if (!s?.id || !isAnilistId(s.anilistId)) continue;
+    if (!s?.id || !isAnilistId(s.anilistId) || mergedIn.has(s.id)) continue;
     anilistBySeries.set(s.id, s.anilistId);
     if (!seriesByAnilist.has(s.anilistId)) seriesByAnilist.set(s.anilistId, s.id);
   }
@@ -656,6 +683,26 @@ function deriveBoundHome(anilistId, homeIndexes, clusterSeason) {
     seasonId: picked.season?.id ?? null,
     animeId: picked.season?.animeId,
   };
+}
+
+/**
+ * Whether the representative's match may route this whole cluster: its files
+ * came from one folder, and none of them is filed yet. dandanplay is asked
+ * about the representative alone, the clusterizer merges folders by title, and
+ * a file the library already filed keeps the episode it is on.
+ *
+ * @param {import('@/lib/library/types').MatchCluster} cluster
+ * @param {import('dexie').Dexie|null|undefined} db
+ * @returns {Promise<boolean>}
+ */
+async function matchSpeaksForCluster(cluster, db) {
+  if ((cluster.groups?.length ?? 0) > 1) return false;
+  if (!db) return true;
+  for (const item of cluster.items ?? []) {
+    const ref = await db.fileRefs.get(fileRefId(item));
+    if (ref?.episodeId) return false;
+  }
+  return true;
 }
 
 /**
