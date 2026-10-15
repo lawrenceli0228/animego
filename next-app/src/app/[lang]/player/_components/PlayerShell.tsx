@@ -13,7 +13,9 @@
  * Supports BOTH entry modes (parity port):
  *   - Library hand-off: `?seriesId=&resumeEpisode=` → loads Series + Episodes
  *     + FileRefs from Dexie, auto-matches against dandanplay, auto-resumes
- *     a specific episode when resumeEpisode is set.
+ *     a specific episode when resumeEpisode is set. `&file=<fileRefId>` names
+ *     which of that episode's files to play — one of its other versions —
+ *     instead of its primary.
  *   - Drop-zone: `/player` with no params → DropZone surface; on drop, the
  *     matching pipeline (useDandanMatch) takes over.
  */
@@ -69,6 +71,7 @@ import {
   type BindingResolverDb,
 } from "@/app/[lang]/library/_services/resolveSeriesBinding";
 import { useSeriesDetail } from "@/app/[lang]/library/_hooks/useSeriesDetail";
+import { episodeHoldingFile } from "@/app/[lang]/library/_services/otherVersions";
 import { useVideoFiles } from "@/app/[lang]/library/_hooks/useVideoFiles";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — JSDoc-only JS module
@@ -454,6 +457,8 @@ function PlayerShellInner() {
   const router = useLocaleRouter();
   const locationSeriesId = sp.get("seriesId");
   const resumeEpisodeRaw = sp.get("resumeEpisode");
+  // Which of the episode's files the link asked for; absent means its primary.
+  const locationFileRef = sp.get("file");
   const locationResumeEpisode = useMemo(() => {
     if (resumeEpisodeRaw == null) return null;
     const n = Number(resumeEpisodeRaw);
@@ -966,10 +971,19 @@ function PlayerShellInner() {
   }, [matchResult, playbackPhase, playingEp, playingFile, loadComments]);
 
 
-  // P3: library mode — episode click handler
+  // P3: library mode — episode click handler. `fileRefId` picks one of the
+  // episode's other versions; it is honoured only when this episode holds that
+  // file, and the primary plays otherwise.
   const handleLibraryEpisodePlay = useCallback(
-    async (episodeId: string) => {
-      const file = await seriesDetail.getFile(episodeId);
+    async (episodeId: string, fileRefId?: string) => {
+      const ep = seriesDetail.episodes.find((e: any) => e.id === episodeId);
+      const version =
+        fileRefId && ep && episodeHoldingFile([ep], fileRefId)
+          ? seriesDetail.fileRefById.get(fileRefId)
+          : undefined;
+      const file = version
+        ? await seriesDetail.getFileByRef(version.id)
+        : await seriesDetail.getFile(episodeId);
       if (!file) {
         if (fileHandles.status === "denied") {
           setDenialDetected(true);
@@ -978,8 +992,7 @@ function PlayerShellInner() {
         }
         return;
       }
-      const ep = seriesDetail.episodes.find((e: any) => e.id === episodeId);
-      const fileRef = seriesDetail.fileRefByEpisode.get(episodeId);
+      const fileRef = version ?? seriesDetail.fileRefByEpisode.get(episodeId);
       if (!ep || !fileRef) return;
 
       // Prefer server-shaped matchResult.episodeMap when auto-match has landed;
@@ -1151,7 +1164,10 @@ function PlayerShellInner() {
     if (libraryEmptyKind) return;
     if (playbackPhase === "playing") return;
     if (autoResumeAttempted) return;
+    // A named file decides the episode by itself: in a merged card two
+    // members can each have an episode with this number.
     const ep =
+      episodeHoldingFile(seriesDetail.episodes, locationFileRef) ??
       seriesDetail.episodes.find(
         (e: any) =>
           e.number === locationResumeEpisode && e.kind === "main",
@@ -1165,10 +1181,11 @@ function PlayerShellInner() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAutoResumeAttempted(true);
     if (!ep) return;
-    handleLibraryEpisodePlay(ep.id);
+    handleLibraryEpisodePlay(ep.id, locationFileRef ?? undefined);
   }, [
     locationSeriesId,
     locationResumeEpisode,
+    locationFileRef,
     seriesDetail,
     playbackPhase,
     autoResumeAttempted,
@@ -1469,7 +1486,13 @@ function PlayerShellInner() {
       {/* PLAYING */}
       {uiPhase === "playing" && (
         <div style={fadeUp}>
-          <header style={s.playHeader} data-testid="player-header">
+          {/* data-playing-file: which FileRef is playing — the only outward
+              sign of which of an episode's versions was opened. */}
+          <header
+            style={s.playHeader}
+            data-testid="player-header"
+            data-playing-file={playingFile?.fileId ?? undefined}
+          >
             <HudBackButton
               onClick={handleBackToList}
               label={t("player.backToList")}

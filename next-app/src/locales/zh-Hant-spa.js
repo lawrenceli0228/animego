@@ -1396,6 +1396,8 @@ const zhHant = {
       notDownloaded: 'EP {{num}} · 未下載',
       unclassified: '未歸類',
       unclassifiedHint: '集號不在本季範圍內 — 單獨列出以免被藏起來',
+      otherVersions: '其他版本',
+      otherVersionsHint: '同一集的其他檔案 — 點開播放這一份',
     },
     // ImportMiniPill
     miniPill: {

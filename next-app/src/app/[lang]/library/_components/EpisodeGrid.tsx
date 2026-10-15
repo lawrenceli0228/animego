@@ -17,6 +17,7 @@ import { motion } from "motion/react";
 import { mono, PLAYER_HUE, PROGRESS_FILL } from "@/components/landing/shared/hud-tokens";
 import { useLang } from "@/lib/lang-client";
 import type { EpisodeGridModel, GridCell, GridEpisodeRow } from "../_services/episodeGridModel";
+import type { OtherVersionEntry, OtherVersionGroup } from "../_services/otherVersions";
 
 const HUE = PLAYER_HUE.local;
 
@@ -75,6 +76,16 @@ const s = {
     fontSize: 10,
     letterSpacing: "0.04em",
     color: "rgba(235,235,245,0.40)",
+  } as CSSProperties,
+  versionSource: {
+    ...mono,
+    fontSize: 10,
+    letterSpacing: "0.04em",
+    color: "rgba(235,235,245,0.55)",
+    margin: "12px 0 8px",
+    // Wrapped, not truncated: the release group usually closes the folder
+    // name ("… [ktnbytes]"), which is the part that tells versions apart.
+    overflowWrap: "anywhere",
   } as CSSProperties,
   chip: {
     ...mono,
@@ -191,7 +202,10 @@ export interface EpisodeGridProps {
   /** False while the IDB read is still in flight. */
   loaded: boolean;
   reduced: boolean;
-  onPick: (episode: GridEpisodeRow) => void;
+  /** `fileRefId` is set when the chip is one of the episode's other versions. */
+  onPick: (episode: GridEpisodeRow, fileRefId?: string) => void;
+  /** Other releases of the card's episodes, by where they came from. */
+  otherVersions?: readonly OtherVersionGroup[];
 }
 
 /**
@@ -199,7 +213,8 @@ export interface EpisodeGridProps {
  *
  * Both lanes render. `model.unclassified` is the only thing standing between a
  * file numbered outside its season and a UI it cannot be reached from — see
- * the R1 note on `EpisodeGridModel`.
+ * the R1 note on `EpisodeGridModel`. The other-versions lane under it does the
+ * same for a second release of an episode the grid already shows.
  */
 export function EpisodeGrid({
   model,
@@ -208,11 +223,12 @@ export function EpisodeGrid({
   loaded,
   reduced,
   onPick,
+  otherVersions = [],
 }: EpisodeGridProps) {
   const { t } = useLang();
   const { cells, unclassified, gridLength, inferred, episodeCount } = model;
 
-  function renderChip(cell: GridCell, testId: string) {
+  function renderChip(cell: GridCell, testId: string, version?: OtherVersionEntry) {
     const { episode } = cell;
     const prog = episode ? progressByEpisodeId.get(episode.id) : undefined;
     const completed = prog?.completed === true;
@@ -231,9 +247,11 @@ export function EpisodeGrid({
     const title =
       episode == null
         ? t("library.detail.notDownloaded").replace("{{num}}", label)
-        : openable
-          ? `EP ${label}`
-          : t("library.detail.unclassified");
+        : !openable
+          ? t("library.detail.unclassified")
+          : version
+            ? `EP ${label} · ${version.fileName}`
+            : `EP ${label}`;
 
     return (
       <motion.button
@@ -259,7 +277,7 @@ export function EpisodeGrid({
           ...(openable ? null : s.chipDisabled),
         }}
         disabled={!openable}
-        onClick={() => openable && episode && onPick(episode)}
+        onClick={() => openable && episode && onPick(episode, version?.fileRefId)}
         variants={{
           hidden: { opacity: 0, y: 6 },
           show: {
@@ -336,6 +354,38 @@ export function EpisodeGrid({
                 )}
               </motion.div>
             </>
+          )}
+
+          {otherVersions.length > 0 && (
+            <div data-testid="episode-grid-other-versions">
+              <div style={s.laneHeader}>
+                <span style={s.laneTitle}>{t("library.detail.otherVersions")}</span>
+                <span style={s.laneHint}>{t("library.detail.otherVersionsHint")}</span>
+              </div>
+              {otherVersions.map((group) => (
+                <div key={group.key}>
+                  <div style={s.versionSource} title={group.label}>
+                    {group.label}
+                  </div>
+                  <motion.div style={s.grid} {...gridMotion}>
+                    {/* Keyed by file: one episode can have several versions. */}
+                    {group.entries.map((entry) =>
+                      renderChip(
+                        {
+                          key: `version:${entry.key}`,
+                          number: entry.number,
+                          rawNumber: entry.rawNumber,
+                          episode: entry.episode,
+                          state: "available",
+                        },
+                        `episode-chip-version-${entry.fileRefId}`,
+                        entry,
+                      ),
+                    )}
+                  </motion.div>
+                </div>
+              ))}
+            </div>
           )}
         </>
       )}

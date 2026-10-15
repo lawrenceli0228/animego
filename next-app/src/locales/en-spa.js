@@ -1339,6 +1339,8 @@ const en = {
       notDownloaded: 'EP {{num}} · not downloaded',
       unclassified: 'Unclassified',
       unclassifiedHint: 'Numbered outside this season — listed here so nothing is hidden',
+      otherVersions: 'Other versions',
+      otherVersionsHint: 'Other files of the same episode — open one to play it',
     },
     // ImportMiniPill
     miniPill: {
