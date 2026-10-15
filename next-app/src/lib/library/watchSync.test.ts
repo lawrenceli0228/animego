@@ -314,18 +314,17 @@ describe("decidePush", () => {
     });
   });
 
-  test("★ a mixed library refuses the offset the delta alone would have accepted", () => {
-    // The case that makes the previous test's claim mean something. Two files
-    // are already season-relative and one is not; the delta is only the
-    // absolute one.
+  test("★ a mixed library translates only the number that cannot be the season's own", () => {
+    // Two files are season-relative and one is numbered continuously — a
+    // season card started from an "S02E01" release and then fed a group's
+    // "- 16". The whole set does not fit the offset:
     //
-    //   delta alone  [38]        -> 38-28 = 10, inside [1,10], looks fine
     //   whole set    [1,2,38]    -> 1-28 = -27, outside the season entirely
     //
-    // Validating the delta would translate 38 and leave 1 and 2 as they are,
-    // putting two numbering spaces in one subscription — and the grid, which
-    // decides on the whole card, would still render 38 as 38. Nothing would
-    // fail; the two would just quietly disagree.
+    // but 38 is past the season's end, so it cannot be the season's own
+    // number, and 38-28 lands inside it. 1 and 2 already do. Sending 38 as it
+    // is would be range-checked into a 400 on every push, for good. The grid
+    // makes the same per-number call, so the two still agree.
     const plan = decidePush({
       ...base,
       synced: new Set([1, 2]),
@@ -337,7 +336,26 @@ describe("decidePush", () => {
       push: true,
       anilistId: 154587,
       episodes: [38],
-      siteEpisodes: [38],
+      siteEpisodes: [10],
+    });
+  });
+
+  test("★ a translation that would collide with a number already held is not made", () => {
+    // 1..12 and 13..24 on a 12-episode season with 12 before it: two seasons
+    // on one card. 13-12 = 1 is already a file here, so which of them is the
+    // season's episode 1 is not something this can know.
+    const plan = decidePush({
+      ...base,
+      synced: new Set([1, 2]),
+      watched: [1, 2, 13],
+      totalEpisodes: 12,
+      episodeOffset: 12,
+    });
+    expect(plan).toEqual({
+      push: true,
+      anilistId: 154587,
+      episodes: [13],
+      siteEpisodes: [13],
     });
   });
 

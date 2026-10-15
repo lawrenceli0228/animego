@@ -67,22 +67,46 @@ export function offsetApplies(
 }
 
 /**
- * Local episode numbers → the numbers the site uses, or `null` when the
- * offset must not be applied.
+ * Local episode number → the number the site uses, for every distinct number
+ * given. A number the offset does not apply to maps to itself, so a caller
+ * never has to tell "unchanged" from "unknown".
  *
- * ALL OR NOTHING, and that is the load-bearing part. Translating the episodes
- * that happen to fit and leaving the rest alone would put two numbering
- * spaces inside one request — and worse, it would let the grid and the push
- * disagree about the same file, because the grid applies `offsetApplies` to
- * the whole card. `null` means "send what you already had", which is exactly
- * what the grid means by rendering the stored number.
+ * WHOLE SET FIRST. When the offset maps every number into the season, all of
+ * them move: that is a continuously numbered run, and validating it as a set
+ * is what keeps a lone ambiguous number from deciding for the rest.
+ *
+ * THEN, ONLY WHAT CANNOT BE THE SEASON'S OWN. A card can hold both spaces at
+ * once — a season begun from an "S02E01" release (stored 1) and then fed a
+ * group's "- 16". The set fails, but 16 is past the season's end, so it is not
+ * the season's own number, and 16 - offset lands inside the season. That one
+ * moves. A number already inside the season stays where it is, because there
+ * it could be either and the stored number is the safe reading. A move that
+ * would land on a number the set already holds is not made either: two
+ * seasons on one card look exactly like this, and which file is episode 1 is
+ * not knowable here.
+ *
+ * Both the grid and the watch push call this with the numbers they hold, so
+ * the rule is stated once and the two cannot drift apart.
  */
-export function toSiteEpisodes(
+export function toSiteNumbers(
   numbers: readonly number[],
   total: number | undefined,
   offset: number | undefined,
-): number[] | null {
-  if (!offsetApplies(numbers, total, offset)) return null;
-  const shift = offset as number;
-  return numbers.map((n) => n - shift);
+): Map<number, number> {
+  const distinct = [...new Set(numbers)];
+  const out = new Map(distinct.map((n) => [n, n] as const));
+  if (offset === undefined || offset <= 0) return out;
+  if (typeof total !== "number" || !Number.isInteger(total) || total <= 0) return out;
+
+  if (offsetApplies(distinct, total, offset)) {
+    for (const n of distinct) out.set(n, n - offset);
+    return out;
+  }
+
+  const held = new Set(distinct);
+  for (const n of distinct) {
+    const site = n - offset;
+    if (n > total && site >= 1 && site <= total && !held.has(site)) out.set(n, site);
+  }
+  return out;
 }

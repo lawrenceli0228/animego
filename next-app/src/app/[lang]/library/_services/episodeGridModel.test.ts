@@ -239,6 +239,26 @@ describe("normalizeEpisodeNumbers — a measured offset outranks the inference",
     expect(normalizeEpisodeNumbers(rows, 12, 30).get("mixed-13")).toBe(13);
   });
 
+  test("★ a card mixing the season's own numbers with a continuous one moves only the continuous one", () => {
+    // The reported case: a second-season card begun from "S02E01" (stored 1),
+    // then fed "Koori no Jouheki - 16". Fourteen episodes precede the season
+    // and it runs twelve. 16 is past the end, so it is not the season's own
+    // number; 16-14 = 2 is. 1 already fits and stays.
+    const rows = [ep("s2e01", 1), ep("koori-16", 16)];
+    const map = normalizeEpisodeNumbers(rows, 12, 14);
+    expect(map.get("s2e01")).toBe(1);
+    expect(map.get("koori-16")).toBe(2);
+  });
+
+  test("★ a continuous number is not moved onto a slot another file already holds", () => {
+    // Two seasons on one card: which file is the season's episode 1 is not
+    // knowable, so neither moves and the extra one stays in the lane.
+    const rows = [...run("a-", 1, 12), ...run("b-", 13, 24)];
+    const map = normalizeEpisodeNumbers(rows, 12, 12);
+    expect(map.get("a-1")).toBe(1);
+    expect(map.get("b-13")).toBe(13);
+  });
+
   test("a non-integer or negative offset is ignored, not coerced", () => {
     const rows = [ep("odd-38", 38)];
     for (const bad of [-1, 1.5, Number.NaN]) {

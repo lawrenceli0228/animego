@@ -25,7 +25,7 @@
 // ids to display numbers and never writes anything.
 
 import { positiveTotal, resolveEpisodeGridLength } from "./seriesGroups";
-import { offsetApplies, readEpisodeOffset } from "@/lib/library/episodeOffset";
+import { readEpisodeOffset, toSiteNumbers } from "@/lib/library/episodeOffset";
 
 /** The `Episode` fields the grid reads. See `lib/library/types.js`. */
 export interface GridEpisodeRow {
@@ -128,25 +128,26 @@ export function normalizeEpisodeNumbers(
   //
   // It is checked against the files before it is applied. The server knows
   // the franchise; only this side knows what is on disk, and `format` is a
-  // coarse proxy for "counts toward the numbering" — so an offset that does
-  // not map every episode into [1, total] is discarded rather than trusted.
+  // coarse proxy for "counts toward the numbering" — so the whole card moves
+  // only when the offset maps every episode into [1, total], and otherwise
+  // only a number past the season's end that the offset maps into it does
+  // (see `toSiteNumbers`).
   //
-  // A known offset that does not fit returns identity and does NOT fall
-  // through to the inference below. That is the point of measuring: files
-  // numbered 1-12 for a season whose offset is 24 are already
-  // season-relative, and re-deriving a shift for them from their own lowest
-  // value is how a correct set of numbers gets moved.
+  // A known offset never falls through to the inference below. That is the
+  // point of measuring: files numbered 1-12 for a season whose offset is 24
+  // are already season-relative, and re-deriving a shift for them from their
+  // own lowest value is how a correct set of numbers gets moved.
   //
-  // `offsetApplies` is imported rather than restated: `watchSync` has to make
+  // `toSiteNumbers` is imported rather than restated: `watchSync` has to make
   // the identical decision about the identical files before it pushes them,
   // and two copies of a rule this quiet drift without anything failing — the
   // grid would render episode 10 while the push sent 38.
   const measured = readEpisodeOffset(absoluteOffset);
   if (measured !== undefined) {
-    if (offsetApplies(numbers, total, measured)) {
-      for (const row of mains) {
-        out.set(row.id, (episodeNumberOf(row) as number) - measured);
-      }
+    const siteOf = toSiteNumbers(numbers, total, measured);
+    for (const row of mains) {
+      const n = episodeNumberOf(row) as number;
+      out.set(row.id, siteOf.get(n) ?? n);
     }
     return out;
   }

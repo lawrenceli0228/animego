@@ -131,7 +131,7 @@ import { authFetch } from "@/lib/authFetch";
 import { parseWatchedSnapshot } from "@/components/anime/watchedEpisodeState";
 import { readBinding } from "./animeBinding";
 import { resolveWatchedEpisodes } from "./watchHighWater";
-import { readEpisodeOffset, toSiteEpisodes } from "./episodeOffset";
+import { readEpisodeOffset, toSiteNumbers } from "./episodeOffset";
 
 // ─── Row shapes (structural, so tests can hand in plain objects) ────────────
 
@@ -513,12 +513,10 @@ export function decidePush(input: {
   // a subset would let the two disagree about the same file, which is the one
   // outcome `episodeOffset.ts` exists to prevent.
   //
-  // `?? episodes` is the "no offset applies" answer, and it is the same
-  // answer the grid gives by rendering the stored number.
-  const site =
-    toSiteEpisodes(watched, input.totalEpisodes, input.episodeOffset) === null
-      ? episodes
-      : episodes.map((n) => n - (input.episodeOffset as number));
+  // A number the offset does not apply to maps to itself — the same answer
+  // the grid gives by rendering the stored number.
+  const siteOf = toSiteNumbers(watched, input.totalEpisodes, input.episodeOffset);
+  const site = episodes.map((n) => siteOf.get(n) ?? n);
 
   return { push: true, anilistId, episodes, siteEpisodes: site };
 }
