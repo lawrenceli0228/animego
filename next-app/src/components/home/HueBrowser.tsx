@@ -9,6 +9,12 @@
 // holding all of its shows (HueRail.tsx); every panel stays mounted and a
 // switch is a staggered crossfade, like the hero's. A rail ends by offering
 // the next family.
+//
+// A family fetches its covers only once it has been opened. The stacked,
+// hidden panels are laid out like the visible one, so without this every
+// family would load the covers across its first screen — seven rows of
+// pictures nobody can see, competing with the rest of the page for the
+// image server and the browser's connections.
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { nextFamily, type HueFamilyKey } from "@/lib/home/hueFamilies";
@@ -65,6 +71,7 @@ export default function HueBrowser({
   railCopy,
 }: HueBrowserProps) {
   const [selected, setSelected] = useState<HueFamilyKey>(defaultKey);
+  const [opened, setOpened] = useState<ReadonlySet<HueFamilyKey>>(() => new Set([defaultKey]));
   const pillsRef = useRef<HTMLDivElement | null>(null);
 
   const pillOf = (key: HueFamilyKey) =>
@@ -77,11 +84,16 @@ export default function HueBrowser({
     if (row && pill) revealPill(row, pill);
   }, []);
 
+  const show = (key: HueFamilyKey) => {
+    setSelected(key);
+    setOpened((prev) => (prev.has(key) ? prev : new Set([...prev, key])));
+  };
+
   // The end of a rail moves on to the next family. The button that was
   // pressed goes inert with its panel, so focus goes to the new family's pill
   // rather than falling back to the page.
   const goTo = (key: HueFamilyKey) => {
-    setSelected(key);
+    show(key);
     const row = pillsRef.current;
     const pill = pillOf(key);
     if (!row || !pill) return;
@@ -108,7 +120,7 @@ export default function HueBrowser({
               style={vars}
               data-family={f.key}
               aria-pressed={f.key === selected}
-              onClick={() => setSelected(f.key)}
+              onClick={() => show(f.key)}
             >
               <span className={styles.dot} aria-hidden />
               {f.label}
@@ -126,6 +138,7 @@ export default function HueBrowser({
               key={f.key}
               family={f}
               active={f.key === selected}
+              loadCovers={opened.has(f.key)}
               next={next}
               onNext={() => {
                 if (nextKey) goTo(nextKey);

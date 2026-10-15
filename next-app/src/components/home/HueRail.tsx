@@ -41,6 +41,8 @@ interface HueRailProps {
   family: HueFamilyView;
   /** The family on show; the others stay mounted, hidden and inert, for the crossfade. */
   active: boolean;
+  /** This family has been on show: its covers may load. Until then each card keeps its tone fill. */
+  loadCovers: boolean;
   /** Where the end of the row sends the reader; null when there is no other family. */
   next: HueFamilyView | null;
   onNext: () => void;
@@ -56,7 +58,7 @@ export function hueRailId(family: HueFamilyView): string {
   return `home-hue-${family.key}`;
 }
 
-export default function HueRail({ family, active, next, onNext, copy }: HueRailProps) {
+export default function HueRail({ family, active, loadCovers, next, onNext, copy }: HueRailProps) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const thumbRef = useRef<HTMLSpanElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -84,7 +86,7 @@ export default function HueRail({ family, active, next, onNext, copy }: HueRailP
         {...drag.handlers}
       >
         {family.items.map((it, k) => (
-          <HueRailCard key={it.id} item={it} order={k} />
+          <HueRailCard key={it.id} item={it} order={k} loadCover={loadCovers} />
         ))}
         {next ? (
           <div className={styles.end}>
@@ -134,7 +136,7 @@ export default function HueRail({ family, active, next, onNext, copy }: HueRailP
   );
 }
 
-function HueRailCard({ item: it, order }: { item: HueCard; order: number }) {
+function HueRailCard({ item: it, order, loadCover }: { item: HueCard; order: number; loadCover: boolean }) {
   const vars = {
     ...(cardToneVars(it.hue) as unknown as Vars),
     "--stagger": `${60 + Math.min(order, STAGGERED - 1) * 60}ms`,
@@ -143,7 +145,7 @@ function HueRailCard({ item: it, order }: { item: HueCard; order: number }) {
     <Link href={it.href} prefetch={false} className={`${cards.card} ${styles.card}`} style={vars} data-card>
       <div className={`${cards.cover} ${styles.cover}`}>
         <span className={`${cards.zoom} ${styles.zoom}`}>
-          <FadeImage src={it.cover} alt="" width={200} height={267} className={cards.img} />
+          <FadeImage src={loadCover ? it.cover : null} alt="" width={200} height={267} className={cards.img} />
         </span>
         <span className={styles.band} aria-hidden />
       </div>

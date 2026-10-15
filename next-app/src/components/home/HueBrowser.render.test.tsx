@@ -16,7 +16,7 @@ const card = (id: number, hue: number): HueCard => ({
   id,
   href: `/anime/${id}`,
   title: `测试番 ${id}`,
-  cover: null,
+  cover: `https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx${id}.jpg`,
   hue,
   score: "7.5",
   meta: "TV · 连载中",
@@ -108,6 +108,20 @@ describe("HueBrowser", () => {
     expect(html).toMatch(/蓝调<span[^>]*>15 部<\/span>/);
     const exposed = html.match(/<div[^>]*data-active="true"[^>]*>/g) ?? [];
     expect(exposed.filter((tag) => !/aria-hidden="true"/.test(tag) && !/inert/.test(tag))).toHaveLength(1);
+  });
+
+  // Every family's rail is laid out (stacked, hidden) for the crossfade, so a
+  // family nobody has opened would still fetch the covers in view — seven rows
+  // of them, all invisible. On a slow image server those requests held every
+  // connection and a click elsewhere on the page could not load its route.
+  test("only the family on show loads its covers; the others wait to be opened", () => {
+    const html = render([RED, BLUE, PURPLE], "blue");
+    const imgs = (panel: string) => panel.match(/<img\b/g) ?? [];
+    expect(imgs(panelOf(html, "blue"))).toHaveLength(15);
+    expect(imgs(panelOf(html, "red"))).toHaveLength(0);
+    expect(imgs(panelOf(html, "purple"))).toHaveLength(0);
+    // The unopened families keep their cards — and so their count — just not the pictures.
+    expect(cardsIn(panelOf(html, "red"))).toHaveLength(8);
   });
 
   test("renders nothing when no show has a colour", () => {
