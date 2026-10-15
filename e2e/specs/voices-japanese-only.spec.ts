@@ -8,8 +8,9 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
  *   - 16498 (Attack on Titan) carried Korean voices beside the Japanese ones.
  *   - 126403 (Link Click) is a Chinese production whose main voices were
  *     Chinese, with Japanese voices for part of the cast.
- *   - 163264 voiced only in Chinese, so no credit names them any more and
- *     their person page is gone.
+ *   - 163264 voiced only in Chinese, so no voice credit names them any more.
+ *     Their page went with those credits, and a staff credit brought it back
+ *     (ADR director of 131239), so it may exist but lists no voice role.
  *
  * Every request carries a throwaway query parameter so Cloudflare cannot
  * answer it from a copy cached before the change; the handlers ignore it.
@@ -83,7 +84,13 @@ test("Link Click's detail cast names only voices from its Japanese list", async 
   for (const c of named) expect(japanese.has(c.voiceActorId as number), `voice actor ${c.voiceActorId}`).toBe(true);
 });
 
-test("a voice actor who only voiced in Chinese has no page", async ({ request }) => {
+test("a voice actor who only voiced in Chinese is credited with no voice role", async ({ request }) => {
   const res = await request.get(`/api/people/${CHINESE_ONLY_VOICE_ACTOR}?${fresh()}`);
-  expect(res.status()).toBe(404);
+  // No page at all, or a page that only a staff credit keeps.
+  if (res.status() === 404) return;
+  expect(res.status()).toBe(200);
+  const { data } = await res.json();
+  expect(data.voiceRoles).toEqual([]);
+  expect(data.voiceWorkCount).toBe(0);
+  expect(data.staffRoles.length).toBeGreaterThan(0);
 });
