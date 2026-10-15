@@ -546,6 +546,12 @@ type TorrentsDB interface {
 	GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistID int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error)
 }
 
+// MikanIDLookup resolves an anime's Mikan Project bangumi id from its
+// AniList id and, when it has one, its Bangumi subject id.  Production
+// passes mikanidmap.Lookup; nil resolves nothing, leaving Mikan on its
+// keyword search.
+type MikanIDLookup func(anilistID int32, bgmID *int32) (int32, bool)
+
 // Torrents implements GET /api/anime/torrents — multi-source magnet
 // aggregator (animes.garden + acg.rip + nyaa.si + dmhy + mikan + AnimeTosho)
 // wired into internal/torrents.  Replaces anime.controller.js:291-325 — the
@@ -556,9 +562,11 @@ type TorrentsDB interface {
 //
 //   - ?anilistId=N (primary): resolve the anime's four cached titles into
 //     deduped search variants and, when the id map carries an AniDB id, pull
-//     AnimeTosho's complete aid feed alongside the keyword fan-out.  Server
-//     -side title resolution is what unlocks full coverage — the client no
-//     longer has to guess a single keyword.
+//     AnimeTosho's complete aid feed alongside the keyword fan-out.  When
+//     mikanIDs names the show's Mikan bangumi page, Mikan's per-bangumi feed
+//     replaces Mikan's keyword search.  Server-side title resolution is what
+//     unlocks full coverage — the client no longer has to guess a single
+//     keyword.
 //   - ?q=<keyword> (fallback): the legacy single-keyword fan-out, unchanged.
 //
 // Resolution precedence: anilistId wins when both are present (the richer
@@ -572,7 +580,7 @@ type TorrentsDB interface {
 // Response envelope:
 //
 //	{"data":[{"title":..., "magnet":..., "size":..., "fansub":..., "date":..., "source":..., "seeders":..., "infohash":..., "provider":...}, ...]}
-func Torrents(agg *torrents.Aggregator, db TorrentsDB) http.HandlerFunc {
+func Torrents(agg *torrents.Aggregator, db TorrentsDB, mikanIDs MikanIDLookup) http.HandlerFunc {
 	const maxQueryLen = 200
 
 	return func(w http.ResponseWriter, req *http.Request) {
@@ -616,8 +624,13 @@ func Torrents(agg *torrents.Aggregator, db TorrentsDB) http.HandlerFunc {
 				return
 			}
 
-			variants := buildTorrentVariants(row)
-			items, err = agg.FetchForAnime(ctx, variants, row.AnidbID)
+			query := torrents.AnimeQuery{Variants: buildTorrentVariants(row), AnidbID: row.AnidbID}
+			if mikanIDs != nil {
+				if mikanID, ok := mikanIDs(int32(id), row.BgmID); ok {
+					query.MikanID = &mikanID
+				}
+			}
+			items, err = agg.FetchForAnime(ctx, query)
 
 		case q != "":
 			// Fallback path: single-keyword fan-out (legacy behaviour).

@@ -39,13 +39,16 @@ import (
 // BEFORE the caller's opts so every Fetch-driven test stays offline and
 // its garden/acg/nyaa assertions are unchanged; a test that wants to drive
 // dmhy/mikan/tosho can still pass its own WithDmhyFn/WithMikanFn/WithToshoFn
-// after these (later options win).
+// after these (later options win).  Mikan's per-bangumi feed, which
+// FetchForAnime fetches for a request carrying a Mikan id, gets the same
+// treatment via WithMikanBangumiFn.
 func newTestAggregator(t *testing.T, opts ...Option) *Aggregator {
 	t.Helper()
 	base := []Option{
 		WithDmhyFn(staticFn(nil, nil)),
 		WithMikanFn(staticFn(nil, nil)),
 		WithToshoFn(staticFn(nil, nil)),
+		WithMikanBangumiFn(func(context.Context, int) ([]TorrentItem, error) { return nil, nil }),
 	}
 	a, err := New(append(base, opts...)...)
 	require.NoError(t, err)

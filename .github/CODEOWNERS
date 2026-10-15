@@ -14,6 +14,8 @@
 # owner and is NOT open to external code contributions. PRs touching these
 # paths will be closed without merge (see CONTRIBUTING.md → "Out of scope").
 /go-api/internal/torrents/                                  @lawrenceli0228
+/go-api/internal/mikanidmap/                                @lawrenceli0228
+/go-api/cmd/mikanmap/                                       @lawrenceli0228
 /next-app/src/components/anime/TorrentModal.tsx             @lawrenceli0228
 /next-app/src/components/anime/torrentModalLogic.ts         @lawrenceli0228
 /next-app/src/components/anime/torrentModalLogic.test.ts    @lawrenceli0228

@@ -1,12 +1,14 @@
 // Package torrents — mikan.go
 //
-// Mikan Project (mikanani.me) keyword-search RSS fetcher.  Mikan is a
-// popular Chinese-sub aggregator with broad coverage; its keyword search
-// catches releases the other sources miss.
+// Mikan Project (mikanani.me) RSS fetchers.  Mikan is a popular
+// Chinese-sub aggregator with broad coverage; its keyword search catches
+// releases the other sources miss, and its per-bangumi feed lists every
+// fansub group's releases for one season, full history included.
 //
-// Endpoint shape:
+// Endpoint shapes (both feeds share the item format below):
 //
 //	GET https://mikanani.me/RSS/Search?searchstr=<q>
+//	GET https://mikanani.me/RSS/Bangumi?bangumiId=<id>
 //
 //	<rss version="2.0" xmlns:torrent="https://mikanani.me/0.1/">
 //	  <channel>
@@ -59,16 +61,35 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 )
 
-// SourceMikan is mikanani.me — keyword-search RSS of the Mikan Project
-// aggregator.  Declared here (not types.go) because Mikan is this file's
-// source.
+// SourceMikan is mikanani.me — the Mikan Project aggregator's RSS feeds,
+// keyword search and per-bangumi alike.  Declared here (not types.go)
+// because Mikan is this file's source.
 const SourceMikan Source = "mikan"
 
 // mikanEndpoint is Mikan's keyword-search RSS endpoint.  The term rides
 // on ?searchstr=<q>.
 const mikanEndpoint = "https://mikanani.me/RSS/Search"
+
+// mikanBangumiEndpoint is Mikan's per-bangumi RSS endpoint: every release
+// for one Mikan bangumi page (one season), newest first.  The id rides on
+// ?bangumiId=<id>.
+const mikanBangumiEndpoint = "https://mikanani.me/RSS/Bangumi"
+
+// mikanBangumiMaxBytes bounds how much of a per-bangumi feed is read.  A
+// season's page fits; the pages of very long-running shows list thousands
+// of releases and pass it.  Those are cut here, and since the feed lists
+// the newest releases first, the cut drops the oldest.  The bound also
+// keeps such a show's response to a list the magnet modal can render, and
+// its download inside the request's time budget.
+const mikanBangumiMaxBytes = 1 << 20
+
+// mikanDrainBytes is how much of an unread body is drained before closing
+// it, so the connection can be reused.  A feed that was cut is closed
+// without draining.
+const mikanDrainBytes = 64 << 10
 
 // mikanNamespaceURI is the XML namespace for Mikan's <torrent> element
 // and its children.  encoding/xml resolves namespaced tags by full URI,
@@ -137,7 +158,44 @@ func FetchMikan(ctx context.Context, httpClient *http.Client, q string) ([]Torre
 		return nil, fmt.Errorf("mikan: build url: %w", err)
 	}
 
-	feed, err := fetchMikanFeed(ctx, httpClient, endpoint)
+	// 0: the keyword search reads its whole response, as it always has.
+	feed, err := fetchMikanFeed(ctx, httpClient, endpoint, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapMikanItems(feed.Items), nil
+}
+
+// FetchMikanByBangumi reads Mikan's per-bangumi RSS feed for one Mikan
+// bangumi id and returns its releases as TorrentItems tagged SourceMikan.
+// It is the id-keyed counterpart to FetchMikan's keyword search: same item
+// format, same parsing and mapping.
+//
+// At most mikanBangumiMaxBytes of the feed are read, and no more than ctx
+// allows.  A feed cut by either keeps the items that ended before the cut,
+// which are the newest.  Other errors match FetchMikan (network / non-2xx /
+// decode → (nil, err)); an id below 1 is an error and sends no request.
+func FetchMikanByBangumi(ctx context.Context, httpClient *http.Client, mikanID int) ([]TorrentItem, error) {
+	return fetchMikanBangumi(ctx, httpClient, mikanID, mikanBangumiMaxBytes)
+}
+
+// fetchMikanBangumi is FetchMikanByBangumi with the size bound as a
+// parameter, so tests can cut a small feed at an exact byte.
+func fetchMikanBangumi(ctx context.Context, httpClient *http.Client, mikanID int, maxBytes int64) ([]TorrentItem, error) {
+	if mikanID < 1 {
+		return nil, fmt.Errorf("mikan: invalid bangumi id %d", mikanID)
+	}
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
+	endpoint, err := buildMikanBangumiURL(mikanID)
+	if err != nil {
+		return nil, fmt.Errorf("mikan: build bangumi url: %w", err)
+	}
+
+	feed, err := fetchMikanFeed(ctx, httpClient, endpoint, maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +207,16 @@ func FetchMikan(ctx context.Context, httpClient *http.Client, q string) ([]Torre
 // fetchRSS's error contract but for Mikan's namespaced envelope.  Kept
 // local because the shared fetchRSS hard-codes the plain rssFeed shape
 // and Mikan needs the <torrent> extension.
-func fetchMikanFeed(ctx context.Context, httpClient *http.Client, endpoint string) (*mikanFeed, error) {
+//
+// maxBytes > 0 makes the read bounded: at most maxBytes of the body are
+// decoded, and a feed cut by that bound or by ctx keeps every item that
+// ended before the cut.  encoding/xml appends each <item> to feed.Items
+// once it is complete and drops the one an error interrupts, and the error
+// here is the cut; TestFetchMikanBangumi_CutsAtTheByteBound and
+// TestFetchMikanByBangumi_DeadlineKeepsTheItemsReadSoFar pin that.  A cut
+// that leaves no complete item is an error.  maxBytes 0 reads the whole
+// body, and any decode error fails the fetch.
+func fetchMikanFeed(ctx context.Context, httpClient *http.Client, endpoint string, maxBytes int64) (*mikanFeed, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("mikan: build request: %w", err)
@@ -160,8 +227,11 @@ func fetchMikanFeed(ctx context.Context, httpClient *http.Client, endpoint strin
 	if err != nil {
 		return nil, fmt.Errorf("mikan: http do: %w", err)
 	}
+	cut := false
 	defer func() {
-		_, _ = io.Copy(io.Discard, res.Body)
+		if !cut {
+			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, mikanDrainBytes))
+		}
 		_ = res.Body.Close()
 	}()
 
@@ -169,11 +239,34 @@ func fetchMikanFeed(ctx context.Context, httpClient *http.Client, endpoint strin
 		return nil, fmt.Errorf("mikan: upstream status %d", res.StatusCode)
 	}
 
+	body := io.Reader(res.Body)
+	var limited *io.LimitedReader
+	if maxBytes > 0 {
+		limited = &io.LimitedReader{R: res.Body, N: maxBytes}
+		body = limited
+	}
+
 	var feed mikanFeed
-	if err := xml.NewDecoder(res.Body).Decode(&feed); err != nil {
-		return nil, fmt.Errorf("mikan: decode response: %w", err)
+	if err := xml.NewDecoder(body).Decode(&feed); err != nil {
+		cut = limited != nil && (limited.N == 0 || ctx.Err() != nil)
+		if !cut || len(feed.Items) == 0 {
+			return nil, fmt.Errorf("mikan: decode response: %w", err)
+		}
 	}
 	return &feed, nil
+}
+
+// buildMikanBangumiURL composes Mikan's per-bangumi RSS URL with
+// ?bangumiId=<id>.
+func buildMikanBangumiURL(mikanID int) (string, error) {
+	u, err := url.Parse(mikanBangumiEndpoint)
+	if err != nil {
+		return "", err
+	}
+	vals := u.Query()
+	vals.Set("bangumiId", strconv.Itoa(mikanID))
+	u.RawQuery = vals.Encode()
+	return u.String(), nil
 }
 
 // buildMikanURL composes Mikan's RSS URL with ?searchstr=<q>.

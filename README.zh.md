@@ -307,6 +307,7 @@ cd next-app && bun test
 - [Bangumi 番组计划](https://bgm.tv/) — 中文标题、评分、角色和分集数据
 - [弹弹Play](https://www.dandanplay.com/) — 弹幕匹配 API 与弹幕评论数据库。感谢弹弹Play 开发者的支持。
 - [ACG.rip](https://acg.rip/) — 种子 RSS 订阅源
+- [bangumi-data](https://github.com/bangumi-data/bangumi-data) — 磁力搜索按番读取蜜柑计划订阅所用的 AniList / Bangumi → 蜜柑计划编号对照（`go-api/internal/mikanidmap/mikan_map.json`，每周自动更新），依 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用
 
 ---
 
@@ -318,4 +319,4 @@ AnimeGo 以 **GNU AGPL-3.0** 许可开源，欢迎贡献。提交 Pull Request �
 
 ## 许可证
 
-AnimeGo 采用 **GNU Affero 通用公共许可证 v3.0（AGPL-3.0）**。你可在该许可下使用、研究、修改与再分发本项目；特别地，若以网络服务形式运行修改版，须向其用户提供修改后的源码。完整条款见 [LICENSE](LICENSE)。© 2026 lawrenceli0228（AnimeGo · animegoclub.com）。该许可仅覆盖本仓库的原创代码，不含其集成的第三方数据/接口（AniList、Bangumi、MyAnimeList、dandanplay、ACG.rip），后者仍受各自所有者条款约束。
+AnimeGo 采用 **GNU Affero 通用公共许可证 v3.0（AGPL-3.0）**。你可在该许可下使用、研究、修改与再分发本项目；特别地，若以网络服务形式运行修改版，须向其用户提供修改后的源码。完整条款见 [LICENSE](LICENSE)。© 2026 lawrenceli0228（AnimeGo · animegoclub.com）。该许可仅覆盖本仓库的原创代码，不含其集成的第三方数据/接口（AniList、Bangumi、bangumi-data、MyAnimeList、dandanplay、ACG.rip），后者仍受各自所有者条款约束。

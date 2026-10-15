@@ -915,7 +915,7 @@ func TestTorrents_MissingQuery(t *testing.T) {
 
 	agg := newStubAggregator(t, nil, nil, nil)
 	rec := httptest.NewRecorder()
-	Torrents(agg, &fakeQuerier{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents", nil))
+	Torrents(agg, &fakeQuerier{}, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents", nil))
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "Missing query")
@@ -929,7 +929,7 @@ func TestTorrents_QueryTooLong(t *testing.T) {
 	rec := httptest.NewRecorder()
 	longQ := strings.Repeat("a", 201)
 	rec = httptest.NewRecorder()
-	Torrents(agg, &fakeQuerier{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q="+longQ, nil))
+	Torrents(agg, &fakeQuerier{}, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q="+longQ, nil))
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "Query too long")
@@ -954,7 +954,7 @@ func TestTorrents_HappyPath(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
-	Torrents(agg, &fakeQuerier{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q=naruto", nil))
+	Torrents(agg, &fakeQuerier{}, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q=naruto", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
@@ -976,7 +976,7 @@ func TestTorrents_EmptyResults(t *testing.T) {
 
 	agg := newStubAggregator(t, nil, nil, nil)
 	rec := httptest.NewRecorder()
-	Torrents(agg, &fakeQuerier{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q=zzzz", nil))
+	Torrents(agg, &fakeQuerier{}, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q=zzzz", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	// Empty array, not null.
@@ -1095,7 +1095,7 @@ func TestTorrents_ByAnilistID_ResolvesVariantsAndAidFeed(t *testing.T) {
 
 	agg, queries, aidSeen := capturingAggregator(t)
 	rec := httptest.NewRecorder()
-	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21", nil))
+	Torrents(agg, q, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, `{"data":[]}`, rec.Body.String(), "all sources empty → empty envelope")
@@ -1123,7 +1123,7 @@ func TestTorrents_ByAnilistID_NoAnidb_DegradesNoFeed(t *testing.T) {
 
 	agg, queries, aidSeen := capturingAggregator(t)
 	rec := httptest.NewRecorder()
-	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=99", nil))
+	Torrents(agg, q, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=99", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, []string{"Bleach"}, queries(), "single title → single variant fan-out")
@@ -1141,7 +1141,7 @@ func TestTorrents_ByAnilistID_NotFound_404(t *testing.T) {
 
 	agg := newStubAggregator(t, nil, nil, nil)
 	rec := httptest.NewRecorder()
-	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=404404", nil))
+	Torrents(agg, q, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=404404", nil))
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	require.Contains(t, rec.Body.String(), `"NOT_FOUND"`)
@@ -1161,7 +1161,7 @@ func TestTorrents_ByAnilistID_Invalid_400(t *testing.T) {
 
 	agg := newStubAggregator(t, nil, nil, nil)
 	rec := httptest.NewRecorder()
-	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=abc", nil))
+	Torrents(agg, q, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=abc", nil))
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), `"VALIDATION_ERROR"`)
@@ -1179,7 +1179,7 @@ func TestTorrents_ByAnilistID_DBError_500(t *testing.T) {
 
 	agg := newStubAggregator(t, nil, nil, nil)
 	rec := httptest.NewRecorder()
-	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21", nil))
+	Torrents(agg, q, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21", nil))
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.Contains(t, rec.Body.String(), `"SERVER_ERROR"`)
@@ -1201,7 +1201,7 @@ func TestTorrents_AnilistIDWinsOverQ(t *testing.T) {
 
 	agg, queries, _ := capturingAggregator(t)
 	rec := httptest.NewRecorder()
-	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21&q=ignored", nil))
+	Torrents(agg, q, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21&q=ignored", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.True(t, called, "anilistId path runs even when q is also present")

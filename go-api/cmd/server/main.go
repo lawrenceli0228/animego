@@ -57,6 +57,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/mikanidmap"
 	"github.com/lawrenceli0228/animego/go-api/internal/notifications"
 	"github.com/lawrenceli0228/animego/go-api/internal/obs"
 	"github.com/lawrenceli0228/animego/go-api/internal/people"
@@ -116,6 +117,16 @@ func main() {
 		os.Exit(1)
 	}
 	defer torrentsAgg.Close()
+
+	// Mikan bangumi ids for the torrents handler, embedded in the binary.  A
+	// map that fails to parse answers nothing, which leaves Mikan on its
+	// keyword search; say so once here rather than on every request.
+	if mikanMap, err := mikanidmap.Embedded(); err != nil {
+		slog.Warn("mikan id map failed to load; magnet search keeps Mikan's keyword search", "err", err)
+	} else {
+		anilistIDs, bgmIDs := mikanMap.Len()
+		slog.Info("mikan id map loaded", "bangumi_data", mikanMap.Version(), "anilist_ids", anilistIDs, "bgm_ids", bgmIDs)
+	}
 
 	// AniList GraphQL client — single instance shared by /search +
 	// /schedule (and later /:anilistId).  Internal rate limiter is one
@@ -832,7 +843,7 @@ func main() {
 		r.Get("/browse", anime.Browse(q))
 		r.Get("/hubs", anime.Hubs(q, hubsCache))
 		r.Get("/trending", anime.Trending(q, trendingCache))
-		r.Get("/torrents", anime.Torrents(torrentsAgg, q))
+		r.Get("/torrents", anime.Torrents(torrentsAgg, q, mikanidmap.Lookup))
 		r.Get("/search", searchSvc.Handler())
 		r.Get("/schedule", scheduleSvc.Handler())
 		r.Get("/episodes", anime.Episodes(q))
