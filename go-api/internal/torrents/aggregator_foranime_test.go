@@ -247,6 +247,43 @@ func TestFetchForAnime_DoesNotAliasFetchKey(t *testing.T) {
 	assert.Equal(t, int32(2), gc.Load(), "anime-keyed lookup must not alias the plain Fetch key")
 }
 
+// A keyword that reads exactly like an anime request's cache key is still a
+// keyword search of its own, in either order: the two key spaces are
+// disjoint by construction, not by what a keyword happens to contain.
+func TestFetch_KeySpaceIsDisjointFromFetchForAnime(t *testing.T) {
+	t.Parallel()
+
+	aid, mikanID := int32(7), int32(3141)
+	query := AnimeQuery{Variants: []string{"naruto"}, AnidbID: &aid, MikanID: &mikanID}
+	lookalike := animeCacheKey([]string{"naruto"}, &aid, &mikanID)
+
+	for name, calls := range map[string][]func(*Aggregator) error{
+		"anime first": {
+			func(a *Aggregator) error { _, err := a.FetchForAnime(context.Background(), query); return err },
+			func(a *Aggregator) error { _, err := a.Fetch(context.Background(), lookalike); return err },
+		},
+		"keyword first": {
+			func(a *Aggregator) error { _, err := a.Fetch(context.Background(), lookalike); return err },
+			func(a *Aggregator) error { _, err := a.FetchForAnime(context.Background(), query); return err },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var gc atomic.Int32
+			a := newTestAggregator(t,
+				WithGardenFn(staticFn([]TorrentItem{itemWithHash(SourceGarden, "beef")}, &gc)),
+				WithAcgFn(staticFn(nil, nil)),
+				WithNyaaFn(staticFn(nil, nil)),
+			)
+			require.NoError(t, calls[0](a))
+			a.cache.Wait()
+			require.NoError(t, calls[1](a))
+			assert.Equal(t, int32(2), gc.Load(), "the second request must not be served the first one's entry")
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Degrade paths
 // ---------------------------------------------------------------------------

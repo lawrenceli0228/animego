@@ -18,7 +18,7 @@
 //     Express's AbortSignal.timeout(8000) on each fetch call.
 //   - Cache: per-query, 1 hour TTL, max 500 entries.  Cache key is
 //     the query string after .trim().toLowerCase() — same
-//     normalisation as Express.
+//     normalisation as Express — behind a "q:" prefix.
 //   - Empty query: short-circuit to empty result, no upstream calls
 //     and no cache write.  The HTTP handler validates q upstream
 //     (required, ≤200 chars); the defensive guard here protects
@@ -417,6 +417,9 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 		// nothing.
 		return []TorrentItem{}, nil
 	}
+	// Prefixed like FetchForAnime's "anime:" keys, so the two key spaces
+	// are disjoint whatever a keyword contains.
+	key = "q:" + key
 
 	if cached, hit := a.cache.Get(key); hit {
 		return cached, nil
