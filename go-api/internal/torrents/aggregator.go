@@ -246,7 +246,7 @@ func WithMikanFn(f fetchFn) Option {
 	}
 }
 
-// WithToshoFn overrides the feed.animetosho.org source with a
+// WithToshoFn overrides the AnimeTosho source with a
 // single-function stub.  Test-only.  See WithGardenFn.  Because tosho is
 // in the default registry, the aggregator's own orchestration tests (and
 // the anime handler tests) use this to keep the tosho slot off the

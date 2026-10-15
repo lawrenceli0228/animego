@@ -1,6 +1,6 @@
 // Package torrents — animetosho.go
 //
-// AnimeTosho (feed.animetosho.org) JSON fetcher.  AnimeTosho is a
+// AnimeTosho (animetosho.org/feed) JSON fetcher.  AnimeTosho is a
 // mirror/index that, uniquely among this package's sources, reports a
 // live seeders/leechers count — so it is the one source that can feed the
 // ranker a real "best copy" signal instead of nil.  It also exposes an
@@ -9,8 +9,12 @@
 //
 // Endpoint shape (JSON, no Cloudflare — HK can dial it directly):
 //
-//	GET https://feed.animetosho.org/json?q=<keyword>&only_tor=1
-//	GET https://feed.animetosho.org/json?aid=<AniDB-id>&only_tor=1
+//	GET https://animetosho.org/feed/json?q=<keyword>&only_tor=1
+//	GET https://animetosho.org/feed/json?aid=<AniDB-id>&only_tor=1
+//
+// The feed used to be served from feed.animetosho.org.  That host stopped
+// resolving in October 2026; the same JSON is served under /feed on the
+// main host.
 //
 //	[
 //	  {
@@ -55,14 +59,14 @@ import (
 	"time"
 )
 
-// SourceTosho is feed.animetosho.org — JSON index that reports seeders
+// SourceTosho is AnimeTosho's feed — JSON index that reports seeders
 // and exposes an AniDB-id feed.  Declared here (not types.go) because
 // AnimeTosho is this file's source.
 const SourceTosho Source = "tosho"
 
 // toshoEndpoint is AnimeTosho's JSON feed.  Both the keyword search
 // (?q=) and the AniDB-id feed (?aid=) ride on this path.
-const toshoEndpoint = "https://feed.animetosho.org/json"
+const toshoEndpoint = "https://animetosho.org/feed/json"
 
 // toshoPriority is the ranker Priority AnimeTosho advertises via
 // Capabilities.  It is a modest positive value: every other source in
@@ -72,7 +76,7 @@ const toshoEndpoint = "https://feed.animetosho.org/json"
 // seeder-less source, prefer the copy that carries a real seeder count".
 const toshoPriority = 10
 
-// animeToshoSource is the Fetcher adapter for feed.animetosho.org.  Thin
+// animeToshoSource is the Fetcher adapter for AnimeTosho's feed.  Thin
 // struct in the gardenSource mould: it binds the shared *http.Client +
 // optional Logger and delegates to FetchAnimeTosho.
 //
