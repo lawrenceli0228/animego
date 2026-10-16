@@ -24,7 +24,7 @@
  * @property {'main'|'sp'|'ova'|'movie'|'pv'|'commentary'|'ncop'|'nced'|'bonus'|'trailer'|'interview'|'wp'|'cm'|'menu'|'unknown'} parsedKind - 集类型
  * @property {string}  [parsedGroup]        - 字幕组(从括号标签提取)
  * @property {'480p'|'720p'|'1080p'|'2160p'} [parsedResolution]   - 分辨率标签
- * @property {string}  [hash16M]            - 首 16MB SparkMD5(P1 末期 hash 完才填入)
+ * @property {string}  [hash16M]            - 首 16MB 的 MD5(导入时按簇算好才填入)
  */
 
 // ─── P2 同文件夹分组冻结锚点(P3 SeriesMatcher 复用此形状) ────────────────────
