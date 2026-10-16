@@ -8,15 +8,16 @@ import { createHashPool } from '@/lib/library/hashPool.js';
 /** @typedef {import('@/lib/library/types').EpisodeItem} EpisodeItem */
 /** @typedef {import('../_services/importPipeline').ImportSummary} ImportSummary */
 /** @typedef {'idle'|'running'|'done'|'error'} ImportStatus */
-/** @typedef {{ hash: (file: File, opts?: { timeoutMs?: number }) => Promise<string>, dispose: () => void }} HashPool */
+/** @typedef {{ hash: (file: File, opts?: { timeoutMs?: number, signal?: AbortSignal }) => Promise<string>, dispose: () => void }} HashPool */
 
 /**
  * React hook wrapping runImport with observable progress, status, and cancel.
  *
- * P4-E adds a hash phase: items missing `hash16M` are routed through an md5
- * worker pool before being passed downstream. This is what unlocks matchCache
- * reuse — without a stable hash on the cluster representative, every re-import
- * minted a fresh series ulid.
+ * P4-E adds hashing: items missing `hash16M` are routed through an md5 worker
+ * pool. This is what unlocks matchCache reuse — without a stable hash on the
+ * cluster representative, every re-import minted a fresh series ulid. The
+ * pipeline hashes cluster by cluster while it imports (hashClustersInOrder),
+ * rather than the whole batch before the first cluster.
  *
  * DI seam: accepts { db, dandan, hashPool } so tests can inject mocks.
  *
@@ -40,16 +41,25 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
   const [summary, setSummary] = useState(/** @type {ImportSummary|null} */ (null));
   const [error, setError] = useState(/** @type {string|null} */ (null));
 
-  /** Used to signal cancellation to the in-flight run */
-  const cancelledRef = useRef(false);
+  /**
+   * One controller per run in flight. Aborting one stops that run between
+   * clusters and takes its files still waiting off the hash pool. Each run
+   * has its own: a shared flag was reset by the next run, so a cancelled run
+   * went on importing files whose reads had been cut short.
+   */
+  const runsRef = useRef(/** @type {Set<AbortController>} */ (new Set()));
 
   /** Lazily-created hash pool when no injected pool is provided. */
   const ownedPoolRef = useRef(/** @type {HashPool|null} */ (null));
 
-  // Dispose any pool we own when the hook unmounts. Injected pools are owned
-  // by the caller — we never dispose those.
+  // On unmount, stop the runs before disposing any pool we own. Left running
+  // without a pool, a run would import the files still being read under
+  // name-and-size ids; stopped, it leaves them for the next scan. Injected
+  // pools are owned by the caller — we never dispose those.
   useEffect(() => {
+    const runs = runsRef.current;
     return () => {
+      for (const running of runs) running.abort();
       if (ownedPoolRef.current) {
         ownedPoolRef.current.dispose();
         ownedPoolRef.current = null;
@@ -58,10 +68,11 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
   }, []);
 
   /**
-   * Cancel the in-flight import. Partial results are retained.
+   * Cancel the in-flight import. Partial results are retained: clusters
+   * already imported stay, the rest are left for the next scan.
    */
   const cancel = useCallback(() => {
-    cancelledRef.current = true;
+    for (const running of runsRef.current) running.abort();
   }, []);
 
   /**
@@ -76,18 +87,20 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
    * @returns {Promise<void>}
    */
   const run = useCallback(async (input) => {
-    cancelledRef.current = false;
+    const abort = new AbortController();
+    const stopped = () => abort.signal.aborted;
+    runsRef.current.add(abort);
     setProgress([]);
     setSummary(null);
     setError(null);
     setStatus('running');
 
     try {
-      // Hash phase — fill in hash16M for items missing it. Pool throttles
-      // concurrent worker use, so Promise.all is safe even on large batches.
-      // A pool failure (timeout, dispose) returns '' → we let the item proceed
-      // without a hash; the pipeline degrades to "no cache, no reuse" rather
-      // than aborting the whole import.
+      // The pipeline fills in hash16M for items missing it, cluster by
+      // cluster. The pool throttles concurrent worker use, so the whole batch
+      // can be queued at once. A pool failure (timeout, dispose) returns '' →
+      // the item proceeds without a hash; the pipeline degrades to "no cache,
+      // no reuse" rather than aborting the whole import.
       //
       // Pool creation is deferred until at least one item actually needs
       // hashing — so callers passing pre-hashed items never spawn a real Worker
@@ -98,31 +111,21 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
         ? (injectedPool ?? (ownedPoolRef.current ??= createHashPool()))
         : null;
 
-      const hashed = await Promise.all(items.map(async (item) => {
-        if (item.hash16M) return item;
-        if (!item.file || !pool) return item;
-        const h = await pool.hash(item.file);
-        return h ? { ...item, hash16M: h } : item;
-      }));
-
-      if (cancelledRef.current) {
-        setStatus('idle');
-        return;
-      }
-
       const result = await runImport(
-        { items: hashed, libraryId: input.libraryId, onDisk: input.onDisk },
+        { items, libraryId: input.libraryId, onDisk: input.onDisk },
         {
           db,
           dandan,
+          hashFile: pool ? (file) => pool.hash(file, { signal: abort.signal }) : undefined,
+          shouldStop: stopped,
           onEvent: (event) => {
-            if (cancelledRef.current) return;
+            if (stopped()) return;
             setProgress(prev => [...prev, event]);
           },
         },
       );
 
-      if (!cancelledRef.current) {
+      if (!stopped()) {
         setSummary(result);
         setStatus('done');
       } else {
@@ -131,12 +134,14 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!cancelledRef.current) {
+      if (!stopped()) {
         setError(msg);
         setStatus('error');
       } else {
         setStatus('idle');
       }
+    } finally {
+      runsRef.current.delete(abort);
     }
   }, [db, dandan, injectedPool]);
 

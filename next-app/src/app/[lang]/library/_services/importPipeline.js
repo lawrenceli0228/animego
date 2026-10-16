@@ -24,6 +24,7 @@ import {
 import { normalizeTokens } from '@/lib/library/normalize.js';
 import { batchOnDisk, dropCopiesWithin, relocateFileRef } from './fileRefCopies.js';
 import { folderOf, splitClusterByFolder } from './splitClusterByFolder.js';
+import { hashClustersInOrder } from './hashClustersInOrder.js';
 // The one door in and out of `Series.anilistId`. Imported rather than
 // re-implemented: the guarantee that an automatic write can never stomp a
 // binding the user set by hand lives in that module, and an import is about as
@@ -61,6 +62,10 @@ import { writeBinding } from '@/lib/library/animeBinding';
  * holds it, a move when it does not. Without it the batch itself is the only
  * evidence.
  *
+ * Items without `hash16M` are hashed with `hashFile` as their clusters come
+ * up (hashClustersInOrder.js). `shouldStop` is asked before each cluster; once
+ * it says yes, the clusters left are not imported.
+ *
  * @param {{
  *   items: EpisodeItem[],
  *   libraryId: string,
@@ -69,6 +74,8 @@ import { writeBinding } from '@/lib/library/animeBinding';
  * @param {{
  *   db: import('dexie').Dexie,
  *   dandan: { match(hash16M: string, fileName: string, opts?: { fileSize?: number }): Promise<any> },
+ *   hashFile?: (file: File) => Promise<string>,
+ *   shouldStop?: () => boolean,
  *   ulidSeedBase?: number,
  *   onEvent?: (e: ImportEvent) => void
  * }} ctx
@@ -76,9 +83,10 @@ import { writeBinding } from '@/lib/library/animeBinding';
  */
 export async function runImport(input, ctx) {
   const { items, libraryId } = input;
-  const { db, dandan, ulidSeedBase, onEvent } = ctx;
+  const { db, dandan, hashFile, ulidSeedBase, onEvent } = ctx;
 
   const emit = onEvent ?? (() => {});
+  const shouldStop = ctx.shouldStop ?? (() => false);
 
   const seriesRepo = makeSeriesRepo(db);
   const seasonRepo = makeSeasonRepo(db);
@@ -126,10 +134,12 @@ export async function runImport(input, ctx) {
    */
   const seriesFolders = new Map();
 
-  // Stage 3: clusterize. Stage 4: split each cluster where its folders name
-  // different shows (splitClusterByFolder.js), then process each part. The
-  // split runs cluster by cluster, so its questions are spread over the batch
-  // instead of all coming before the first progress event.
+  // Stage 3: clusterize, and queue every file for hashing in cluster order;
+  // each cluster waits for its own files only (hashClustersInOrder.js).
+  // Stage 4: split each cluster where its folders name different shows
+  // (splitClusterByFolder.js), then process each part. The split runs cluster
+  // by cluster, so its questions are spread over the batch instead of all
+  // coming before the first progress event.
   //
   // Two copies of the same bytes are one file to the library. Copies that
   // land in different clusters need nothing here: whichever cluster runs
@@ -143,7 +153,15 @@ export async function runImport(input, ctx) {
   const copies = [];
   let seedOffset = ulidSeedBase ?? 0;
 
-  for (const raw of clusterize(groups, priorSeasons)) {
+  const clusters = clusterize(groups, priorSeasons);
+  const hashed = hashClustersInOrder(clusters, hashFile);
+
+  for (const unhashed of clusters) {
+    if (shouldStop()) break;
+    const raw = await hashed(unhashed);
+    // Stopping cuts the reading short, so this cluster's hashes may be
+    // missing: imported now, its files would take name-and-size ids.
+    if (shouldStop()) break;
     // Copies are dropped before the split: two copies that the split puts in
     // different parts would each mint an episode on a different card.
     const { cluster: distinct, copies: extra } = dropCopiesWithin(raw);

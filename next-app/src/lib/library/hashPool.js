@@ -3,14 +3,16 @@
  *
  * Usage:
  *   const pool = createHashPool();
- *   const hex  = await pool.hash(file);   // '' on timeout/error
+ *   const hex  = await pool.hash(file);   // '' on timeout/error/abort
  *   pool.dispose();
  *
  * Architecture:
  *   pending queue + fixed idle-worker array; each hash() call dequeues
  *   the next idle worker (or enqueues a waiter), sends the file, and
- *   returns the worker to the idle list when done — no worker is ever
- *   created or destroyed per-request.
+ *   returns the worker to the idle list when done. Callers queue in the
+ *   order they want files read: a batch's import queues every file at
+ *   once, cluster by cluster. A worker is only replaced when a hash times
+ *   out (see hash()).
  *
  * Injection point for tests:
  *   pass workerFactory to createHashPool({ workerFactory }) to supply
@@ -31,7 +33,7 @@ const defaultWorkerFactory = () =>
 
 /**
  * @param {{ poolSize?: number, workerFactory?: () => Worker }} [options]
- * @returns {{ hash: (file: File, opts?: { timeoutMs?: number }) => Promise<string>, dispose: () => void }}
+ * @returns {{ hash: (file: File, opts?: { timeoutMs?: number, signal?: AbortSignal }) => Promise<string>, dispose: () => void }}
  */
 export function createHashPool({
   poolSize = DEFAULT_POOL_SIZE,
@@ -51,14 +53,30 @@ export function createHashPool({
 
   let isDisposed = false;
 
-  /** Acquire an idle worker, or wait until one becomes available. */
-  function acquire() {
+  /**
+   * Acquire an idle worker, or wait until one becomes available. Resolves
+   * null when the pool is disposed or `signal` aborts first.
+   * @param {AbortSignal} [signal]
+   * @returns {Promise<Worker | null>}
+   */
+  function acquire(signal) {
     return new Promise((resolve) => {
       if (idle.length > 0) {
         resolve(idle.shift());
-      } else {
-        waiters.push(resolve);
+        return;
       }
+      /** @param {Worker | null} worker */
+      const waiter = (worker) => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve(worker);
+      };
+      const onAbort = () => {
+        const at = waiters.indexOf(waiter);
+        if (at >= 0) waiters.splice(at, 1);
+        resolve(null);
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      waiters.push(waiter);
     });
   }
 
@@ -73,17 +91,36 @@ export function createHashPool({
   }
 
   /**
-   * Hash a file using a pooled worker.
-   * @param {File} file
-   * @param {{ timeoutMs?: number }} [opts]
-   * @returns {Promise<string>} hex md5 or '' on timeout/error/disposed
+   * Retire a worker that may still answer for a file it was given, and put a
+   * fresh one in its place.
+   * @param {Worker} worker
    */
-  async function hash(file, { timeoutMs = 10000 } = {}) {
-    if (isDisposed) return '';
+  function replace(worker) {
+    worker.terminate();
+    if (isDisposed) return;
+    const fresh = workerFactory();
+    workers[workers.indexOf(worker)] = fresh;
+    release(fresh);
+  }
 
-    const worker = await acquire();
+  /**
+   * Hash a file using a pooled worker.
+   *
+   * `signal` takes a file that has not reached a worker yet out of the queue,
+   * so an abandoned batch does not keep the pool reading. A file already
+   * being read finishes.
+   *
+   * @param {File} file
+   * @param {{ timeoutMs?: number, signal?: AbortSignal }} [opts]
+   * @returns {Promise<string>} hex md5 or '' on timeout/error/disposed/aborted
+   */
+  async function hash(file, { timeoutMs = 10000, signal } = {}) {
+    if (isDisposed || signal?.aborted) return '';
 
-    // Pool was disposed while this call was waiting in the queue.
+    const worker = await acquire(signal);
+
+    // Pool was disposed, or the caller gave up, while this call was waiting
+    // in the queue.
     if (worker === null) return '';
 
     return new Promise((resolve) => {
@@ -92,10 +129,12 @@ export function createHashPool({
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        // Remove listeners so the later onmessage doesn't double-release.
         worker.onmessage = null;
         worker.onerror = null;
-        release(worker);
+        // The worker is still reading this file and will answer for it
+        // later. Handed to the next file, that answer would be taken as the
+        // next file's hash, and every answer after it would be one file late.
+        replace(worker);
         resolve('');
       }, timeoutMs);
 
