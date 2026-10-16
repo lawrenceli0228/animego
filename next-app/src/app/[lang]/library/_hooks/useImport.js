@@ -41,19 +41,25 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
   const [summary, setSummary] = useState(/** @type {ImportSummary|null} */ (null));
   const [error, setError] = useState(/** @type {string|null} */ (null));
 
-  /** Used to signal cancellation to the in-flight run */
-  const cancelledRef = useRef(false);
-
-  /** Takes the in-flight run's files that are still waiting off the hash pool. */
-  const abortRef = useRef(/** @type {AbortController|null} */ (null));
+  /**
+   * One controller per run in flight. Aborting one stops that run between
+   * clusters and takes its files still waiting off the hash pool. Each run
+   * has its own: a shared flag was reset by the next run, so a cancelled run
+   * went on importing files whose reads had been cut short.
+   */
+  const runsRef = useRef(/** @type {Set<AbortController>} */ (new Set()));
 
   /** Lazily-created hash pool when no injected pool is provided. */
   const ownedPoolRef = useRef(/** @type {HashPool|null} */ (null));
 
-  // Dispose any pool we own when the hook unmounts. Injected pools are owned
-  // by the caller — we never dispose those.
+  // On unmount, stop the runs before disposing any pool we own. Left running
+  // without a pool, a run would import the files still being read under
+  // name-and-size ids; stopped, it leaves them for the next scan. Injected
+  // pools are owned by the caller — we never dispose those.
   useEffect(() => {
+    const runs = runsRef.current;
     return () => {
+      for (const running of runs) running.abort();
       if (ownedPoolRef.current) {
         ownedPoolRef.current.dispose();
         ownedPoolRef.current = null;
@@ -66,8 +72,7 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
    * already imported stay, the rest are left for the next scan.
    */
   const cancel = useCallback(() => {
-    cancelledRef.current = true;
-    abortRef.current?.abort();
+    for (const running of runsRef.current) running.abort();
   }, []);
 
   /**
@@ -82,9 +87,9 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
    * @returns {Promise<void>}
    */
   const run = useCallback(async (input) => {
-    cancelledRef.current = false;
     const abort = new AbortController();
-    abortRef.current = abort;
+    const stopped = () => abort.signal.aborted;
+    runsRef.current.add(abort);
     setProgress([]);
     setSummary(null);
     setError(null);
@@ -112,15 +117,15 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
           db,
           dandan,
           hashFile: pool ? (file) => pool.hash(file, { signal: abort.signal }) : undefined,
-          shouldStop: () => cancelledRef.current,
+          shouldStop: stopped,
           onEvent: (event) => {
-            if (cancelledRef.current) return;
+            if (stopped()) return;
             setProgress(prev => [...prev, event]);
           },
         },
       );
 
-      if (!cancelledRef.current) {
+      if (!stopped()) {
         setSummary(result);
         setStatus('done');
       } else {
@@ -129,12 +134,14 @@ export function useImport({ db, dandan, hashPool: injectedPool }) {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!cancelledRef.current) {
+      if (!stopped()) {
         setError(msg);
         setStatus('error');
       } else {
         setStatus('idle');
       }
+    } finally {
+      runsRef.current.delete(abort);
     }
   }, [db, dandan, injectedPool]);
 
