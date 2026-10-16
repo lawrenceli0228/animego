@@ -897,10 +897,13 @@ export function LibraryShell() {
   // Legacy used useNavigate('/player', { state: {...} }); we encode in the
   // querystring so refresh recovers.
   const handlePickEpisode = useCallback(
-    (seriesId: string, episodeNumber: number) => {
+    (seriesId: string, episodeNumber: number, fileRefId?: string) => {
       setDetailSeriesId(null);
+      // `file` names one of the episode's other versions; without it the
+      // player plays the episode's primary file.
+      const file = fileRefId ? `&file=${encodeURIComponent(fileRefId)}` : "";
       router.push(
-        `/player?seriesId=${encodeURIComponent(seriesId)}&resumeEpisode=${episodeNumber}`,
+        `/player?seriesId=${encodeURIComponent(seriesId)}&resumeEpisode=${episodeNumber}${file}`,
       );
     },
     [router],

@@ -212,6 +212,13 @@ export interface SeedEpisodeSpec {
   progress?: SeedProgressSpec;
   /** Omit unless a caller has to resolve the actual file. */
   fileRef?: SeedFileRefSpec;
+  /**
+   * Other releases of this episode: extra `fileRefs` rows, listed in the
+   * episode's `alternateFileIds` — what an import writes when a second release
+   * of an episode it already holds turns up. Ids come from
+   * `seedAlternateFileId`.
+   */
+  alternates?: readonly SeedFileRefSpec[];
 }
 
 /**
@@ -313,6 +320,16 @@ export function seedEpisodeId(
   number: number,
 ): string {
   return `${seriesId}-ep-${kind}-${number}`;
+}
+
+/** The `FileRef.id` `seedLibrary` gives an episode's `index`-th alternate. */
+export function seedAlternateFileId(
+  seriesId: string,
+  kind: string,
+  number: number,
+  index: number,
+): string {
+  return `${seedEpisodeId(seriesId, kind, number)}-alt-${index}`;
 }
 
 function defaultSeriesSpecs(count: number): SeedSeriesSpec[] {
@@ -474,9 +491,23 @@ export async function seedLibrary(
             // the file header: an unmatched primaryFileId keeps the card out
             // of the 'offline'/'partial' filter instead of hiding it.
             primaryFileId: `${epId}-file`,
-            alternateFileIds: [],
+            // Same id scheme as `seedAlternateFileId`, which cannot be called
+            // from inside page.evaluate.
+            alternateFileIds: (ep.alternates ?? []).map((_, i) => `${epId}-alt-${i}`),
             version: 1,
             updatedAt: now,
+          });
+          (ep.alternates ?? []).forEach((alt, i) => {
+            fileRefRows.push({
+              id: `${epId}-alt-${i}`,
+              libraryId: alt.libraryId,
+              libraryIds: [alt.libraryId],
+              episodeId: epId,
+              relPath: alt.relPath,
+              size: alt.size ?? 1024,
+              mtime: alt.mtime ?? now,
+              matchStatus: "manual",
+            });
           });
           if (ep.fileRef) {
             fileRefRows.push({
@@ -664,6 +695,11 @@ export interface SeedOpfsRootOptions {
   fileName: string;
   /** File bytes. Read a real fixture off disk and pass `[...buffer]`. */
   bytes: readonly number[];
+  /**
+   * More files under the same root, at paths relative to it; folders on the
+   * way are created. For an episode whose other versions live elsewhere.
+   */
+  extraFiles?: readonly { relPath: string; bytes: readonly number[] }[];
 }
 
 /**
@@ -700,14 +736,28 @@ export async function seedOpfsLibraryRoot(
       libraryId,
       fileName,
       bytes,
+      extraFiles,
     }: { dbName: string } & SeedOpfsRootOptions) => {
       const opfs = await navigator.storage.getDirectory();
       await opfs.removeEntry(dirName, { recursive: true }).catch(() => {});
       const dir = await opfs.getDirectoryHandle(dirName, { create: true });
-      const fileHandle = await dir.getFileHandle(fileName, { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(new Uint8Array(bytes));
-      await writable.close();
+      const writeAt = async (relPath: string, data: readonly number[]) => {
+        const parts = relPath.split("/").filter(Boolean);
+        const name = parts.pop();
+        if (!name) throw new Error(`seedOpfsLibraryRoot: empty path ${JSON.stringify(relPath)}`);
+        let parent = dir;
+        for (const segment of parts) {
+          parent = await parent.getDirectoryHandle(segment, { create: true });
+        }
+        const handle = await parent.getFileHandle(name, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(new Uint8Array(data));
+        await writable.close();
+      };
+      await writeAt(fileName, bytes);
+      for (const extra of extraFiles ?? []) {
+        await writeAt(extra.relPath, extra.bytes);
+      }
 
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
         const req = indexedDB.open(dbName);
@@ -730,7 +780,12 @@ export async function seedOpfsLibraryRoot(
       });
       db.close();
     },
-    { dbName: DB_NAME, ...opts, bytes: [...opts.bytes] },
+    {
+      dbName: DB_NAME,
+      ...opts,
+      bytes: [...opts.bytes],
+      extraFiles: (opts.extraFiles ?? []).map((f) => ({ relPath: f.relPath, bytes: [...f.bytes] })),
+    },
   );
 }
 

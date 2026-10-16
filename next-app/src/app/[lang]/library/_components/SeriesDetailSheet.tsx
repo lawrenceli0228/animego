@@ -22,6 +22,11 @@ import { useLang } from "@/lib/lang-client";
 import { db } from "@/lib/library/db/db.js";
 import { loadMergedSeriesRows } from "../_services/loadSeriesRows";
 import { buildGridCells, type GridEpisodeRow } from "../_services/episodeGridModel";
+import {
+  alternateFileIdsOf,
+  buildOtherVersions,
+  type VersionFileRef,
+} from "../_services/otherVersions";
 import { EPISODE_CHIP_CSS, EpisodeGrid } from "./EpisodeGrid";
 // P6 TODO: tighten when useLibrary gets typed exports; for now widen to any
 // eslint-disable-next-line -eslint/no-explicit-any
@@ -32,6 +37,8 @@ interface EpisodeRow {
   seriesId: string;
   number: number;
   kind: string;
+  primaryFileId?: string;
+  alternateFileIds?: string[];
 }
 
 interface ProgressRow {
@@ -361,7 +368,8 @@ interface SeriesDetailSheetProps {
    */
   episodeOffset?: number;
   onClose: () => void;
-  onPickEpisode: (seriesId: string, episodeNumber: number) => void;
+  /** `fileRefId` names one of the episode's other versions; absent plays its primary. */
+  onPickEpisode: (seriesId: string, episodeNumber: number, fileRefId?: string) => void;
   onPlaySeries?: (seriesId: string) => void;
 }
 
@@ -379,6 +387,7 @@ export function SeriesDetailSheet({
   const [progressById, setProgressById] = useState<Map<string, ProgressRow>>(
     new Map(),
   );
+  const [versionRefs, setVersionRefs] = useState<VersionFileRef[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -402,10 +411,26 @@ export function SeriesDetailSheet({
           series.id,
         )) as { episodes: EpisodeRow[]; progress: ProgressRow[] };
         if (cancelled) return;
+        // The files behind each episode's other versions. Best-effort: the
+        // grid is complete without them, so a failed read costs this lane only.
+        const versionIds = alternateFileIdsOf(eps);
+        const refs = versionIds.length
+          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ((await (db as any).fileRefs
+              .where("id")
+              .anyOf(versionIds)
+              .toArray()
+              .catch((err: unknown) => {
+                console.warn("[SeriesDetailSheet] other versions failed to load:", err);
+                return [];
+              })) as VersionFileRef[])
+          : [];
+        if (cancelled) return;
         const map = new Map<string, ProgressRow>();
         for (const p of progRows) map.set(p.episodeId, p);
         setEpisodes(eps);
         setProgressById(map);
+        setVersionRefs(refs);
         setLoaded(true);
       } catch (err) {
         if (!cancelled) {
@@ -437,6 +462,12 @@ export function SeriesDetailSheet({
   const grid = useMemo(
     () => buildGridCells(episodes, groupTotal, episodeOffset),
     [episodes, groupTotal, episodeOffset],
+  );
+
+  // Other releases of the same episodes, numbered like their episode's chip.
+  const otherVersions = useMemo(
+    () => buildOtherVersions(episodes, versionRefs, grid.displayNumbers),
+    [episodes, versionRefs, grid.displayNumbers],
   );
 
   const lastResume = useMemo(() => {
@@ -480,9 +511,9 @@ export function SeriesDetailSheet({
   // the other end, and every id-space lookup downstream of it — the dandanplay
   // `episodeMap`, keyed by the number parsed out of the filename — is too.
   // Only the label moves.
-  function handlePick(ep: GridEpisodeRow) {
+  function handlePick(ep: GridEpisodeRow, fileRefId?: string) {
     if (typeof ep.number !== "number") return;
-    onPickEpisode(series.id, ep.number);
+    onPickEpisode(series.id, ep.number, fileRefId);
   }
 
   function handleResume() {
@@ -638,6 +669,7 @@ export function SeriesDetailSheet({
             loaded={loaded}
             reduced={!!reduced}
             onPick={handlePick}
+            otherVersions={otherVersions}
           />
         </motion.div>
       </motion.div>

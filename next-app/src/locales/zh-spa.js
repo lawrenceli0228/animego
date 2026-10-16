@@ -1398,6 +1398,8 @@ const zh = {
       notDownloaded: 'EP {{num}} · 未下载',
       unclassified: '未归类',
       unclassifiedHint: '集号不在本季范围内 — 单独列出以免被藏起来',
+      otherVersions: '其他版本',
+      otherVersionsHint: '同一集的其他文件 — 点开播放这一份',
     },
     // ImportMiniPill
     miniPill: {

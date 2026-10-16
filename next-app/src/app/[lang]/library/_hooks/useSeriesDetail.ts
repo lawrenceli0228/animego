@@ -2,11 +2,13 @@
 
 // Ported from client/src/hooks/useSeriesDetail.js (P6.4 subagent C).
 // Loads a Series + its Episodes + their FileRefs from IDB. Lazily resolves
-// Files via FSA only on demand (returned `getFile(episodeId)`).
+// Files via FSA only on demand (returned `getFile(episodeId)` for an episode's
+// primary, `getFileByRef(fileRefId)` for any file the card holds).
 
 import { useState, useEffect, useCallback } from "react";
 import { resolveMergedSeriesIds } from "../_services/resolveMergedIds";
 import { buildGroupTotals } from "../_services/seriesGroups";
+import { alternateFileIdsOf } from "../_services/otherVersions";
 import { readEpisodeOffset } from "@/lib/library/episodeOffset";
 import type Dexie from "dexie";
 
@@ -90,6 +92,11 @@ export interface UseSeriesDetailResult {
   episodes: EpisodeRecord[];
   fileRefByEpisode: Map<string, FileRefRecord>;
   /**
+   * Every file the card holds by id: each episode's primary and its
+   * alternates. `fileRefByEpisode` only ever names the primary.
+   */
+  fileRefById: Map<string, FileRefRecord>;
+  /**
    * Episodes this whole card claims, folded across the merge group.
    * `undefined` means unknown — an unbound series, or one whose count never
    * resolved.
@@ -114,6 +121,8 @@ export interface UseSeriesDetailResult {
    */
   episodeOffset: number | undefined;
   getFile: (episodeId: string) => Promise<File | null>;
+  /** The file behind one FileRef on this card — a primary or an alternate. */
+  getFileByRef: (fileRefId: string) => Promise<File | null>;
   refresh: () => void;
 }
 
@@ -131,6 +140,9 @@ export function useSeriesDetail(
   const [fileRefByEpisode, setFileRefByEpisode] = useState<
     Map<string, FileRefRecord>
   >(new Map());
+  const [fileRefById, setFileRefById] = useState<Map<string, FileRefRecord>>(
+    new Map(),
+  );
   const [groupTotal, setGroupTotal] = useState<number | undefined>(undefined);
   const [episodeOffset, setEpisodeOffset] = useState<number | undefined>(undefined);
   const [tick, setTick] = useState(0);
@@ -145,6 +157,7 @@ export function useSeriesDetail(
       setSeries(null);
       setEpisodes([]);
       setFileRefByEpisode(new Map());
+      setFileRefById(new Map());
       setGroupTotal(undefined);
       setEpisodeOffset(undefined);
       return;
@@ -168,6 +181,7 @@ export function useSeriesDetail(
           setSeries(null);
           setEpisodes([]);
           setFileRefByEpisode(new Map());
+          setFileRefById(new Map());
           setGroupTotal(undefined);
           setEpisodeOffset(undefined);
       setEpisodeOffset(undefined);
@@ -202,22 +216,25 @@ export function useSeriesDetail(
         if (cancelled) return;
         epRecords.sort((a, b) => a.number - b.number);
 
-        // 3. Fetch fileRefs for each episode's primaryFileId.
+        // 3. Fetch fileRefs for each episode's primary and its alternates —
+        // the alternates so a link naming one (`?file=`) can play it.
         const primaryFileIds = epRecords
           .map((ep) => ep.primaryFileId)
           .filter(Boolean);
+        const refIds = [...new Set([...primaryFileIds, ...alternateFileIdsOf(epRecords)])];
 
         const refMap = new Map<string, FileRefRecord>();
+        let refById = new Map<string, FileRefRecord>();
 
-        if (primaryFileIds.length) {
+        if (refIds.length) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const refs = (await (db as any).fileRefs
             .where("id")
-            .anyOf(primaryFileIds)
+            .anyOf(refIds)
             .toArray()) as FileRefRecord[];
           if (cancelled) return;
 
-          const refById = new Map(refs.map((r) => [r.id, r]));
+          refById = new Map(refs.map((r) => [r.id, r]));
           for (const ep of epRecords) {
             if (ep.primaryFileId) {
               const ref = refById.get(ep.primaryFileId);
@@ -242,6 +259,7 @@ export function useSeriesDetail(
         setSeries(seriesRecord);
         setEpisodes(epRecords);
         setFileRefByEpisode(refMap);
+        setFileRefById(refById);
         setGroupTotal(
           buildGroupTotals(memberSeries, memberSeasons, overrides).get(rootSeriesId),
         );
@@ -270,10 +288,9 @@ export function useSeriesDetail(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesId, db, tick]);
 
-  const getFile = useCallback(
-    async (episodeId: string): Promise<File | null> => {
+  const readFile = useCallback(
+    async (fileRef: FileRefRecord | undefined): Promise<File | null> => {
       try {
-        const fileRef = fileRefByEpisode.get(episodeId);
         if (!fileRef) return null;
         if (!fileRef.libraryId) return null;
 
@@ -286,7 +303,18 @@ export function useSeriesDetail(
         return null;
       }
     },
-    [fileRefByEpisode, fileHandles],
+    [fileHandles],
+  );
+
+  const getFile = useCallback(
+    (episodeId: string): Promise<File | null> =>
+      readFile(fileRefByEpisode.get(episodeId)),
+    [fileRefByEpisode, readFile],
+  );
+
+  const getFileByRef = useCallback(
+    (fileRefId: string): Promise<File | null> => readFile(fileRefById.get(fileRefId)),
+    [fileRefById, readFile],
   );
 
   return {
@@ -294,9 +322,11 @@ export function useSeriesDetail(
     series,
     episodes,
     fileRefByEpisode,
+    fileRefById,
     groupTotal,
     episodeOffset,
     getFile,
+    getFileByRef,
     refresh,
   };
 }
