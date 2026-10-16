@@ -31,10 +31,12 @@ const ROOT = '__root__';
 
 /**
  * Loose files at the root are one group each (grouping.js), but they share a
- * folder: they answer together.
+ * folder: they answer together, and a match speaks for them together
+ * (importPipeline's matchSpeaksForCluster).
  * @param {Group} group
+ * @returns {string}
  */
-function folderOf(group) {
+export function folderOf(group) {
   return group.groupKey.startsWith(ROOT) ? ROOT : group.groupKey;
 }
 

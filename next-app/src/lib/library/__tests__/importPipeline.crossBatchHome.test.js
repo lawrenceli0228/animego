@@ -761,6 +761,71 @@ describe("a cluster splits where its folders name different shows", () => {
     expect(bindingOf(db, seriesOfFile(db, s1[0]))).not.toBe(213805);
   });
 
+  test("a file with a copy in a folder that splits off is still one episode", async () => {
+    const ep = (dir, n, hash) =>
+      item({
+        fileId: `${dir}/${n}|700|0`,
+        fileName: `[Sub] Koori no Jouheki - ${String(n).padStart(2, "0")}.mkv`,
+        relativePath: `${dir}/[Sub] Koori no Jouheki - ${String(n).padStart(2, "0")}.mkv`,
+        parsedTitle: "Koori no Jouheki",
+        episode: n,
+        hash16M: hash,
+      });
+    const own = [ep("Koori", 1, "a1"), ep("Koori", 2, "a2"), ep("Koori", 13, "b13")];
+    const copy = ep("Koori airing", 13, "b13");
+    const next = ep("Koori airing", 14, "c14");
+    const db = memoryDb({});
+    await runImport(
+      { items: [...own, copy, next], libraryId: "lib-1" },
+      {
+        db,
+        dandan: dandanByHash({
+          a1: matchedAs(100, "Koori"),
+          a2: matchedAs(100, "Koori"),
+          b13: matchedAs(100, "Koori"),
+          c14: matchedAs(200, "Koori 2"),
+        }),
+      },
+    );
+    const refId = fileRefId(own[2]);
+    const holders = [...db.episodes.rows.values()].filter(
+      (e) => e.primaryFileId === refId || (e.alternateFileIds ?? []).includes(refId),
+    );
+    expect(holders).toHaveLength(1);
+    expect(bindingOf(db, holders[0].seriesId)).toBe(100);
+    expect(db.fileRefs.rows.get(refId).copies?.map((c) => c.relPath)).toEqual([copy.relativePath]);
+    expect(bindingOf(db, seriesOfFile(db, next))).toBe(200);
+  });
+
+  test("★ two new loose files of a sequel join its card, not the first season's", async () => {
+    // Loose root files are a group each; a match speaks for them together.
+    const db = memoryDb({
+      series: [{ ...KOORI.series[0], id: "sr-s1" }, KOORI_S2_CARD.series],
+      episodes: [KOORI_S2_CARD.episode],
+      fileRefs: [KOORI_S2_CARD.ref],
+    });
+    const r16 = kooriItem();
+    const r17 = kooriItem({
+      fileId: "r17|700|0",
+      fileName: "[SweetSub&LoliHouse] Koori no Jouheki - 17 [WebRip 1080p].mkv",
+      relativePath: "[SweetSub&LoliHouse] Koori no Jouheki - 17 [WebRip 1080p].mkv",
+      episode: 17,
+      hash16M: "koori17",
+    });
+    await runImport(
+      { items: [r16, r17], libraryId: "lib-1" },
+      {
+        db,
+        dandan: dandanByHash({
+          koori16: matchedAs(213805, "冰之城墙 第二季"),
+          koori17: matchedAs(213805, "冰之城墙 第二季"),
+        }),
+      },
+    );
+    expect(seriesOfFile(db, r16)).toBe("sr-s2");
+    expect(seriesOfFile(db, r17)).toBe("sr-s2");
+  });
+
   test("a folder of specials is never split off its show", async () => {
     const main = item({
       fileId: "fm1|700|0",

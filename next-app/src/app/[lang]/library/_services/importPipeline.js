@@ -23,7 +23,7 @@ import {
 } from '@/lib/library/recordFactory.js';
 import { normalizeTokens } from '@/lib/library/normalize.js';
 import { batchOnDisk, dropCopiesWithin, relocateFileRef } from './fileRefCopies.js';
-import { splitClusterByFolder } from './splitClusterByFolder.js';
+import { folderOf, splitClusterByFolder } from './splitClusterByFolder.js';
 // The one door in and out of `Series.anilistId`. Imported rather than
 // re-implemented: the guarantee that an automatic write can never stomp a
 // binding the user set by hand lives in that module, and an import is about as
@@ -144,9 +144,11 @@ export async function runImport(input, ctx) {
   let seedOffset = ulidSeedBase ?? 0;
 
   for (const raw of clusterize(groups, priorSeasons)) {
-    for (const part of await splitOrKeep(raw, identifyFolder)) {
-      const { cluster, copies: extra } = dropCopiesWithin(part);
-      copies.push(...extra);
+    // Copies are dropped before the split: two copies that the split puts in
+    // different parts would each mint an episode on a different card.
+    const { cluster: distinct, copies: extra } = dropCopiesWithin(raw);
+    copies.push(...extra);
+    for (const cluster of await splitOrKeep(distinct, identifyFolder)) {
       summary.clusters++;
 
       const { clusterKey } = cluster;
@@ -696,7 +698,8 @@ function deriveBoundHome(anilistId, homeIndexes, clusterSeason) {
 
 /**
  * Whether the representative's match may route this whole cluster: its files
- * came from one folder, and none of them is filed yet. dandanplay is asked
+ * came from one folder (loose root files are one folder, though grouping.js
+ * makes each its own group), and none of them is filed yet. dandanplay is asked
  * about the representative alone, the clusterizer merges folders by title, and
  * a file the library already filed keeps the episode it is on.
  *
@@ -705,7 +708,7 @@ function deriveBoundHome(anilistId, homeIndexes, clusterSeason) {
  * @returns {Promise<boolean>}
  */
 async function matchSpeaksForCluster(cluster, db) {
-  if ((cluster.groups?.length ?? 0) > 1) return false;
+  if (new Set((cluster.groups ?? []).map(folderOf)).size > 1) return false;
   if (!db) return true;
   for (const item of cluster.items ?? []) {
     const ref = await db.fileRefs.get(fileRefId(item));
