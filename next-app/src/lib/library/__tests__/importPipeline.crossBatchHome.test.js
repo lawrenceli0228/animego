@@ -370,22 +370,20 @@ describe("the match routes a cluster only when it speaks for every file", () => 
       ],
       fileRefs: [filedRef(filed[0], "s1-ep1"), filedRef(filed[1], "s1-ep2"), KOORI_S2_CARD.ref],
     });
-    await runImport(
-      { items: [...filed, kooriItem()], libraryId: "lib-1" },
-      {
-        db,
-        dandan: dandanByHash({
-          koori16: matchedAs(213805, "冰之城墙 第二季"),
-          s1e1: matchedAs(186497, "冰之城墙"),
-          s1e2: matchedAs(186497, "冰之城墙"),
-        }),
-      },
-    );
+    // The filed folder answers from its card's binding, so none of its files
+    // is sent to dandanplay, and "- 16" is split off and filed by its own
+    // match (see "a cluster splits where its folders name different shows").
+    const dandan = recordingByHash({
+      koori16: matchedAs(213805, "冰之城墙 第二季"),
+      s1e1: matchedAs(186497, "冰之城墙"),
+      s1e2: matchedAs(186497, "冰之城墙"),
+    });
+    await runImport({ items: [...filed, kooriItem()], libraryId: "lib-1" }, { db, dandan });
     expect(seriesOfFile(db, filed[0])).toBe("sr-s1");
     expect(seriesOfFile(db, filed[1])).toBe("sr-s1");
-    const s2Episodes = [...db.episodes.rows.values()].filter((e) => e.seriesId === "sr-s2");
-    expect(s2Episodes.map((e) => e.id)).toEqual(["s2-ep1"]);
+    expect(seriesOfFile(db, kooriItem())).toBe("sr-s2");
     expect(db.episodes.rows.get("s2-ep1").alternateFileIds).toEqual([]);
+    expect(dandan.asked).toEqual(["koori16"]);
   });
 
   test("★ a file already filed stays put when a new file in its own folder is the one asked", async () => {
@@ -528,3 +526,112 @@ describe("the match routes a cluster only when it speaks for every file", () => 
   });
 });
 // (content-hash home precedence is locked by importPipeline.hardening.test.js)
+
+// ─── each folder answers for itself ─────────────────────────────────────────
+//
+// The clusterizer merges folders by title alone, so one cluster can hold a
+// first season's folder and a sequel's "- 16" at the root. On a first import
+// (or after clearing the library) nothing is filed yet, and the cluster used to
+// become ONE card named and bound by whichever file was asked — "- 16", since
+// the root sorts first — so the first season showed up inside the second.
+// Before matching, the pipeline now asks one file per folder and splits the
+// cluster where the answers name different shows.
+
+/** dandanplay answering per file, recording which files were asked. */
+function recordingByHash(answers) {
+  const asked = [];
+  return {
+    asked,
+    match: async (hash) => {
+      asked.push(hash);
+      return answers[hash] ?? null;
+    },
+  };
+}
+
+function bindingOf(db, seriesId) {
+  return db.series.rows.get(seriesId)?.anilistId;
+}
+
+describe("a cluster splits where its folders name different shows", () => {
+  test("★ first import: the first season and the sequel's '- 16' get a card each", async () => {
+    const s1 = [s1Item(1), s1Item(2)];
+    const db = memoryDb({});
+    await runImport(
+      { items: [...s1, kooriItem()], libraryId: "lib-1" },
+      {
+        db,
+        dandan: dandanByHash({
+          koori16: matchedAs(213805, "冰之城墙 第二季"),
+          s1e1: matchedAs(186497, "冰之城墙"),
+          s1e2: matchedAs(186497, "冰之城墙"),
+        }),
+      },
+    );
+    const s1Card = seriesOfFile(db, s1[0]);
+    const s2Card = seriesOfFile(db, kooriItem());
+    expect(seriesOfFile(db, s1[1])).toBe(s1Card);
+    expect(s1Card).not.toBe(s2Card);
+    expect(bindingOf(db, s1Card)).toBe(186497);
+    expect(bindingOf(db, s2Card)).toBe(213805);
+    expect(db.series.rows.get(s1Card).titleZh).toBe("冰之城墙");
+  });
+
+  test("folders naming the same show stay one card, each folder asked once", async () => {
+    const show = (dir, n) =>
+      item({
+        fileId: `jjk${n}|700|0`,
+        fileName: `[Sub] Jujutsu Kaisen S3 - ${String(n).padStart(2, "0")}.mkv`,
+        relativePath: `${dir}/[Sub] Jujutsu Kaisen S3 - ${String(n).padStart(2, "0")}.mkv`,
+        parsedTitle: "Jujutsu Kaisen",
+        episode: n,
+        hash16M: `jjk${n}`,
+      });
+    const files = [show("JJK", 3), show("JJK", 4), show("JJK/extra", 1)];
+    const answers = Object.fromEntries(files.map((f) => [f.hash16M, matchedAs(300, "咒术回战")]));
+    const dandan = recordingByHash(answers);
+    const db = memoryDb({});
+    await runImport({ items: files, libraryId: "lib-1" }, { db, dandan });
+    const cards = new Set(files.map((f) => seriesOfFile(db, f)));
+    expect(cards.size).toBe(1);
+    expect([...dandan.asked].sort()).toEqual(["jjk1", "jjk3"]);
+  });
+
+  test("a folder the match cannot place stays with its cluster", async () => {
+    // No positive disagreement, no split: an unindexed folder of the same show
+    // must not become a second card that nothing can fold back.
+    const s1 = [s1Item(1), s1Item(2)];
+    const db = memoryDb({});
+    await runImport(
+      { items: [...s1, kooriItem()], libraryId: "lib-1" },
+      { db, dandan: dandanByHash({ koori16: matchedAs(213805, "冰之城墙 第二季") }) },
+    );
+    expect(seriesOfFile(db, s1[0])).toBe(seriesOfFile(db, kooriItem()));
+  });
+
+  test("a folder of specials is never split off its show", async () => {
+    const main = item({
+      fileId: "fm1|700|0",
+      fileName: "[Sub] Frieren - 01.mkv",
+      relativePath: "Frieren/[Sub] Frieren - 01.mkv",
+      episode: 1,
+      hash16M: "frieren01",
+    });
+    const special = item({
+      fileId: "fsp1|700|0",
+      fileName: "[Sub] Frieren - SP01.mkv",
+      relativePath: "Frieren/SPs/[Sub] Frieren - SP01.mkv",
+      episode: 1,
+      parsedKind: "sp",
+      hash16M: "frierenSP1",
+    });
+    const dandan = recordingByHash({
+      frieren01: matchedAs(154587, "葬送的芙莉莲"),
+      frierenSP1: matchedAs(999001, "Frieren Special"),
+    });
+    const db = memoryDb({});
+    await runImport({ items: [main, special], libraryId: "lib-1" }, { db, dandan });
+    expect(seriesOfFile(db, special)).toBe(seriesOfFile(db, main));
+    expect(dandan.asked).not.toContain("frierenSP1");
+  });
+});
