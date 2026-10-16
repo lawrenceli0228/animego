@@ -1,5 +1,5 @@
-/* 按色调逛. Pills in their family's colour; one panel of up to six covers
- * visible at a time on a wide screen, a sideways rail on a phone. */
+/* 按色调逛. Pills in their family's colour; one family at a time, as a
+ * sideways rail of all its covers with a slider under it (HueRail.tsx). */
 
 .pills {
   margin-top: 24px;
@@ -67,16 +67,15 @@
 /* Panels are stacked in one grid cell, so the stage is as tall as the
  * tallest panel and nothing below it jumps when the family changes. */
 .stage {
-  margin-top: 28px;
+  margin-top: 20px;
   display: grid;
 }
 
 .panel {
   grid-area: 1 / 1;
-  padding-inline: var(--home-gutter);
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 24px;
+  /* A grid item's min-width is its content's by default: without this the
+   * rail would widen the page to its full length instead of scrolling. */
+  min-width: 0;
   visibility: hidden;
   transition: visibility 0s linear 0.3s;
 }
@@ -86,11 +85,35 @@
   transition: visibility 0s linear 0s;
 }
 
-.card:nth-child(n + 7) {
+/* Every show of the family is its own card, at every width: the row scrolls,
+ * nothing in it is hidden. (It used to keep the first six on a wide screen and
+ * drop the rest; TodayRail.css.test.ts now scans this file too.) It runs from
+ * the content gutter to the viewport edge, so the row visibly continues. */
+.rail {
+  --hue-card: 192px;
+
+  /* The offsetParent of the cards, so their offsetLeft is a position in the
+   * row: the slider and the settle read it. */
+  position: relative;
+  display: flex;
+  gap: 24px;
+  padding: 8px var(--home-gutter) 4px;
+  scroll-padding-inline: var(--home-gutter);
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Reaching either end does not hand the swipe on to the browser's
+   * back / forward gesture. */
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.rail::-webkit-scrollbar {
   display: none;
 }
 
 .card {
+  flex: none;
+  width: var(--hue-card);
   opacity: 0;
   transform: translateY(12px);
   transition:
@@ -104,6 +127,95 @@
   transition:
     opacity 0.55s var(--home-ease) var(--stagger),
     transform 0.8s var(--home-expo) var(--stagger);
+}
+
+/* The end of the family: what comes next and the way there. A plain panel at
+ * cover height, not a card: it is not a show and is not counted. */
+.end {
+  box-sizing: border-box;
+  flex: none;
+  width: 300px;
+  height: calc(var(--hue-card) * 4 / 3);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 28px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background-color: var(--home-surface);
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+.endTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.endNext {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(235, 235, 245, 0.58);
+}
+
+.endLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease-out;
+}
+
+.endLink:hover {
+  opacity: 0.78;
+}
+
+.endLink:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* While the row is moved by hand or flung: nothing snaps against it, and the
+ * cards passing under the pointer do not lift. Specific enough to beat the
+ * hover rules in cards.module.css whichever stylesheet loads first. */
+.rail[data-moving="true"] {
+  scroll-snap-type: none;
+}
+
+.rail[data-moving="true"] .card .cover,
+.rail[data-moving="true"] .card .zoom {
+  transform: none;
+  box-shadow: none;
+}
+
+/* A mouse: the row is grabbed and dragged. */
+@media (hover: hover) and (pointer: fine) {
+  .rail {
+    cursor: grab;
+  }
+
+  .rail[data-dragging="true"],
+  .rail[data-dragging="true"] * {
+    cursor: grabbing;
+  }
+
+  .rail[data-dragging="true"] {
+    -webkit-user-select: none;
+    user-select: none;
+    scroll-snap-type: none;
+  }
 }
 
 .cover {
@@ -132,24 +244,10 @@
   line-height: 20px;
 }
 
-@media (max-width: 1180px) {
-  .panel {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .card:nth-child(n + 5) {
-    display: none;
-  }
-}
-
 @media (max-width: 900px) {
-  .panel {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .rail {
+    --hue-card: 160px;
     gap: 16px;
-  }
-
-  .card:nth-child(n + 4) {
-    display: none;
   }
 }
 
@@ -188,28 +286,27 @@
   }
 
   .stage {
-    margin-top: 16px;
+    margin-top: 12px;
   }
 
-  .panel {
-    display: flex;
+  /* The row swipes and settles card by card. */
+  .rail {
+    --hue-card: 124px;
     gap: 12px;
-    overflow-x: auto;
+    padding-top: 4px;
     scroll-snap-type: x proximity;
-    scroll-padding-inline: var(--home-gutter);
-    scrollbar-width: none;
   }
 
-  .panel::-webkit-scrollbar {
-    display: none;
-  }
-
-  .card,
-  .card:nth-child(n + 4) {
-    display: flex;
-    flex: none;
-    width: 124px;
+  .card {
     gap: 8px;
+    scroll-snap-align: start;
+  }
+
+  .end {
+    width: 200px;
+    height: 165px;
+    padding: 0 16px;
+    border-radius: 8px;
     scroll-snap-align: start;
   }
 

@@ -80,6 +80,20 @@ export function defaultFamily(groups: ReadonlyArray<{ key: HueFamilyKey; items: 
 }
 
 /**
+ * The family after `key`, wrapping from the last to the first: where a
+ * family's rail sends a reader who has reached its end. Null when there is no
+ * other family to go to.
+ */
+export function nextFamily(
+  groups: ReadonlyArray<{ key: HueFamilyKey }>,
+  key: HueFamilyKey,
+): HueFamilyKey | null {
+  const at = groups.findIndex((g) => g.key === key);
+  if (at < 0 || groups.length < 2) return null;
+  return groups[(at + 1) % groups.length].key;
+}
+
+/**
  * Coloured items first, colourless ones after, each group in its original
  * order. The hero opens on its first slide and that slide paints the whole
  * page, so a colourless first slide opens the homepage grey.

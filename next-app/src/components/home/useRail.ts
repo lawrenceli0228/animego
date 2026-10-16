@@ -1,8 +1,9 @@
 "use client";
 
-// The wiring behind 今日更新's rail: dragging it with the mouse (and the fling
-// a quick drag ends in), coming to rest on a card, the slider under it, and the
-// cards rising the first time the row comes into view. The decisions — what a
+// The wiring behind the homepage's sideways rails (今日更新, and each family of
+// 按色调逛): dragging a rail with the mouse (and the fling a quick drag ends
+// in), coming to rest on a card, the slider under it, and the cards rising the
+// first time the row comes into view. The decisions — what a
 // drag is, where the thumb sits, where the rail comes to rest — are in
 // lib/home/railScroll.ts; these hooks read the DOM and write scrollLeft.
 
@@ -60,7 +61,7 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Where each item in the rail (cards, the 现在 marker, the end of the day) starts. */
+/** Where each item in the rail (cards, 今日更新's 现在 marker, the end panel) starts. */
 function itemStarts(rail: HTMLElement): number[] {
   return Array.from(rail.children, (el) => (el as HTMLElement).offsetLeft);
 }
@@ -69,9 +70,9 @@ function boxOf(el: HTMLElement): ItemBox {
   return { start: el.offsetLeft, width: el.offsetWidth };
 }
 
-/** The show cards only — the ones a reader counts. */
+/** The show cards only (marked `data-card`) — the ones a reader counts. */
 function cardBoxes(rail: HTMLElement): ItemBox[] {
-  return Array.from(rail.querySelectorAll<HTMLElement>(":scope > [data-state]"), boxOf);
+  return Array.from(rail.querySelectorAll<HTMLElement>(":scope > [data-card]"), boxOf);
 }
 
 function stopsOf(rail: HTMLElement, g: RailGeometry): number[] {

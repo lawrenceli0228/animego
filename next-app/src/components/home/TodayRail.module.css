@@ -218,104 +218,6 @@
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
-/* ── The slider ────────────────────────────────────────────────────────────
- * A thin line under the row, aligned with the page's content; its thumb is as
- * wide as the share of the row in view and as far along as the row is. Quiet
- * until the pointer is on it, it is held, or the keyboard is on the range
- * input in front of it; then the line thickens and the thumb takes the page's
- * tone. Size and place are written onto the thumb by useRailSlider.
- *
- * A row that fits keeps the slider's room — nothing below moves when the row
- * is measured — but draws nothing. */
-.slider {
-  position: relative;
-  height: 24px;
-  margin: 14px var(--home-gutter) 0;
-  border-radius: 8px;
-  cursor: pointer;
-  touch-action: pan-y;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.slider[data-overflow="false"] {
-  visibility: hidden;
-}
-
-.track,
-.thumb {
-  position: absolute;
-  top: 11px;
-  height: 2px;
-  transition:
-    top 0.15s ease-out,
-    height 0.15s ease-out,
-    background-color 0.15s ease-out;
-}
-
-.track {
-  left: 0;
-  right: 0;
-  border-radius: 3px;
-  background-color: rgba(255, 255, 255, 0.08);
-}
-
-.thumb {
-  border-radius: 4px;
-  background-color: var(--home-tone-line);
-  cursor: grab;
-}
-
-.slider[data-active="true"] .track {
-  top: 9px;
-  height: 6px;
-  background-color: rgba(255, 255, 255, 0.12);
-}
-
-.slider[data-active="true"] .thumb {
-  top: 8px;
-  height: 8px;
-  background-color: var(--home-tone);
-}
-
-.slider[data-dragging="true"],
-.slider[data-dragging="true"] .thumb {
-  cursor: grabbing;
-}
-
-/* The range input: off screen but focusable; its focus shows on the slider. */
-.scrub {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.scrub:focus-visible + .slider {
-  outline: 2px solid transparent;
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
-}
-
-/* Forced colours (Windows high contrast) drop backgrounds and shadows: the
- * track keeps a border and the thumb a system colour; the transparent outline
- * above becomes the focus ring. */
-@media (forced-colors: active) {
-  .track {
-    border: 1px solid CanvasText;
-  }
-
-  .thumb {
-    forced-color-adjust: none;
-    background-color: Highlight;
-  }
-}
-
 /* While the row is moved by hand or flung: nothing snaps against it, and the
  * cards passing under the pointer do not lift. Specific enough to beat the
  * hover rules in cards.module.css whichever stylesheet loads first. */
@@ -398,30 +300,6 @@
     width: 200px;
     padding: 0 16px;
   }
-
-  .slider {
-    margin-top: 12px;
-  }
-}
-
-/* A finger needs a taller target than a mouse. */
-@media (pointer: coarse) {
-  .slider {
-    height: 44px;
-  }
-
-  .track,
-  .thumb {
-    top: 21px;
-  }
-
-  .slider[data-active="true"] .track {
-    top: 19px;
-  }
-
-  .slider[data-active="true"] .thumb {
-    top: 18px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -429,10 +307,5 @@
   .nowDot,
   .rail[data-enter="run"] > * {
     animation: none;
-  }
-
-  .track,
-  .thumb {
-    transition-duration: 0.01ms;
   }
 }

@@ -78,14 +78,14 @@ function getCurrentSeason(): Season {
 }
 
 // How much of the season one request brings back. The hero takes the top 5,
-// 本季高分 the top 12, and 按色调逛 groups all of them by colour — so this is
-// sized for the colour groups to have something in them, not for the grid.
-// The endpoint is score-ordered and already filters adult titles.
-const SEASON_ROWS = 48;
+// 本季高分 the top 12, and 按色调逛 groups all of them by colour — the whole
+// season, so a family's pill counts every show of that colour this season and
+// its rail holds every one of them. 200 is the endpoint's own cap (go-api
+// seasonal.go); a season runs to about a hundred. Score-ordered, adult titles
+// already filtered out.
+const SEASON_ROWS = 200;
 const HERO_COUNT = 5;
 const SEASON_TOP_COUNT = 12;
-/** Per colour family: six show on a wide screen, the rest scroll on a phone. */
-const HUE_FAMILY_MAX = 10;
 const TRENDING_COUNT = 10;
 const COMPLETED_GEMS_LIMIT = 6;
 const YEAR_TOP_COUNT = 10;
@@ -298,7 +298,7 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
     hue: g.hue,
     label: dict.home[HUE_LABEL_KEY[g.key]] as string,
     count: g.items.length,
-    items: g.items.slice(0, HUE_FAMILY_MAX),
+    items: g.items,
   }));
   const hueCount = hueGroups.reduce((n, g) => n + g.items.length, 0);
 
@@ -356,6 +356,13 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
           countTemplate={dict.home.hueCount}
           families={families}
           defaultKey={defaultFamily(hueGroups) ?? families[0].key}
+          railCopy={{
+            scroll: dict.home.hueScroll,
+            scrollValue: dict.home.hueScrollValue,
+            endTitle: dict.home.hueEndTitle,
+            endNext: dict.home.hueEndNext,
+            endLink: dict.home.hueEndLink,
+          }}
         />
       ) : null}
       <TrendingRanks
