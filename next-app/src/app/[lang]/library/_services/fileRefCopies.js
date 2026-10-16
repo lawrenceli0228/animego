@@ -98,8 +98,10 @@ export function separateCopies(items) {
  * A cluster with each set of identical files in it reduced to its first
  * member. Two copies of the same bytes in one cluster would each mint an
  * Episode; the others are returned, to be listed as copies once the first has
- * a row. Folders left contributing nothing drop out of the cluster's groups,
- * so a copy does not count as a second folder merged into the card.
+ * a row. The copies leave their groups as well, and folders left
+ * contributing nothing drop out, so a copy does not count as a second folder
+ * merged into the card, and a cluster rebuilt from its groups (the folder
+ * split) does not bring the copies back.
  *
  * @param {import('@/lib/library/types').MatchCluster} cluster
  * @returns {{ cluster: import('@/lib/library/types').MatchCluster, copies: EpisodeItem[] }}
@@ -119,9 +121,9 @@ export function dropCopiesWithin(cluster) {
       ...cluster,
       items: distinct,
       representative,
-      groups: (cluster.groups ?? []).filter((group) =>
-        (group.items ?? []).some((item) => kept.has(item)),
-      ),
+      groups: (cluster.groups ?? [])
+        .map((group) => ({ ...group, items: (group.items ?? []).filter((item) => kept.has(item)) }))
+        .filter((group) => group.items.length > 0),
     },
     copies,
   };

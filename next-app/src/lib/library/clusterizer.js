@@ -30,7 +30,7 @@ function fnv1a(str) {
  * @param {EpisodeItem[]} items
  * @returns {EpisodeItem|null}
  */
-function pickRepresentative(items) {
+export function pickRepresentative(items) {
   if (!items.length) return null;
   const main = items.find(it => it.episode !== null && it.parsedKind === 'main');
   return main ?? items[0];
@@ -161,4 +161,26 @@ export function clusterize(groups, priorSeasons) {
   }
 
   return clusters;
+}
+
+/**
+ * Rebuild a cluster from a subset of its groups, the way clusterize builds
+ * one: items in the same order, representative picked the same way. The
+ * first part keeps the cluster's key; later parts get a suffix so progress
+ * events stay distinct.
+ *
+ * @param {MatchCluster} cluster
+ * @param {Group[]} groups - a subset of cluster.groups, in cluster order
+ * @param {number} index - position of this part among the cluster's parts
+ * @returns {MatchCluster}
+ */
+export function clusterOfGroups(cluster, groups, index) {
+  const items = sortClusterItems(groups.flatMap(g => g.items), groups);
+  return {
+    ...cluster,
+    clusterKey: index === 0 ? cluster.clusterKey : `${cluster.clusterKey}#${index}`,
+    groups,
+    items,
+    representative: pickRepresentative(items),
+  };
 }

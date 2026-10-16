@@ -23,6 +23,7 @@ import {
 } from '@/lib/library/recordFactory.js';
 import { normalizeTokens } from '@/lib/library/normalize.js';
 import { batchOnDisk, dropCopiesWithin, relocateFileRef } from './fileRefCopies.js';
+import { folderOf, splitClusterByFolder } from './splitClusterByFolder.js';
 // The one door in and out of `Series.anilistId`. Imported rather than
 // re-implemented: the guarantee that an automatic write can never stomp a
 // binding the user set by hand lives in that module, and an import is about as
@@ -108,25 +109,13 @@ export async function runImport(input, ctx) {
     homeIndexes = null;
   }
 
-  // Stage 3: clusterize
-  //
-  // Two copies of the same bytes are one file to the library. Copies that
-  // land in different clusters need nothing here: whichever cluster runs
-  // later finds the bytes already homed and lists its path as a copy (groups
-  // run largest first, so a show's own folder normally gets there before a
-  // stray copy). Copies in the SAME cluster would each mint an Episode, so
-  // each cluster keeps one and the rest are listed once it has a row (end of
-  // batch). Deduplicating the whole batch up front would be wrong: it can
-  // pull a file out of its folder, which changes how the folder clusters.
-  const copies = [];
-  const clusters = clusterize(groups, priorSeasons).map((raw) => {
-    const { cluster, copies: extra } = dropCopiesWithin(raw);
-    copies.push(...extra);
-    return cluster;
-  });
+  // Every dandanplay question this batch asks goes through here, so a file
+  // asked about by the folder split below is not asked again when its
+  // cluster is matched.
+  const askDandan = askOncePerFile(dandan);
 
   /** @type {ImportSummary} */
-  const summary = { clusters: clusters.length, matched: 0, failed: 0, ambiguous: 0, crossFolderMerges: [] };
+  const summary = { clusters: 0, matched: 0, failed: 0, ambiguous: 0, crossFolderMerges: [] };
 
   /**
    * Track which folders contributed files to each resolved seriesId across the
@@ -137,40 +126,62 @@ export async function runImport(input, ctx) {
    */
   const seriesFolders = new Map();
 
-  // Stage 4: process each cluster independently
+  // Stage 3: clusterize. Stage 4: split each cluster where its folders name
+  // different shows (splitClusterByFolder.js), then process each part. The
+  // split runs cluster by cluster, so its questions are spread over the batch
+  // instead of all coming before the first progress event.
+  //
+  // Two copies of the same bytes are one file to the library. Copies that
+  // land in different clusters need nothing here: whichever cluster runs
+  // later finds the bytes already homed and lists its path as a copy (groups
+  // run largest first, so a show's own folder normally gets there before a
+  // stray copy). Copies in the SAME cluster would each mint an Episode, so
+  // each cluster keeps one and the rest are listed once it has a row (end of
+  // batch). Deduplicating the whole batch up front would be wrong: it can
+  // pull a file out of its folder, which changes how the folder clusters.
+  const identifyFolder = (folderItems, rep) => folderIdentity(folderItems, rep, db, askDandan);
+  const copies = [];
   let seedOffset = ulidSeedBase ?? 0;
 
-  for (const cluster of clusters) {
-    const { clusterKey } = cluster;
-    emit({ kind: 'clusterStart', clusterKey, total: cluster.items.length });
+  for (const raw of clusterize(groups, priorSeasons)) {
+    // Copies are dropped before the split: two copies that the split puts in
+    // different parts would each mint an episode on a different card.
+    const { cluster: distinct, copies: extra } = dropCopiesWithin(raw);
+    copies.push(...extra);
+    for (const cluster of await splitOrKeep(distinct, identifyFolder)) {
+      summary.clusters++;
 
-    try {
-      await processCluster({
-        cluster,
-        libraryId,
-        priorSeasons,
-        homeIndexes,
-        userOverrides,
-        seriesRepo,
-        seasonRepo,
-        fileRefRepo,
-        cacheRepo,
-        dandan,
-        db,
-        onDisk,
-        ulidSeed: ulidSeedBase !== undefined ? seedOffset : undefined,
-        summary,
-        emit,
-        seriesFolders,
-      });
-    } catch (err) {
-      summary.failed++;
-      const errMsg = err instanceof Error ? err.message : String(err);
-      emit({ kind: 'clusterDone', clusterKey, verdict: 'failed' });
-      emit({ kind: 'failed', clusterKey, error: errMsg });
+      const { clusterKey } = cluster;
+      emit({ kind: 'clusterStart', clusterKey, total: cluster.items.length });
+
+      try {
+        await processCluster({
+          cluster,
+          libraryId,
+          priorSeasons,
+          homeIndexes,
+          userOverrides,
+          seriesRepo,
+          seasonRepo,
+          fileRefRepo,
+          cacheRepo,
+          dandan: askDandan,
+          db,
+          onDisk,
+          ulidSeed: ulidSeedBase !== undefined ? seedOffset : undefined,
+          summary,
+          emit,
+          seriesFolders,
+        });
+      } catch (err) {
+        summary.failed++;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        emit({ kind: 'clusterDone', clusterKey, verdict: 'failed' });
+        emit({ kind: 'failed', clusterKey, error: errMsg });
+      }
+
+      seedOffset += 100;
     }
-
-    seedOffset += 100;
   }
 
   if (copies.length) await recordCopies(db, copies, libraryId, onDisk);
@@ -687,7 +698,8 @@ function deriveBoundHome(anilistId, homeIndexes, clusterSeason) {
 
 /**
  * Whether the representative's match may route this whole cluster: its files
- * came from one folder, and none of them is filed yet. dandanplay is asked
+ * came from one folder (loose root files are one folder, though grouping.js
+ * makes each its own group), and none of them is filed yet. dandanplay is asked
  * about the representative alone, the clusterizer merges folders by title, and
  * a file the library already filed keeps the episode it is on.
  *
@@ -696,7 +708,7 @@ function deriveBoundHome(anilistId, homeIndexes, clusterSeason) {
  * @returns {Promise<boolean>}
  */
 async function matchSpeaksForCluster(cluster, db) {
-  if ((cluster.groups?.length ?? 0) > 1) return false;
+  if (new Set((cluster.groups ?? []).map(folderOf)).size > 1) return false;
   if (!db) return true;
   for (const item of cluster.items ?? []) {
     const ref = await db.fileRefs.get(fileRefId(item));
@@ -811,7 +823,7 @@ function deriveTitleHome(cluster, homeIndexes, clusterSeason) {
  * animeId comes back undefined when the home was derived structurally rather
  * than via a dandan match; callers must not cache such verdicts.
  *
- * @param {import('@/lib/library/types').MatchCluster} cluster
+ * @param {{ items: EpisodeItem[] }} cluster - a cluster, or any set of its files
  * @param {import('dexie').Dexie} db
  * @returns {Promise<{seriesId: string, seasonId: string|null, animeId: undefined}|null>}
  */
@@ -832,6 +844,78 @@ async function deriveExistingHome(cluster, db) {
   }
   if (!seriesId) return null;
   return { seriesId, seasonId, animeId: undefined };
+}
+
+/**
+ * Wrap the batch's dandanplay client so each file is asked about at most once.
+ *
+ * A failed ask is not retried within the batch either: the folder split and
+ * the cluster's match must see the same answer. If the split's ask failed and
+ * the match's retry succeeded, the cluster would stay whole and still be named
+ * and bound by that one file — the case the split exists to prevent. The real
+ * client resolves null on failure, so this only matters for one that throws;
+ * the cluster then fails, and the next scan tries it again.
+ *
+ * @param {{ match(hash16M: string, fileName: string, opts?: { fileSize?: number }): Promise<any> }} dandan
+ * @returns {{ match(hash16M: string, fileName: string, opts?: { fileSize?: number }): Promise<any> }}
+ */
+function askOncePerFile(dandan) {
+  /** @type {Map<string, Promise<any>>} */
+  const asked = new Map();
+  return {
+    match(hash16M, fileName, opts = {}) {
+      const key = JSON.stringify([hash16M, fileName, opts.fileSize ?? 0]);
+      let pending = asked.get(key);
+      if (!pending) {
+        pending = Promise.resolve().then(() => dandan.match(hash16M, fileName, opts));
+        asked.set(key, pending);
+      }
+      return pending;
+    },
+  };
+}
+
+/**
+ * splitClusterByFolder, or the cluster whole when the split throws. It runs
+ * outside each cluster's own error handling, and a folder that cannot be
+ * asked is no reason to end the batch: the cluster is matched as it was
+ * before folders were asked at all.
+ *
+ * @param {import('@/lib/library/types').MatchCluster} cluster
+ * @param {import('./splitClusterByFolder.js').FolderIdentity} identify
+ * @returns {Promise<import('@/lib/library/types').MatchCluster[]>}
+ */
+async function splitOrKeep(cluster, identify) {
+  try {
+    return await splitClusterByFolder(cluster, identify);
+  } catch (err) {
+    console.warn('[importPipeline] folder split failed; matching the cluster whole:', err);
+    return [cluster];
+  }
+}
+
+/**
+ * The AniList id a folder's files belong to, for splitClusterByFolder.
+ *
+ * A folder the library already filed onto one card answers with that card's
+ * binding and costs no network call; any other folder answers with what
+ * dandanplay says about `rep`. Throws what the database or the client throws;
+ * `splitOrKeep` then keeps the cluster whole.
+ *
+ * @param {EpisodeItem[]} items
+ * @param {EpisodeItem} rep
+ * @param {import('dexie').Dexie|null|undefined} db
+ * @param {any} dandan
+ * @returns {Promise<number|undefined>}
+ */
+async function folderIdentity(items, rep, db, dandan) {
+  const home = db ? await deriveExistingHome({ items }, db) : null;
+  if (home) {
+    const series = await db?.series.get(home.seriesId);
+    return isAnilistId(series?.anilistId) ? series.anilistId : undefined;
+  }
+  const answer = await callDandan(dandan, rep);
+  return answer.isAmbiguous ? undefined : answer.anilistId;
 }
 
 /**
