@@ -724,10 +724,11 @@ type seasonalPagination struct {
 }
 
 // seasonalResponse is the full envelope for /api/anime/seasonal.  Order:
-// data first, then pagination — matches Express.
+// data first, then pagination — matches Express.  See seasonalItem for the
+// shape of each entry.
 type seasonalResponse struct {
-	Data       []dbgen.GetSeasonalAnimeRow `json:"data"`
-	Pagination seasonalPagination          `json:"pagination"`
+	Data       []seasonalItem     `json:"data"`
+	Pagination seasonalPagination `json:"pagination"`
 }
 
 // trendingItem is one row in /api/anime/trending's data array.  Field

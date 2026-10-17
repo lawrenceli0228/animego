@@ -1135,6 +1135,16 @@ type Querier interface {
 	// silently matched nothing (lib/types.ts called this exact failure out as a
 	// risk of the cutover).  The subquery costs nothing extra in practice: the
 	// Hentai exclusion below already forces the same anime_genres lookup.
+	//
+	// The columns after trailer_site are what the seasonal page sorts, filters
+	// and badges by: popularity and favourites (sorts), the next episode (the
+	// air-time countdown and the weekday bars), start_date (the premiere-month
+	// bars), source (the source filter), duration and the main studio (the
+	// card's details), and is_sequel (new or sequel).  Two of them are read
+	// from child tables that only the detail fetch writes -- studio from
+	// anime_studios, is_sequel from anime_relations -- so a row that only
+	// listing upserts have written answers NULL and false: "not known yet",
+	// not "AniList has none".  See internal/anime/seasonal.go.
 	GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error)
 	// /api/subscriptions/:anilistId — single subscription read.
 	// pgx.ErrNoRows → 404 "Subscription not found".
