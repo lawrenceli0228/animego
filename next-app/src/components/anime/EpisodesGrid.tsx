@@ -57,7 +57,6 @@ import {
   broadcastSubscription,
   subscribeToBus,
   type SubscriptionDoc,
-  type SubStatus,
 } from "@/lib/subscriptionBus";
 import type { DetailEpisodeTitle } from "@/lib/types";
 import { pickEpisodeTitle } from "@/lib/formatters";
@@ -93,6 +92,7 @@ import {
   failWrite,
   isFurthestMarked,
   latestWatched,
+  parseSubscriptionRead,
   parseWatchedEpisodes,
   parseWatchedSnapshot,
   settleWrite,
@@ -127,29 +127,6 @@ type Access = "probing" | "anonymous" | "ready";
 
 /** Whether a subscription row exists to hang episode writes off. */
 type EnsureResult = "ok" | "signedOut" | "failed";
-
-const VALID_STATUSES: ReadonlyArray<SubStatus> = [
-  "watching",
-  "completed",
-  "plan_to_watch",
-  "dropped",
-];
-
-function parseSub(raw: unknown): SubscriptionDoc | null {
-  if (!raw || typeof raw !== "object") return null;
-  const r = raw as Record<string, unknown>;
-  const data = (r.data ?? r) as Record<string, unknown> | null;
-  if (!data || typeof data !== "object") return null;
-  const status = typeof data.status === "string" ? data.status : "watching";
-  if (!VALID_STATUSES.includes(status as SubStatus)) return null;
-  return {
-    status: status as SubStatus,
-    currentEpisode:
-      typeof data.currentEpisode === "number" ? data.currentEpisode : 0,
-    score: typeof data.score === "number" ? data.score : null,
-  };
-}
-
 
 // Every rule this section draws lives in EpisodesGrid.module.css, keyed off
 // the `data-` attributes below rather than off style objects built per cell.
@@ -337,8 +314,9 @@ export default function EpisodesGrid({
           setAccess("anonymous");
           return;
         }
-        // 404 = signed in with no subscription row yet: the cells are still
-        // the reader's to click, and the first click creates the row.
+        // No row yet is 200 + `data: null` today; 404 is kept for an older
+        // server. Either way the cells are still the reader's to click, and
+        // the first click creates the row.
         if (res.status === 404) {
           setAccess("ready");
           return;
@@ -352,7 +330,9 @@ export default function EpisodesGrid({
         const body = await res.json().catch(() => null);
         if (cancelled) return;
         setAccess("ready");
-        const parsed = parseSub(body);
+        // null leaves subRef empty, which is what makes the first click
+        // create the row before writing an episode to it.
+        const parsed = parseSubscriptionRead(body);
         if (parsed) commitSub(parsed);
         commitTracker(
           settleWrite(trackerRef.current, token, null, parseWatchedEpisodes(body)),

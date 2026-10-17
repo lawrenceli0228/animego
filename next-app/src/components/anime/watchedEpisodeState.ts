@@ -22,6 +22,8 @@
 // undo it. `settled` is the guard: a server answer is only allowed to become
 // the new baseline if no later write has already been folded in.
 
+import type { SubStatus, SubscriptionDoc } from "@/lib/subscriptionBus";
+
 /**
  * What one cell is entitled to claim.
  *
@@ -106,6 +108,38 @@ function toEpisodeSet(episodes: Iterable<number>): ReadonlySet<number> {
     if (episode !== null) out.add(episode);
   }
   return out;
+}
+
+const SUB_STATUSES: ReadonlyArray<SubStatus> = [
+  "watching",
+  "completed",
+  "plan_to_watch",
+  "dropped",
+];
+
+/**
+ * The reader's subscription row off `GET /api/subscriptions/{id}`, or null when
+ * they have none.
+ *
+ * "None" arrives as 200 with `{ data: null }`, not as a 404 — the endpoint
+ * answers that way so the probe on every detail view does not log a failed
+ * request. This used to fall back from a null `data` to the envelope itself,
+ * which has no status, so it read as a default `watching` row. The grid then
+ * believed a row existed, skipped creating one, and the server refused the
+ * episode write against a subscription that was not there: on any show not
+ * yet on the reader's list, every click was rolled back.
+ */
+export function parseSubscriptionRead(value: unknown): SubscriptionDoc | null {
+  const data = unwrap(value);
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const row = data as Record<string, unknown>;
+  const status = typeof row.status === "string" ? row.status : "watching";
+  if (!SUB_STATUSES.includes(status as SubStatus)) return null;
+  return {
+    status: status as SubStatus,
+    currentEpisode: typeof row.currentEpisode === "number" ? row.currentEpisode : 0,
+    score: typeof row.score === "number" ? row.score : null,
+  };
 }
 
 /**
