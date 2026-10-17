@@ -74,10 +74,11 @@ type seasonalItem struct {
 	StartDate *string `json:"startDate"`
 	// Duration is minutes per episode.
 	Duration *int32 `json:"duration"`
-	// IsSequel says AniList lists a PREQUEL that is itself an anime.  False
-	// also for a row the detail fetch has not reached yet, for the reason
-	// Studio is null there: anime_relations is written only by that fetch.
-	IsSequel bool `json:"isSequel"`
+	// IsSequel says AniList lists a PREQUEL that is itself an anime.  Null
+	// for a row the detail fetch has not reached yet, for the reason Studio
+	// is null there: anime_relations is written only by that fetch, so such
+	// a row cannot tell "no prequel" from "not fetched".
+	IsSequel *bool `json:"isSequel"`
 }
 
 // seasonalItemFromRow projects one GetSeasonalAnime row onto the wire
@@ -122,7 +123,7 @@ func seasonalItemFromRow(r dbgen.GetSeasonalAnimeRow) seasonalItem {
 		Source:            r.Source,
 		StartDate:         calendarDate(r.StartDate),
 		Duration:          r.Duration,
-		IsSequel:          r.IsSequel,
+		IsSequel:          knownBool(r.IsSequel, r.RelationsKnown),
 	}
 }
 
@@ -166,4 +167,13 @@ func calendarDate(d pgtype.Date) *string {
 	}
 	s := d.Time.Format(time.DateOnly)
 	return &s
+}
+
+// knownBool is v, or nil when the column it was read from is not known yet.
+func knownBool(v, known bool) *bool {
+	if !known {
+		return nil
+	}
+	b := v
+	return &b
 }

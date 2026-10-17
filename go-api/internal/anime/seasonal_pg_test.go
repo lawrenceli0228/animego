@@ -134,8 +134,10 @@ func seasonalRelation(id int, relationType, format string) anilist.RelationEdge 
 // studios and a non-main studio never counts, however it sorts; a title
 // with two main studios is still one item, whatever shape the studio
 // lookup takes; isSequel counts a PREQUEL that is an anime and not one
-// that is a manga, a novel or of no stated format; a title that has none
-// of the new facts answers null for each and false for isSequel; and the
+// that is a manga, a novel or of no stated format; a title the detail fetch
+// reached with none of the new facts answers null for each and false for
+// isSequel (known: no anime prequel), while a title only a listing wrote
+// answers null for isSequel too (see the cold-start test); and the
 // listing itself -- which titles, in which order, how many -- is what it
 // was: adult titles out by column and by genre, other seasons out, score
 // descending with unscored titles last.
@@ -318,7 +320,7 @@ func TestSeasonal_PG_ColdStartReturnsTheNewFields(t *testing.T) {
 		assert.Equal(t, sptr("2032-01-08T14:00:00Z"), a.NextAiringAt)
 		assert.Equal(t, i32(1), a.NextAiringEpisode)
 		assert.Nil(t, a.Studio, "anime_studios is written by the detail fetch only")
-		assert.Equal(t, false, *a.IsSequel, "anime_relations is written by the detail fetch only")
+		assert.Nil(t, a.IsSequel, "anime_relations is written by the detail fetch only: not known yet, so null")
 
 		y := seasonalByID(t, got.Data, 2002)
 		assert.Nil(t, y.StartDate, "a year-only date is not a date")

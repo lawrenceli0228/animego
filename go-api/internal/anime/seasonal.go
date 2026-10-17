@@ -20,8 +20,9 @@
 //
 // `studio` and `isSequel` are read the same way, from anime_studios and
 // anime_relations, so the same holds for them: a row no detail fetch has
-// reached answers studio null and isSequel false, which means "not known
-// yet" rather than "no main studio" or "no prequel".  That is accepted on
+// reached answers studio null and isSequel null, which means "not known
+// yet" rather than "no main studio" or "no prequel" (isSequel is known once
+// detail_fetched_at is set).  That is accepted on
 // purpose.  Selecting studios and relations in SeasonalAnimeQuery would
 // put two nested connections on every Media of a 50-row page and make
 // this path write child tables, which is the detail fetch's job; and no

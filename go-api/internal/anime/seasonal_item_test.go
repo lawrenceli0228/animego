@@ -66,8 +66,9 @@ const seasonalLegacyFullJSON = `{"anilistId":195516,"titleRomaji":"Kusuriya no H
 const seasonalLegacyEmptyJSON = `{"anilistId":7,"titleRomaji":null,"titleEnglish":null,"titleNative":null,"titleChinese":null,"titleHant":null,"titleHantSource":null,"titleHantSeo":null,"coverImageUrl":null,"bannerImageUrl":null,"coverImageColor":null,"posterAccent":null,"averageScore":null,"bangumiScore":null,"episodes":null,"season":null,"seasonYear":null,"status":null,"format":null,"description":null,"descriptionCn":null,"descriptionCnSource":null,"descriptionHant":null,"descriptionHantSource":null,"genres":null,"discussionCount":0,"trailerId":null,"trailerSite":null`
 
 // seasonalNullNewFieldsJSON is how the new fields encode when the row has
-// none of them: every key present, every value null, isSequel false.
-const seasonalNullNewFieldsJSON = `,"studio":null,"nextAiringAt":null,"nextAiringEpisode":null,"popularity":null,"favourites":null,"source":null,"startDate":null,"duration":null,"isSequel":false}`
+// none of them: every key present, every value null, isSequel null (the
+// detail fetch has not reached the row, so its relations are not known).
+const seasonalNullNewFieldsJSON = `,"studio":null,"nextAiringAt":null,"nextAiringEpisode":null,"popularity":null,"favourites":null,"source":null,"startDate":null,"duration":null,"isSequel":null}`
 
 // encodeLikeTheEnvelope encodes v the way writeMultiKeyEnvelope does:
 // HTML escaping off, no trailing newline.
@@ -108,6 +109,7 @@ func TestSeasonalItem_LegacyFieldsEncodeAsBefore(t *testing.T) {
 		row.StartDate = pgtype.Date{Time: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), Valid: true}
 		row.Duration = i32(24)
 		row.IsSequel = true
+		row.RelationsKnown = true
 
 		got := encodeLikeTheEnvelope(t, seasonalItemFromRow(row))
 		assert.Equal(t, seasonalLegacyFullJSON+
@@ -241,6 +243,7 @@ func TestSeasonal_HandlerWritesTheItemShape(t *testing.T) {
 			full.NextAiringAt = pgtype.Timestamptz{Time: time.Date(2026, 10, 22, 22, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60)), Valid: true}
 			full.NextAiringEpisode = i32(4)
 			full.StartDate = pgtype.Date{Time: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), Valid: true}
+			full.RelationsKnown = true // fetched, and no anime prequel: a known false
 			return []dbgen.GetSeasonalAnimeRow{full, {AnilistID: 7}}, nil
 		},
 		countSeasonalFn: func(_ context.Context, _ *string, _ *int32) (int64, error) { return 2, nil },

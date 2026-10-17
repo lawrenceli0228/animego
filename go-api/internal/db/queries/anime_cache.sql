@@ -113,8 +113,9 @@ LIMIT $2;
 -- card's details), and is_sequel (new or sequel).  Two of them are read
 -- from child tables that only the detail fetch writes -- studio from
 -- anime_studios, is_sequel from anime_relations -- so a row that only
--- listing upserts have written answers NULL and false: "not known yet",
--- not "AniList has none".  See internal/anime/seasonal.go.
+-- listing upserts have written answers NULL for the studio ("not known
+-- yet", not "AniList has none") and relations_known false, which the
+-- handler turns into a null isSequel.  See internal/anime/seasonal.go.
 SELECT
     anilist_id,
     title_romaji,
@@ -198,7 +199,12 @@ SELECT
         WHERE r.anime_id = anime_cache.anilist_id
           AND r.relation_type = 'PREQUEL'
           AND r.format IN ('TV', 'TV_SHORT', 'MOVIE', 'SPECIAL', 'OVA', 'ONA', 'MUSIC')
-    ) AS is_sequel
+    ) AS is_sequel,
+    -- Whether anime_relations has been written for this title at all: the
+    -- detail fetch writes it and stamps detail_fetched_at.  Until then
+    -- is_sequel's false cannot tell "no prequel" from "not fetched", and the
+    -- item says null.
+    (detail_fetched_at IS NOT NULL)::boolean AS relations_known
 FROM anime_cache
 WHERE
     season = $1

@@ -1143,8 +1143,9 @@ type Querier interface {
 	// card's details), and is_sequel (new or sequel).  Two of them are read
 	// from child tables that only the detail fetch writes -- studio from
 	// anime_studios, is_sequel from anime_relations -- so a row that only
-	// listing upserts have written answers NULL and false: "not known yet",
-	// not "AniList has none".  See internal/anime/seasonal.go.
+	// listing upserts have written answers NULL for the studio ("not known
+	// yet", not "AniList has none") and relations_known false, which the
+	// handler turns into a null isSequel.  See internal/anime/seasonal.go.
 	GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error)
 	// /api/subscriptions/:anilistId — single subscription read.
 	// pgx.ErrNoRows → 404 "Subscription not found".
