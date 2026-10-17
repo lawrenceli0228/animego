@@ -6,7 +6,7 @@ import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
 import { OG_LOCALE, alternateOgLocales, type Lang } from "@/lib/i18n/lang";
 import { siteTime } from "@/lib/seasonal/clock";
-import { toSeasonalItems } from "@/lib/seasonal/model";
+import { seasonRowsOf, toSeasonalItems } from "@/lib/seasonal/model";
 import { parseBrowseState, queryFromRecord } from "@/lib/seasonal/state";
 import type { SeasonalAnime } from "@/lib/types";
 
@@ -115,7 +115,7 @@ export default async function SeasonalPage({ params, searchParams }: SeasonalPag
       `/api/anime/seasonal?season=${apiSeason}&year=${parsed.year}&page=1&perPage=${SEASONAL_PAGE_SIZE}`,
       { revalidate: 300 },
     )
-      .then((env) => env.data ?? EMPTY_ITEMS)
+      .then(seasonRowsOf)
       .catch(() => EMPTY_ITEMS),
     searchParams,
   ]);

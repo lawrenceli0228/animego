@@ -2,9 +2,10 @@
 //
 // Two modes, picked from the season's own data:
 //
-//   weekday  while the season is airing — at least WEEKDAY_MODE_MIN shows have
-//            a next episode scheduled — seven bars, Monday to Sunday, by the
-//            Beijing weekday that episode airs. Today's bar is marked.
+//   weekday  while the season is airing — at least WEEKDAY_MODE_MIN airing
+//            shows have a next episode scheduled — seven bars, Monday to
+//            Sunday, by the Beijing weekday that episode airs. Today's bar is
+//            marked.
 //   month    otherwise (a past season, or one that has not started): one bar
 //            per premiere month, plus 待定 for shows with no date.
 //
@@ -58,16 +59,29 @@ export interface MonthBar {
 
 export type Bar = WeekdayBar | MonthBar;
 
-/** Which chart the season gets. */
-export function barModeOf(items: readonly SeasonalItem[]): BarMode {
-  let scheduled = 0;
-  for (const item of items) if (item.next) scheduled += 1;
-  return scheduled >= WEEKDAY_MODE_MIN ? "weekday" : "month";
+/**
+ * A show with a weekly slot: airing, and with its next episode on the
+ * schedule. An upcoming show's first episode is a premiere date, not a slot
+ * in the week (the month chart reads it instead), and a finished show's
+ * leftover schedule is no slot at all.
+ *
+ * The time itself may lie in the past — the API's next episode is only as
+ * fresh as the row — and still names the weekday: a show keeps its slot.
+ */
+export function hasWeeklySlot(item: SeasonalItem): boolean {
+  return item.status === "RELEASING" && item.next !== null;
 }
 
-/** The Beijing weekday a show's next episode airs on, 1–7, or 0 when nothing is scheduled. */
+/** Which chart the season gets. */
+export function barModeOf(items: readonly SeasonalItem[]): BarMode {
+  let slotted = 0;
+  for (const item of items) if (hasWeeklySlot(item)) slotted += 1;
+  return slotted >= WEEKDAY_MODE_MIN ? "weekday" : "month";
+}
+
+/** The Beijing weekday of a show's weekly slot, 1–7, or 0 when it has none. */
 export function airWeekday(item: SeasonalItem): number {
-  return item.next ? siteTime(item.next.at).weekday : 0;
+  return hasWeeklySlot(item) && item.next ? siteTime(item.next.at).weekday : 0;
 }
 
 /** The premiere-month bucket a show falls in: `YYYY-MM`, or MONTH_TBD. */

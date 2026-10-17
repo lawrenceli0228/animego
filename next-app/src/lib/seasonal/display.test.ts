@@ -139,6 +139,26 @@ describe("coverBadge", () => {
     expect(coverBadge(justAired, NOW, DEFAULT_STATE, "weekday", EN, "en")?.text).toBe("Ep 3 out");
   });
 
+  test("a next episode already in the past: news within the day, nothing after — never 今天", () => {
+    // The row was last synced before the episode went out.
+    expect(coverBadge(at(-2 * HOUR_MS, 6), NOW, DEFAULT_STATE, "weekday", ZH, "zh")).toEqual({
+      kind: "new",
+      text: "第 6 集更新",
+    });
+    expect(coverBadge(at(-30 * HOUR_MS, 6), NOW, DEFAULT_STATE, "weekday", ZH, "zh")).toBeNull();
+    for (const ago of [-MIN_MS, -2 * HOUR_MS, -30 * HOUR_MS, -8 * DAY_MS]) {
+      expect(coverBadge(at(ago), NOW, DEFAULT_STATE, "weekday", ZH, "zh")?.kind).not.toBe("soon");
+    }
+  });
+
+  test("a past time never counts down below zero", () => {
+    for (const ago of [-MIN_MS, -2 * HOUR_MS, -3 * DAY_MS]) {
+      const stale = at(ago, 4);
+      expect(airingText(stale, NOW, ZH, "zh")).toBe("第 4 集 · 已播出");
+      expect(countdown(stale, NOW, ZH, "zh")).toEqual({ label: "第 4 集", value: "已播出" });
+    }
+  });
+
   test("a first episode has no previous one to announce", () => {
     expect(coverBadge(at(7 * DAY_MS - 3 * HOUR_MS, 1), NOW, DEFAULT_STATE, "weekday", ZH, "zh")).toBeNull();
   });

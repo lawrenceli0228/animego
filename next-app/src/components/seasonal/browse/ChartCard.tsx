@@ -45,7 +45,11 @@ function ChartCard({ item, hidden, delayMs, nowMs, lang, copy, Follow }: ChartCa
         <FadeImage src={item.cover} alt="" width={190} height={272} className={chart.chImg} />
         <div className={chart.chOverlay}>
           <div className={chart.chTitle}>{item.title}</div>
-          {item.studio ? <div className={chart.chStudio}>{item.studio}</div> : null}
+          {item.studio ? (
+            <div className={chart.chStudio} data-studio>
+              {item.studio}
+            </div>
+          ) : null}
         </div>
       </Link>
       <div className={chart.chData}>
@@ -57,7 +61,9 @@ function ChartCard({ item, hidden, delayMs, nowMs, lang, copy, Follow }: ChartCa
             </div>
             <Score score={item.score} inChart />
           </div>
-          <div className={chart.chMeta}>{metaLine(item, copy, lang)}</div>
+          <div className={chart.chMeta} data-meta>
+            {metaLine(item, copy, lang)}
+          </div>
           <div className={chart.chDesc}>{item.synopsis || copy.noSynopsis}</div>
         </div>
         <div className={chart.chFoot}>

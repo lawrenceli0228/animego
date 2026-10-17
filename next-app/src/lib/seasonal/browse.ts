@@ -8,7 +8,7 @@
 // Pure: no React, no DOM.
 
 import { HUE_FAMILIES, hueFamilyOf, type HueFamilyKey } from "@/lib/home/hueFamilies";
-import { airWeekday, monthKeyOf, type BarMode } from "./bars";
+import { airWeekday, hasWeeklySlot, monthKeyOf, type BarMode } from "./bars";
 import { minuteOfWeek } from "./clock";
 import type { SeasonalItem } from "./model";
 import {
@@ -50,7 +50,7 @@ export interface Facets {
   sorts: SortKey[];
   /** Some show records its source. */
   source: boolean;
-  /** The API said which shows are sequels. */
+  /** Some show is known to be a sequel. */
   sequel: boolean;
 }
 
@@ -71,7 +71,11 @@ export function facetsOf(items: readonly SeasonalItem[]): Facets {
     if (key === "start") return start;
     return true;
   });
-  return { sorts, source: any((i) => i.source !== null), sequel: any((i) => i.sequel !== null) };
+  // The sequel flag is false both for "a new series" and for "not known yet"
+  // (relations are written only when a show's detail page is fetched), so
+  // the filter is offered only once some show is known to be a sequel. It
+  // stays best-effort after that: 只看新作 includes the unknowns.
+  return { sorts, source: any((i) => i.source !== null), sequel: any((i) => i.sequel === true) };
 }
 
 /**
@@ -161,14 +165,15 @@ function asc(a: number | string | null, b: number | string | null): number {
 
 const byPopularity = (a: SeasonalItem, b: SeasonalItem) => desc(a.popularity, b.popularity);
 
+/** Where a show's weekly slot falls in the week (the same slots the weekday chart counts). */
+const slotMinute = (item: SeasonalItem) => (hasWeeklySlot(item) && item.next ? minuteOfWeek(item.next.at) : null);
+
 const COMPARE: Record<SortKey, (a: SeasonalItem, b: SeasonalItem) => number> = {
   pop: byPopularity,
   score: (a, b) => desc(a.score, b.score) || byPopularity(a, b),
   fav: (a, b) => desc(a.favourites, b.favourites) || byPopularity(a, b),
   next: (a, b) => asc(a.next?.at ?? null, b.next?.at ?? null) || byPopularity(a, b),
-  time: (a, b) =>
-    asc(a.next ? minuteOfWeek(a.next.at) : null, b.next ? minuteOfWeek(b.next.at) : null) ||
-    byPopularity(a, b),
+  time: (a, b) => asc(slotMinute(a), slotMinute(b)) || byPopularity(a, b),
   start: (a, b) => asc(a.start, b.start) || byPopularity(a, b),
   title: (a, b) => a.titleRank - b.titleRank,
 };

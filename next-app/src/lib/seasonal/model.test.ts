@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { SeasonalAnime } from "@/lib/types";
-import { toSeasonalItems } from "./model";
+import { seasonRowsOf, toSeasonalItems } from "./model";
 
 // API row → browse item. Two things are pinned beyond the field mapping:
 // a go-api without the browse fields still produces usable items (all the
@@ -151,6 +151,12 @@ describe("toSeasonalItems", () => {
     expect(en.synopsis).toBe("Maomao returns.");
   });
 
+  test("a row whose genres are null has none, and still renders", () => {
+    const [item] = toSeasonalItems([row({ anilistId: 13, titleChinese: "无类型", genres: null })], "zh");
+    expect(item.genres).toEqual([]);
+    expect(item.title).toBe("无类型");
+  });
+
   test("an adult genre never reaches a pill", () => {
     const [item] = toSeasonalItems([row({ anilistId: 10, genres: ["Hentai", "Romance"] })], "zh");
     expect(item.genres).toEqual(["Romance"]);
@@ -189,5 +195,21 @@ describe("toSeasonalItems", () => {
   test("the brand fallback accent is no colour", () => {
     const [item] = toSeasonalItems([row({ anilistId: 12, posterAccent: "#8b5cf6" })], "zh");
     expect(item.hue).toBeNull();
+  });
+});
+
+describe("seasonRowsOf", () => {
+  test("counts what came back, never pagination.total", () => {
+    // The cold path's envelope: one AniList page, and a total that is not a count of it.
+    const data = Array.from({ length: 50 }, (_, i) => row({ anilistId: 100 + i }));
+    const envelope = { data, pagination: { page: 1, perPage: 200, total: 5000, totalPages: 25 } };
+    expect(seasonRowsOf(envelope)).toHaveLength(50);
+    expect(toSeasonalItems(seasonRowsOf(envelope), "zh")).toHaveLength(50);
+  });
+
+  test("an envelope without data is an empty season", () => {
+    expect(seasonRowsOf({ data: null })).toEqual([]);
+    expect(seasonRowsOf(null)).toEqual([]);
+    expect(seasonRowsOf(undefined)).toEqual([]);
   });
 });

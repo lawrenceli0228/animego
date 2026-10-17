@@ -7,7 +7,9 @@ import {
   BAR_MIN_PX,
   MAX_MONTH_BARS,
   WEEKDAY_MODE_MIN,
+  airWeekday,
   barModeOf,
+  hasWeeklySlot,
   monthBars,
   monthKeyOf,
   seasonBars,
@@ -18,6 +20,23 @@ import { DEFAULT_STATE } from "./state";
 /** An instant on Beijing `weekday` (1 = Monday) of the week of 2026-10-12, at 22:00. */
 const onWeekday = (weekday: number) => Date.UTC(2026, 9, 11 + weekday, 14, 0);
 
+describe("weekly slots", () => {
+  test("only an airing show with an episode scheduled has one", () => {
+    const at = onWeekday(2);
+    expect(hasWeeklySlot(item({ id: 1, status: "RELEASING", next: { at, ep: 4 } }))).toBe(true);
+    // An upcoming show's first episode is a premiere, read by the month chart.
+    expect(hasWeeklySlot(item({ id: 2, status: "NOT_YET_RELEASED", next: { at, ep: 1 } }))).toBe(false);
+    expect(hasWeeklySlot(item({ id: 3, status: "FINISHED", next: { at, ep: 13 } }))).toBe(false);
+    expect(hasWeeklySlot(item({ id: 4, status: "RELEASING" }))).toBe(false);
+  });
+
+  test("a stale time in the past still names the weekday", () => {
+    // Tuesday 22:00 a week before the clock's week: the row was not re-synced since.
+    const stale = item({ id: 5, status: "RELEASING", next: { at: onWeekday(2) - 7 * 24 * 3_600_000, ep: 4 } });
+    expect(airWeekday(stale)).toBe(2);
+  });
+});
+
 describe("barModeOf", () => {
   const scheduled = (n: number) =>
     Array.from({ length: n }, (_, i) => item({ id: i + 1, next: { at: onWeekday(1), ep: 2 } }));
@@ -25,6 +44,13 @@ describe("barModeOf", () => {
   test(`weekday mode needs ${WEEKDAY_MODE_MIN} scheduled shows`, () => {
     expect(barModeOf(scheduled(WEEKDAY_MODE_MIN - 1))).toBe("month");
     expect(barModeOf(scheduled(WEEKDAY_MODE_MIN))).toBe("weekday");
+  });
+
+  test("upcoming premieres do not make a season airing", () => {
+    const upcoming = Array.from({ length: 30 }, (_, i) =>
+      item({ id: 200 + i, status: "NOT_YET_RELEASED", next: { at: onWeekday(3), ep: 1 } }),
+    );
+    expect(barModeOf(upcoming)).toBe("month");
   });
 
   test("shows without a schedule do not count", () => {
@@ -42,6 +68,15 @@ describe("weekdayBars", () => {
     item({ id: 7, next: { at: Date.UTC(2026, 9, 16, 16, 30), ep: 2 } }),
     item({ id: 8 }),
   ];
+
+  test("only airing shows are counted: not an upcoming premiere, not a finished show's leftover", () => {
+    const mixed = [
+      ...shows,
+      item({ id: 50, status: "NOT_YET_RELEASED", next: { at: onWeekday(2), ep: 1 } }),
+      item({ id: 51, status: "FINISHED", next: { at: onWeekday(2), ep: 13 } }),
+    ];
+    expect(weekdayBars(mixed, DEFAULT_STATE, NOW)[1]).toMatchObject({ count: 0, disabled: true });
+  });
 
   test("seven bars, Monday first, counted by the Beijing weekday", () => {
     const bars = weekdayBars(shows, DEFAULT_STATE, NOW);

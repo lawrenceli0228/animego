@@ -164,6 +164,20 @@ describe("the seasonal page's server HTML", () => {
     expect(html).toMatch(/data-hue="blue"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*data-hue="blue"/);
   });
 
+  test("a show with no studio has no studio line, and no meta line carries an empty separator", () => {
+    const items = [
+      { ...SEASON[0], studio: "某某动画工房", source: null, sequel: false, bangumi: null, episodes: 12 },
+      { ...SEASON[1], studio: null, source: null, sequel: false, bangumi: null, episodes: 12 },
+    ];
+    const grid = render({ items });
+    expect(grid.match(/data-studio="true"/g)).toHaveLength(1);
+    expect(grid).toContain("某某动画工房");
+    const chart = render({ items, initial: { ...DEFAULT_STATE, view: "chart" } });
+    expect(chart.match(/data-studio="true"/g)).toHaveLength(1);
+    const metas = [...chart.matchAll(/data-meta="true"[^>]*>([^<]*)</g)].map((m) => m[1]);
+    expect(metas).toEqual(["TV · 12 集", "TV · 12 集"]);
+  });
+
   test("an empty result says so and offers to clear", () => {
     const html = render({ initial: { ...DEFAULT_STATE, q: "没有这部番" } });
     expect(html).toContain("data-empty");

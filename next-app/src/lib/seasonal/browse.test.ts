@@ -94,6 +94,11 @@ describe("matchesState", () => {
     expect(only(s({ wd: 6 }))).toEqual([2]);
   });
 
+  test("a weekday is an airing show's slot: an upcoming premiere on that day is not in it", () => {
+    const premiere = item({ id: 9, status: "NOT_YET_RELEASED", next: { at: FRI_22, ep: 1 } });
+    expect(matchesState(premiere, s({ wd: 5 }), "weekday")).toBe(false);
+  });
+
   test("a weekday means nothing in month mode, a month nothing in weekday mode", () => {
     expect(only(s({ wd: 5 }), "month")).toEqual([1, 2, 3]);
     expect(only(s({ mon: "2026-10" }), "weekday")).toEqual([1, 2, 3]);
@@ -144,6 +149,14 @@ describe("sortItems", () => {
     expect(ids(sortItems(week, "time"))).toEqual([2, 3, 1]);
   });
 
+  test("air time places shows without a weekly slot last", () => {
+    const week = [
+      item({ id: 1, status: "NOT_YET_RELEASED", next: { at: NOW + 2 * HOUR_MS, ep: 1 }, popularity: 9 }),
+      item({ id: 2, next: { at: NOW + 50 * HOUR_MS, ep: 2 } }),
+    ];
+    expect(ids(sortItems(week, "time"))).toEqual([2, 1]);
+  });
+
   test("start date", () => {
     expect(ids(sortItems(shows, "start"))).toEqual([2, 1, 4, 3]);
   });
@@ -179,7 +192,7 @@ describe("browseItems", () => {
 describe("facetsOf / settleState", () => {
   const legacy = [item({ id: 1 }), item({ id: 2 })];
   const rich = [
-    item({ id: 1, favourites: 3, next: { at: NOW, ep: 2 }, start: "2026-10-01", source: "MANGA", sequel: false }),
+    item({ id: 1, favourites: 3, next: { at: NOW, ep: 2 }, start: "2026-10-01", source: "MANGA", sequel: true }),
   ];
 
   test("without the browse fields the page offers only what the API can answer", () => {
@@ -189,6 +202,12 @@ describe("facetsOf / settleState", () => {
       source: true,
       sequel: true,
     });
+  });
+
+  test("the sequel filter waits until some show is known to be one — false is also 'not known yet'", () => {
+    const unknown = [item({ id: 1, sequel: false }), item({ id: 2, sequel: false })];
+    expect(facetsOf(unknown).sequel).toBe(false);
+    expect(facetsOf([...unknown, item({ id: 3, sequel: true })]).sequel).toBe(true);
   });
 
   test("a URL asking for more than the data can do lands on a working page", () => {

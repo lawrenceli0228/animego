@@ -286,18 +286,25 @@ export function coverBadge(
   const next = item.next;
   if (next) {
     const until = next.at - nowMs;
-    if (until > 0 && until < DAY_MS) {
+    if (until <= 0) {
+      // The row is only as fresh as its last sync, so the "next" episode may
+      // already be out: within the last day, that is news about that very
+      // episode. Further back it says nothing — and a time in the past is
+      // never "today".
+      if (-until < DAY_MS) return { kind: "new", text: fillTemplate(copy.badgeEpOut, { ep: next.ep }) };
+    } else if (until < DAY_MS) {
       const today = siteDayNumber(next.at) === siteDayNumber(nowMs);
       return {
         kind: "soon",
         text: fillTemplate(today ? copy.badgeToday : copy.badgeTomorrow, { time: siteHhmm(next.at) }),
       };
-    }
-    // The previous episode is inferred a week before the next one; the first
-    // episode has no previous one to announce.
-    const sinceLast = nowMs - (next.at - WEEK_MS);
-    if (next.ep >= 2 && sinceLast >= 0 && sinceLast < DAY_MS) {
-      return { kind: "new", text: fillTemplate(copy.badgeEpOut, { ep: next.ep - 1 }) };
+    } else {
+      // The previous episode is inferred a week before the next one; the
+      // first episode has no previous one to announce.
+      const sinceLast = nowMs - (next.at - WEEK_MS);
+      if (next.ep >= 2 && sinceLast >= 0 && sinceLast < DAY_MS) {
+        return { kind: "new", text: fillTemplate(copy.badgeEpOut, { ep: next.ep - 1 }) };
+      }
     }
   }
   if (state.wd && mode === "weekday" && next) return { kind: "plain", text: siteHhmm(next.at) };

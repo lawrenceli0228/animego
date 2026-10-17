@@ -160,6 +160,21 @@ function itemOf(row: SeasonalAnime, rank: number, lang: Lang): SeasonalItem {
 }
 
 /**
+ * The season's rows out of the endpoint's envelope — and only them.
+ *
+ * The envelope's `pagination.total` is not a count of what came back: on a
+ * season's first, cold fetch it is AniList's own figure (a placeholder, at
+ * the time of writing) while `data` holds one page of at most 50. Nothing on
+ * the page reads it; every count is the length of this list.
+ */
+export function seasonRowsOf(
+  envelope: { data?: readonly SeasonalAnime[] | null } | null | undefined,
+): SeasonalAnime[] {
+  const data = envelope?.data;
+  return Array.isArray(data) ? [...data] : [];
+}
+
+/**
  * The season's rows as browse items, in API order, one per anime.
  *
  * A repeated id is dropped rather than rendered twice: the items are keyed by

@@ -91,7 +91,7 @@ function CoverCard({ item, hidden, delayMs, nowMs, state, mode, lang, copy, Foll
           <Score score={item.score} />
         </div>
         {item.studio ? (
-          <div className={cards.popStudio} style={{ color: tone.text }}>
+          <div className={cards.popStudio} style={{ color: tone.text }} data-studio>
             {item.studio}
           </div>
         ) : null}
