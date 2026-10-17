@@ -280,26 +280,33 @@ test.describe("desktop", () => {
     await expect(page.locator(`[data-bar="wd-${today}"]`)).toHaveAttribute("data-today", "true");
     await expect(page.locator("[data-bar][data-today]")).toHaveCount(1);
 
-    // Pick the busiest day: filtered to it, sorted by air time.
-    const counts = [1, 2, 3, 4, 5, 6, 7].map((wd) => count((s) => s.at !== null && bjWeekday(s.at) === wd));
-    const busiest = counts.indexOf(Math.max(...counts)) + 1;
+    // Filter to the busiest day whose shows carry no live badge, so every card
+    // shows its air time. Today's shows are hours away ("今天 10:00"), the
+    // ones six days out had their previous episode, inferred a week earlier,
+    // go out under a day ago ("第 N 集更新"), and which day is busiest overall
+    // turns on the hour the run started in: picked blindly, the test failed
+    // through most of the Beijing day.
+    const now = Date.now();
+    const onDay = (wd: number) => WEEK.filter((s) => s.at !== null && bjWeekday(s.at) === wd);
+    const quiet = (s: WeekShow) => s.at !== null && s.at - now > DAY + HOUR && s.at - now < 6 * DAY - HOUR;
+    const quietDays = [1, 2, 3, 4, 5, 6, 7].filter((wd) => onDay(wd).length > 0 && onDay(wd).every(quiet));
+    expect(quietDays.length).toBeGreaterThan(0);
+    const busiest = quietDays.reduce((best, wd) => (onDay(wd).length > onDay(best).length ? wd : best));
     await page.locator(`[data-bar="wd-${busiest}"]`).click();
     await expect(page.locator(`[data-bar="wd-${busiest}"]`)).toHaveAttribute("aria-pressed", "true");
-    await expect(countText(page)).toHaveText(`${counts[busiest - 1]} 部`);
+    await expect(countText(page)).toHaveText(`${onDay(busiest).length} 部`);
     await expect(page).toHaveURL(new RegExp(`wd=${busiest}`));
     await expect(page).toHaveURL(/sort=time/);
     await expect(page.locator("[data-sort-trigger]")).toHaveText("放送时间");
-    // In air-time order, and every card that has no live badge shows its time.
+    // In air-time order, each card showing its time.
     const ids = await visibleCards(page).evaluateAll((els) => els.map((el) => Number(el.getAttribute("data-id"))));
-    const expected = WEEK.filter((s) => s.at !== null && bjWeekday(s.at) === busiest)
-      .sort((a, b) => {
-        const ka = new Date((a.at as number) + BEIJING);
-        const kb = new Date((b.at as number) + BEIJING);
-        return ka.getUTCHours() * 60 + ka.getUTCMinutes() - (kb.getUTCHours() * 60 + kb.getUTCMinutes()) || (b.popularity ?? 0) - (a.popularity ?? 0);
-      })
-      .map((s) => s.anilistId);
-    expect(ids).toEqual(expected);
-    await expect(page.locator('[data-badge="plain"]').first()).toHaveText(/^\d{2}:\d{2}$/);
+    const expected = onDay(busiest).sort((a, b) => {
+      const ka = new Date((a.at as number) + BEIJING);
+      const kb = new Date((b.at as number) + BEIJING);
+      return ka.getUTCHours() * 60 + ka.getUTCMinutes() - (kb.getUTCHours() * 60 + kb.getUTCMinutes()) || (b.popularity ?? 0) - (a.popularity ?? 0);
+    });
+    expect(ids).toEqual(expected.map((s) => s.anilistId));
+    await expect(visibleCards(page).locator('[data-badge="plain"]')).toHaveText(expected.map((s) => bjHhmm(s.at as number)));
 
     // Pressed again: back to everything, sorted by popularity.
     await page.locator(`[data-bar="wd-${busiest}"]`).click();
