@@ -44,7 +44,9 @@
   border-radius: 8px;
   background: var(--field);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-  color: rgba(235, 235, 245, 0.45);
+  /* 0.5, not the artboard's 0.45: an unset value ("任意") reads at 4.6:1
+   * on the field, where 0.45 fell just short of 4.5:1. */
+  color: rgba(235, 235, 245, 0.5);
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;

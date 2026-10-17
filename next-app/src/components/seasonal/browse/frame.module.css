@@ -274,6 +274,9 @@
   .page *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    /* The stagger is an inline animation-delay; without this the cards
+     * would still turn up one by one, just without moving. */
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
   }
 }

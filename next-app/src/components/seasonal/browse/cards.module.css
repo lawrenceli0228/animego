@@ -636,19 +636,12 @@
     gap: 22px 18px;
   }
 
-  .grid > .card:nth-child(3n + 2) .pop,
-  .grid > .card:nth-child(3n) .pop {
-    left: auto;
-    right: calc(100% + 18px);
-    transform-origin: 100% 36px;
-  }
-
-  .grid > .card:nth-child(3n + 2) .arrow,
-  .grid > .card:nth-child(3n) .arrow {
-    right: auto;
-    left: 100%;
-    border-right: 0;
-    border-left: 10px solid currentColor;
+  /* Three columns leave no room for a 290px popover: the middle cover has
+   * one card's width on either side, so it would hang off the screen
+   * whichever way it opened. The card's own title and airing line stand. */
+  .grid > .card .pop,
+  .grid > .card:has(.title:focus-visible) .pop {
+    display: none;
   }
 }
 

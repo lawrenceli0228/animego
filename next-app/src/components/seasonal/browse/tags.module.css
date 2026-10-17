@@ -346,8 +346,16 @@
   }
 
   .view {
+    position: relative;
     width: 36px;
     height: 32px;
+  }
+
+  /* The pills stay 36×32; the target reaches 44px tall. */
+  .view::before {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
   }
 
   .view[data-view-toggle="table"] {
