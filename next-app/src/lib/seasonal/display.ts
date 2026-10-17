@@ -7,7 +7,8 @@
 // words (weekday and month names) are tables here, the way lib/home/time.ts
 // keeps them: they are per-language grammar, not copy.
 //
-// Times are on the Beijing clock (./clock.ts).
+// Days and times are on the page's clock (./clock.ts): Beijing until
+// hydration, the reader's zone after.
 //
 // Pure: no React, no DOM.
 

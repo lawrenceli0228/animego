@@ -9,7 +9,7 @@
 // kept below.
 //
 // Every field the API added for this page is optional on the wire. A missing
-// one comes out as null and the page offers fewer controls (see facets.ts);
+// one comes out as null and the page offers fewer controls (see facetsOf in browse.ts);
 // nothing here throws on an older go-api.
 //
 // Pure: no React, no DOM, no dictionaries.
@@ -128,8 +128,45 @@ function synopsisOf(row: SeasonalAnime, lang: Lang): string {
   return truncateVisual(plain.replace(/\s+/g, " ").trim(), SYNOPSIS_WIDTH);
 }
 
-function itemOf(row: SeasonalAnime, rank: number, lang: Lang): SeasonalItem {
-  const next = nextOf(row);
+/** Statuses after which a stored "next episode" is a leftover of the last sync, not a schedule. */
+const ENDED = new Set(["FINISHED", "CANCELLED"]);
+
+/** The first month of each season's broadcast quarter. */
+const SEASON_FIRST_MONTH: Record<string, number> = { WINTER: 1, SPRING: 4, SUMMER: 7, FALL: 10 };
+
+/** Months a stored premiere date may lie before the season's first month, or after its third. */
+const START_SLACK_MONTHS = 2;
+
+/** A season, as the page asks for it: the AniList enum and the year. */
+export interface SeasonKey {
+  season: string;
+  year: number;
+}
+
+/**
+ * Whether `dayKey` (YYYY-MM-DD) is a premiere date this season can have: its
+ * three months and START_SLACK_MONTHS either side (an early first episode, a
+ * late one). A date further out is a leftover — a show postponed into this
+ * season keeps its old full date when AniList restates the new one as a bare
+ * year or month, since a stored date is only ever overwritten by a whole one.
+ */
+function startFitsSeason(dayKey: string, season: SeasonKey | undefined): boolean {
+  const first = season ? SEASON_FIRST_MONTH[season.season] : undefined;
+  if (!season || first === undefined) return true;
+  const month = Number(dayKey.slice(0, 4)) * 12 + Number(dayKey.slice(5, 7)) - 1;
+  const from = season.year * 12 + first - 1 - START_SLACK_MONTHS;
+  const to = season.year * 12 + first - 1 + 2 + START_SLACK_MONTHS;
+  return month >= from && month <= to;
+}
+
+function startOf(row: SeasonalAnime, next: NextAiring | null, season: SeasonKey | undefined): string | null {
+  const stored = dateKey(row.startDate);
+  if (stored) return startFitsSeason(stored, season) ? stored : null;
+  return next && next.ep === 1 ? siteDateKey(next.at) : null;
+}
+
+function itemOf(row: SeasonalAnime, rank: number, lang: Lang, season: SeasonKey | undefined): SeasonalItem {
+  const next = row.status && ENDED.has(row.status) ? null : nextOf(row);
   const titles = [row.titleChinese, row.titleHant, row.titleNative, row.titleRomaji, row.titleEnglish]
     .map(text)
     .filter((t): t is string => t !== null);
@@ -153,7 +190,7 @@ function itemOf(row: SeasonalAnime, rank: number, lang: Lang): SeasonalItem {
     popularity: nonNegative(row.popularity),
     favourites: nonNegative(row.favourites),
     source: text(row.source),
-    start: dateKey(row.startDate) ?? (next && next.ep === 1 ? siteDateKey(next.at) : null),
+    start: startOf(row, next, season),
     sequel: typeof row.isSequel === "boolean" ? row.isSequel : null,
     synopsis: synopsisOf(row, lang),
   };
@@ -178,15 +215,17 @@ export function seasonRowsOf(
  * The season's rows as browse items, in API order, one per anime.
  *
  * A repeated id is dropped rather than rendered twice: the items are keyed by
- * id on the client, and two cards for one show are a bug either way.
+ * id on the client, and two cards for one show are a bug either way. With
+ * `season`, a stored premiere date that this season cannot have is dropped
+ * (see startFitsSeason).
  */
-export function toSeasonalItems(rows: readonly SeasonalAnime[], lang: Lang): SeasonalItem[] {
+export function toSeasonalItems(rows: readonly SeasonalAnime[], lang: Lang, season?: SeasonKey): SeasonalItem[] {
   const seen = new Set<number>();
   const items: SeasonalItem[] = [];
   for (const row of rows) {
     if (!row || typeof row.anilistId !== "number" || seen.has(row.anilistId)) continue;
     seen.add(row.anilistId);
-    items.push(itemOf(row, items.length, lang));
+    items.push(itemOf(row, items.length, lang, season));
   }
   const collated = [...items].sort(
     (a, b) => a.title.localeCompare(b.title, COLLATION[lang]) || a.rank - b.rank,

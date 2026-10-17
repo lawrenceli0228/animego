@@ -49,8 +49,11 @@ const EMPTY_ITEMS: SeasonalAnime[] = [];
 
 type SeasonalPageProps = PageProps<"/[lang]/seasonal/[season]/[year]">;
 
+/** Four digits and nothing else: Number() alone also took "2026.5" and "0x7EA" and answered an empty 200. */
+const YEAR_SEGMENT = /^\d{4}$/;
+
 function parseSeasonYear(season: string, year: string): { season: SeasonKey; year: number } | null {
-  if (!VALID_SEASONS.has(season)) return null;
+  if (!VALID_SEASONS.has(season) || !YEAR_SEGMENT.test(year)) return null;
   const yearNum = Number(year);
   if (!Number.isFinite(yearNum) || yearNum < 1990 || yearNum > 2100) return null;
   return { season: season as SeasonKey, year: yearNum };
@@ -126,7 +129,7 @@ export default async function SeasonalPage({ params, searchParams }: SeasonalPag
   // show in it is still a real link in the HTML this request returns.
   return (
     <SeasonalBrowse
-      items={toSeasonalItems(rows, lang)}
+      items={toSeasonalItems(rows, lang, { season: apiSeason, year: parsed.year })}
       initial={parseBrowseState(queryFromRecord(query))}
       serverNowMs={nowMs}
       season={parsed.season}

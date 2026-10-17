@@ -11,7 +11,7 @@
 //   status  RELEASING | FINISHED | NOT_YET_RELEASED
 //   source  a source group (SOURCE_GROUPS)
 //   seq     new | sequel
-//   wd      1–7, Monday to Sunday (Beijing)
+//   wd      1–7, Monday to Sunday (on the page's clock: Beijing, then the reader's zone)
 //   mon     YYYY-MM | tbd
 //   hue     a hue family key
 //   sort    pop | score | fav | next | time | start | title
@@ -129,7 +129,11 @@ function parseGenres(value: string | null): string[] {
 
 function parseSort(value: string | null): SortKey {
   if (value === null) return DEFAULT_STATE.sort;
-  return oneOf(value, SORT_KEYS) || LEGACY_SORT[value] || DEFAULT_STATE.sort;
+  // An own-property check, not a bare lookup: `?sort=constructor` would
+  // otherwise read Object.prototype and hand a function to the client tree,
+  // which the server render cannot serialise (a 500 for anyone who edits the
+  // URL). Not Object.hasOwn, which Safari before 15.4 lacks.
+  return oneOf(value, SORT_KEYS) || (Object.prototype.hasOwnProperty.call(LEGACY_SORT, value) ? LEGACY_SORT[value] : DEFAULT_STATE.sort);
 }
 
 /** The state a query describes. Never throws; anything unreadable is the default. */
@@ -138,7 +142,8 @@ export function parseBrowseState(query: QuerySource): BrowseState {
   const mon = query.get("mon");
   const seq = query.get("seq");
   return {
-    q: (query.get("q") ?? "").slice(0, MAX_QUERY_LENGTH),
+    // By code point, so the cut never splits an emoji into a lone surrogate.
+    q: Array.from(query.get("q") ?? "").slice(0, MAX_QUERY_LENGTH).join(""),
     genres: parseGenres(query.get("genre")),
     format: oneOf(query.get("format"), FILTER_FORMATS),
     status: oneOf(query.get("status"), FILTER_STATUSES),

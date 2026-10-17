@@ -346,3 +346,26 @@ describe("the weekday filter and the air-time sort on the reader's clock", () =>
     expect(sortItems([a, b], "time", LOS_ANGELES).map((i) => i.id)).toEqual([2, 1]);
   });
 });
+
+describe("the next-episode sort against the clock", () => {
+  // A's next episode passed long ago (its row has not synced since); B's is in two hours.
+  const a = item({ id: 1, popularity: 50, next: { at: NOW - 20 * 24 * HOUR_MS, ep: 4 } });
+  const b = item({ id: 2, popularity: 10, next: { at: NOW + 2 * HOUR_MS, ep: 6 } });
+  const c = item({ id: 3, popularity: 30 });
+
+  test("an episode already out sorts with the unknowns, after every one still to come", () => {
+    expect(sortItems([a, b, c], "next", undefined, NOW).map((i) => i.id)).toEqual([2, 1, 3]);
+    const state: BrowseState = { ...DEFAULT_STATE, sort: "next" };
+    expect(browseItems([a, b, c], state, "weekday", undefined, NOW).map((i) => i.id)).toEqual([2, 1, 3]);
+  });
+});
+
+describe("the air-time sort needs a weekly slot", () => {
+  test("a season of first episodes still to premiere offers no air-time sort", () => {
+    const premieres = [1, 2, 3].map((id) => item({ id, status: "NOT_YET_RELEASED", next: { at: NOW + id * HOUR_MS, ep: 1 } }));
+    expect(facetsOf(premieres).sorts).not.toContain("time");
+    expect(facetsOf(premieres).sorts).toContain("next");
+    const airing = [...premieres, item({ id: 9, status: "RELEASING", next: { at: NOW + HOUR_MS, ep: 3 } })];
+    expect(facetsOf(airing).sorts).toContain("time");
+  });
+});

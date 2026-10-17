@@ -213,3 +213,33 @@ describe("seasonRowsOf", () => {
     expect(seasonRowsOf(undefined)).toEqual([]);
   });
 });
+
+describe("leftovers the listing can carry", () => {
+  test("a finished or cancelled show's stored next episode is not a schedule", () => {
+    const next = { nextAiringAt: "2026-10-20T14:00:00Z", nextAiringEpisode: 13 };
+    const [finished] = toSeasonalItems([row({ anilistId: 1, status: "FINISHED", ...next })], "zh");
+    const [cancelled] = toSeasonalItems([row({ anilistId: 2, status: "CANCELLED", ...next })], "zh");
+    const [airing] = toSeasonalItems([row({ anilistId: 3, status: "RELEASING", ...next })], "zh");
+    expect(finished.next).toBeNull();
+    expect(cancelled.next).toBeNull();
+    expect(airing.next).toEqual({ at: Date.parse("2026-10-20T14:00:00Z"), ep: 13 });
+  });
+
+  test("a premiere date this season cannot have is a leftover of a postponement", () => {
+    const winter = { season: "WINTER", year: 2027 };
+    const items = toSeasonalItems(
+      [
+        row({ anilistId: 1, startDate: "2026-10-05" }), // the autumn date it was moved from
+        row({ anilistId: 2, startDate: "2027-01-08" }),
+        row({ anilistId: 3, startDate: "2026-12-26" }), // a late-December premiere is still winter's
+        row({ anilistId: 4, startDate: "2027-05-30" }), // two months past March: a late start
+        row({ anilistId: 5, startDate: "2027-07-01" }),
+      ],
+      "zh",
+      winter,
+    );
+    expect(items.map((i) => i.start)).toEqual([null, "2027-01-08", "2026-12-26", "2027-05-30", null]);
+    // Without a season the date is taken as it is.
+    expect(toSeasonalItems([row({ anilistId: 1, startDate: "2026-10-05" })], "zh")[0].start).toBe("2026-10-05");
+  });
+});

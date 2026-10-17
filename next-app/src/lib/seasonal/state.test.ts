@@ -122,3 +122,29 @@ describe("sameBrowseState", () => {
     expect(sameBrowseState(DEFAULT_STATE, { ...DEFAULT_STATE, wd: 1 })).toBe(false);
   });
 });
+
+describe("query values that name Object.prototype members", () => {
+  // A bare lookup in the legacy-sort table used to return Object's own
+  // members, which the server cannot hand to the client tree (a 500).
+  test("fall back to the default sort, and every value stays a string", () => {
+    for (const value of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+      const state = parse(`sort=${value}&view=${value}&hue=${value}&source=${value}&format=${value}&genre=${value}`);
+      expect(state.sort).toBe("pop");
+      expect(state.view).toBe("grid");
+      expect(state.hue).toBe("");
+      expect(state.source).toBe("");
+      expect(state.format).toBe("");
+      expect(state.genres).toEqual([]);
+      expect(JSON.parse(JSON.stringify(state))).toEqual(state);
+    }
+  });
+});
+
+describe("the search box's length cap", () => {
+  test("cuts at a whole character, never inside an emoji", () => {
+    const state = parse(`q=${encodeURIComponent("x".repeat(99) + "😀😀")}`);
+    expect(Array.from(state.q)).toHaveLength(100);
+    expect(state.q.endsWith("😀")).toBe(true);
+    expect(parse(browseSearch(state).slice(1)).q).toBe(state.q);
+  });
+});

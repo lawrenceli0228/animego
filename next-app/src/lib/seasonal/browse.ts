@@ -64,10 +64,14 @@ export function facetsOf(items: readonly SeasonalItem[]): Facets {
   const any = (pred: (item: SeasonalItem) => boolean) => items.some(pred);
   const fav = any((i) => i.favourites !== null);
   const next = any((i) => i.next !== null);
+  // Air time orders weekly slots; a season of first episodes has none, and
+  // the sort would only repeat popularity under another name.
+  const slots = any(hasWeeklySlot);
   const start = any((i) => i.start !== null);
   const sorts = SORT_KEYS.filter((key) => {
     if (key === "fav") return fav;
-    if (key === "next" || key === "time") return next;
+    if (key === "next") return next;
+    if (key === "time") return slots;
     if (key === "start") return start;
     return true;
   });
@@ -172,14 +176,24 @@ const slotMinute = (item: SeasonalItem, zone: ZoneOffset) =>
 
 type Compare = (a: SeasonalItem, b: SeasonalItem) => number;
 
-function compareFor(sort: SortKey, zone: ZoneOffset): Compare {
+/**
+ * The "next episode" key: an episode still to come. One whose time has passed
+ * (the row is only as fresh as its last sync) says nothing about when the
+ * next one is, so it sorts with the unknowns rather than first.
+ */
+function upcomingAt(item: SeasonalItem, nowMs: number | undefined): number | null {
+  const at = item.next?.at ?? null;
+  return at !== null && nowMs !== undefined && at <= nowMs ? null : at;
+}
+
+function compareFor(sort: SortKey, zone: ZoneOffset, nowMs: number | undefined): Compare {
   switch (sort) {
     case "score":
       return (a, b) => desc(a.score, b.score) || byPopularity(a, b);
     case "fav":
       return (a, b) => desc(a.favourites, b.favourites) || byPopularity(a, b);
     case "next":
-      return (a, b) => asc(a.next?.at ?? null, b.next?.at ?? null) || byPopularity(a, b);
+      return (a, b) => asc(upcomingAt(a, nowMs), upcomingAt(b, nowMs)) || byPopularity(a, b);
     case "time":
       return (a, b) => asc(slotMinute(a, zone), slotMinute(b, zone)) || byPopularity(a, b);
     case "start":
@@ -191,23 +205,34 @@ function compareFor(sort: SortKey, zone: ZoneOffset): Compare {
   }
 }
 
-/** A new array; ties fall back to the API's own order, so every sort is total. Air time is read on `zone`'s clock. */
-export function sortItems(items: readonly SeasonalItem[], sort: SortKey, zone: ZoneOffset = SITE_ZONE): SeasonalItem[] {
-  const compare = compareFor(sort, zone);
+/**
+ * A new array; ties fall back to the API's own order, so every sort is total.
+ * Air time is read on `zone`'s clock; with `nowMs`, a next episode already in
+ * the past sorts last under "next".
+ */
+export function sortItems(
+  items: readonly SeasonalItem[],
+  sort: SortKey,
+  zone: ZoneOffset = SITE_ZONE,
+  nowMs?: number,
+): SeasonalItem[] {
+  const compare = compareFor(sort, zone, nowMs);
   return [...items].sort((a, b) => compare(a, b) || a.rank - b.rank);
 }
 
-/** The list the page shows for `state`, on `zone`'s clock. */
+/** The list the page shows for `state`, on `zone`'s clock at `nowMs`. */
 export function browseItems(
   items: readonly SeasonalItem[],
   state: BrowseState,
   mode: BarMode,
   zone: ZoneOffset = SITE_ZONE,
+  nowMs?: number,
 ): SeasonalItem[] {
   return sortItems(
     items.filter((item) => matchesState(item, state, mode, zone)),
     state.sort,
     zone,
+    nowMs,
   );
 }
 

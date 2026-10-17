@@ -190,7 +190,7 @@ export interface SeasonalAnime {
   descriptionHantSource?: string | null;
   // What the seasonal page browses by. Additive fields, all optional: a
   // go-api that predates them sends none, and the page then offers fewer
-  // controls rather than breaking (lib/seasonal/facets.ts decides which).
+  // controls rather than breaking (facetsOf in lib/seasonal/browse.ts decides which).
   /** The main studio's name, when one is recorded. */
   studio?: string | null;
   /** The next episode's air time, RFC 3339 UTC. Paired with nextAiringEpisode. */
