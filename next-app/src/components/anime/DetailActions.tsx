@@ -31,7 +31,14 @@ const TorrentModal = dynamic(() => import("./TorrentModal"), {
 
 interface DetailActionsProps {
   anilistId: number;
+  /** AniList's count. The torrent modal's, and nothing inferred. */
   episodes: number | null;
+  /**
+   * The total the episode grid draws (`gridTotal`), for the subscription
+   * control's "watched N / total". Separate from `episodes` so an inferred
+   * count reaches that readout and nothing else.
+   */
+  progressTotal: number | null;
   titleRomaji: string | null;
   titleEnglish: string | null;
   titleChinese: string | null;
@@ -79,6 +86,7 @@ interface DetailActionsProps {
 export default function DetailActions({
   anilistId,
   episodes,
+  progressTotal,
   titleRomaji,
   titleEnglish,
   titleChinese,
@@ -110,7 +118,7 @@ export default function DetailActions({
         ) : null}
         <SubscriptionButton
           anilistId={anilistId}
-          episodes={episodes}
+          episodes={progressTotal}
           labels={{
             add: labels.subAdd,
             remove: labels.subRemove,

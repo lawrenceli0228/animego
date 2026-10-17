@@ -11,6 +11,7 @@ import {
   isFurthestMarked,
   isWatchedCell,
   latestWatched,
+  parseSubscriptionRead,
   parseWatchedEpisodes,
   parseWatchedSnapshot,
   settleWrite,
@@ -293,6 +294,38 @@ describe("parseWatchedEpisodes", () => {
     expect(parseWatchedEpisodes({ data: { watchedEpisodes: null } })).toEqual([]);
     expect(parseWatchedEpisodes(null)).toEqual([]);
     expect(parseWatchedEpisodes("nope")).toEqual([]);
+  });
+});
+
+describe("parseSubscriptionRead", () => {
+  // GET /api/subscriptions/{id} answers a reader with no row as 200 +
+  // `{ data: null }`, not 404. Reading that as a "watching" row made the grid
+  // skip creating the subscription, so the first click on any show not yet on
+  // the list was refused by the server and rolled back.
+  test("data:null is no subscription, not a default one", () => {
+    expect(parseSubscriptionRead({ data: null })).toBeNull();
+  });
+
+  test("reads the row a subscriber has", () => {
+    expect(
+      parseSubscriptionRead({
+        data: { status: "completed", currentEpisode: 12, score: 8, watchedEpisodes: [12] },
+      }),
+    ).toEqual({ status: "completed", currentEpisode: 12, score: 8 });
+  });
+
+  test("a row without a status is watching, as the server defaults it", () => {
+    expect(parseSubscriptionRead({ data: { currentEpisode: 3 } })).toEqual({
+      status: "watching",
+      currentEpisode: 3,
+      score: null,
+    });
+  });
+
+  test("an unknown status or an unreadable body is no row", () => {
+    expect(parseSubscriptionRead({ data: { status: "paused" } })).toBeNull();
+    expect(parseSubscriptionRead(null)).toBeNull();
+    expect(parseSubscriptionRead("nope")).toBeNull();
   });
 });
 
