@@ -12,12 +12,14 @@
 //
 // The follow buttons come in as `Follow` — see types.ts for why.
 
+import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { seasonYearLabel } from "@/lib/contentLabels";
 import { HUE_FAMILIES } from "@/lib/home/hueFamilies";
 import { oklchCss } from "@/lib/home/tone";
 import { useLang } from "@/lib/lang-client";
 import { barModeOf, seasonBars, type Bar } from "@/lib/seasonal/bars";
+import { batchMemory, memoryUrl, rememberedPages } from "@/lib/seasonal/batchMemory";
 import { effectiveView } from "@/lib/seasonal/batch";
 import {
   browseItems,
@@ -65,16 +67,13 @@ export interface BrowseViewProps {
 }
 
 /**
- * The first state, the same on both sides of hydration: on a first load the
- * browser's URL is the request the server parsed. When the router restores
- * this page from its cache (back / forward), the props are that first
- * request's while the URL carries the filters the reader had set — the URL
- * wins, so the page comes back as it was left.
+ * Whether a browse page has hydrated in this document yet. Until one has, a
+ * mount is the hydration of the server's HTML and must render one batch, as
+ * the server did — even when a reload kept a history entry that remembers
+ * more. Every later mount is a client render (a navigation, Back / Forward)
+ * and may open what the entry remembers.
  */
-function firstState(initial: BrowseState): BrowseState {
-  if (typeof window === "undefined" || !window.location) return initial;
-  return parseBrowseState(new URLSearchParams(window.location.search));
-}
+let hydratedOnce = false;
 
 /** The query a list re-enters for: anything but the search box, whose every keystroke would replay it. */
 function listKeyOf(state: BrowseState): string {
@@ -82,6 +81,17 @@ function listKeyOf(state: BrowseState): string {
 }
 
 export default function BrowseView({ items, initial, serverNowMs, season, year, clockYear, heading, Follow }: BrowseViewProps) {
+  // The first state is read from the router's query, not from `initial` and
+  // not from window.location. On a first load all three agree. When the
+  // router restores this page from its cache (back / forward), the props are
+  // that first request's while the query carries the filters the reader had
+  // set, so the query wins and the page comes back as it was left. And during
+  // a client navigation INTO this page, window.location still holds the page
+  // being left (the router commits the new URL after this render): reading
+  // it put a search page's ?q= into the season, and a year link's dropped
+  // month filter back into the next year.
+  const query = useSearchParams();
+  const pathname = usePathname();
   const { lang } = useLang();
   const copy = useBrowseCopy();
   const { nowMs, zone } = useSeasonClock(serverNowMs);
@@ -91,9 +101,15 @@ export default function BrowseView({ items, initial, serverNowMs, season, year, 
   const mode = useMemo(() => barModeOf(items), [items]);
   const hues = useMemo(() => hueOptionsOf(items), [items]);
 
-  const [state, setState] = useState<BrowseState>(() => settleState(firstState(initial), facets, mode));
+  const [state, setState] = useState<BrowseState>(() => settleState(query ? parseBrowseState(query) : initial, facets, mode));
   const [draft, setDraft] = useState(state.q);
-  const [pages, setPages] = useState(1);
+  // Back from a show opens the batches that were open when the reader left
+  // (see lib/seasonal/batchMemory.ts); any other arrival opens one.
+  const [pages, setPages] = useState(() =>
+    hydratedOnce && typeof window !== "undefined"
+      ? rememberedPages(window.history.state, memoryUrl(pathname, query ? query.toString() : ""))
+      : 1,
+  );
   const [menu, setMenu] = useState<MenuKey | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pending, setPending] = useState<SeasonTarget | null>(null);
@@ -111,23 +127,52 @@ export default function BrowseView({ items, initial, serverNowMs, season, year, 
     [facets, mode],
   );
 
-  // The URL follows the state. replaceState rather than pushState: a filter
-  // is not a place, and Back should leave the page rather than undo a chip.
+  useEffect(() => {
+    hydratedOnce = true;
+  }, []);
+
+  // The URL follows the state, and the history entry remembers the open
+  // batches for it. replaceState rather than pushState: a filter is not a
+  // place, and Back should leave the page rather than undo a chip.
   useEffect(() => {
     const search = browseSearch(state, window.location.search);
-    if (search === window.location.search) return;
-    window.history.replaceState(null, "", `${window.location.pathname}${search}${window.location.hash}`);
-  }, [state]);
+    const url = memoryUrl(window.location.pathname, search);
+    const moved = search !== window.location.search;
+    if (!moved && rememberedPages(window.history.state, url) === pages) return;
+    if (moved) {
+      // A fresh object: Next copies its own entry state into it and moves
+      // the router's query (useSearchParams) to the new address.
+      window.history.replaceState(batchMemory(url, pages), "", `${window.location.pathname}${search}${window.location.hash}`);
+    } else {
+      // Only the batches changed: Next's own entry state rides along, so the
+      // call goes straight through without a router update.
+      window.history.replaceState({ ...window.history.state, ...batchMemory(url, pages) }, "");
+    }
+  }, [state, pages]);
 
-  // One menu at a time, closed by a press anywhere outside it.
+  // One menu at a time, closed by a press anywhere outside it, and by Escape
+  // wherever focus is. The field's own Escape handler only hears keys from
+  // inside the field, and Safari does not focus a button that is clicked, so
+  // after a mouse open focus is on <body> and the key would go nowhere. The
+  // listener lives only while a menu is open (as LanguageMenu's does); a key
+  // the field already handled stops at React's root and never reaches it.
   useEffect(() => {
     if (!menu) return;
     const onDown = (e: PointerEvent) => {
       const target = e.target as Element | null;
       if (!target?.closest?.(`[data-menu="${menu}"]`)) setMenu(null);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenu(null);
+      document.querySelector<HTMLElement>(`[data-menu="${menu}"] button`)?.focus({ preventScroll: true });
+    };
     document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [menu]);
 
   // A season link started loading and the reader went Back before it landed:
@@ -145,7 +190,7 @@ export default function BrowseView({ items, initial, serverNowMs, season, year, 
   }, []);
 
   const view = effectiveView(state.view, layout);
-  const list = useMemo(() => browseItems(items, state, mode, zone), [items, state, mode, zone]);
+  const list = useMemo(() => browseItems(items, state, mode, zone, nowMs), [items, state, mode, zone, nowMs]);
   const bars = useMemo(() => seasonBars(items, mode, state, nowMs, zone), [items, mode, state, nowMs, zone]);
   const years = useMemo(() => yearOptions(year, clockYear), [year, clockYear]);
   const phoneYears = useMemo(() => years.filter((y) => y === year || (y <= clockYear + 1 && y >= clockYear - PHONE_YEARS_BACK)), [years, year, clockYear]);
@@ -247,7 +292,11 @@ export default function BrowseView({ items, initial, serverNowMs, season, year, 
         copy={copy}
         Follow={Follow}
         seasonYear={seasonYear}
-        onClear={() => commit(clearFilters(state))}
+        onClear={() => {
+          // The empty state, and its button, go once the filters do.
+          commit(clearFilters(state));
+          document.querySelector<HTMLElement>("[data-seasonal-browse] [data-tag-row]")?.focus({ preventScroll: true });
+        }}
       />
 
       <FilterSheet

@@ -6,10 +6,11 @@
 // Which menu is open is the parent's state (one at a time). This component
 // only reports presses. Escape is handled here, on the field itself — the
 // trigger and its menu both live inside it, so Escape from either closes the
-// menu and gives focus back to the trigger. Nothing listens on the document
-// for keys. Outside clicks are the parent's: it knows which field is open.
+// menu and gives focus back to the trigger. Escape with focus outside the
+// field (Safari does not focus a clicked button) and outside clicks are the
+// parent's: it knows which field is open.
 
-import { useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronIcon } from "./icons";
 import controls from "./controls.module.css";
 
@@ -24,8 +25,11 @@ interface MenuFieldProps {
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
-  /** listbox for options that set state, true for menus of links. */
-  popup: "listbox" | "true";
+  /**
+   * "listbox" for options that set state. A menu of plain links announces no
+   * popup type: it is neither a menu nor a listbox, only an expanded group.
+   */
+  popup?: "listbox";
   children: (ids: { labelId: string }) => ReactNode;
 }
 
@@ -33,6 +37,17 @@ export default function MenuField({ menuKey, label, value, isSet, open, onToggle
   const labelId = useId();
   const valueId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  // A close that strands focus — the picked option unmounted with its menu,
+  // or Safari never focused the option at all — gives it back to the trigger.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) {
+      const active = document.activeElement;
+      if (!active || active === document.body) triggerRef.current?.focus({ preventScroll: true });
+    }
+    wasOpen.current = open;
+  }, [open]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Escape" || !open) return;

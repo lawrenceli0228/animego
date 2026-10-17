@@ -5,7 +5,7 @@
 // view toggles. On a phone only the tags and two view toggles stay — sort
 // moves into the sheet, the hue dots into their own row.
 
-import type { KeyboardEvent, ReactNode } from "react";
+import { useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { formatLabel, genreLabel, seasonLabel, sourceLabel, statusLabel } from "@/lib/contentLabels";
 import type { HueFamilyKey } from "@/lib/home/hueFamilies";
 import { fillTemplate } from "@/lib/home/time";
@@ -106,9 +106,26 @@ function tagText(tag: ActiveTag, lang: Lang, copy: BrowseCopy): { label: string;
 export default function TagRow(props: TagRowProps) {
   const { state, season, year, hues, view, onRemove, onClear, onHue, onView, lang, copy } = props;
   const active = activeTags(state);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+
+  // A removed tag takes the focused button with it. Focus moves to the tag
+  // beside it, or — when it was the last — to the row itself (not to the
+  // search box: on a phone that would open the keyboard).
+  const remove = (tag: ActiveTag) => (e: MouseEvent<HTMLButtonElement>) => {
+    const own = e.currentTarget;
+    const beside = [own.nextElementSibling, own.previousElementSibling].find(
+      (el): el is HTMLElement => el instanceof HTMLElement && el.hasAttribute("data-tag"),
+    );
+    onRemove(tag);
+    (beside ?? rowRef.current)?.focus({ preventScroll: true });
+  };
+  const clear = () => {
+    onClear();
+    rowRef.current?.focus({ preventScroll: true });
+  };
 
   return (
-    <div className={tags.tags} data-tag-row>
+    <div className={tags.tags} data-tag-row ref={rowRef} tabIndex={-1}>
       <div className={tags.tagsLeft}>
         <TagsIcon className={tags.tagIcon} />
         <span className={`${tags.tag} ${tags.tagFixed}`}>{year}</span>
@@ -122,7 +139,7 @@ export default function TagRow(props: TagRowProps) {
               className={tags.tag}
               aria-label={aria}
               data-tag={tag.kind}
-              onClick={() => onRemove(tag)}
+              onClick={remove(tag)}
             >
               {label}
               <CloseIcon />
@@ -130,7 +147,7 @@ export default function TagRow(props: TagRowProps) {
           );
         })}
         {active.length > 0 ? (
-          <button type="button" className={`${tags.tag} ${tags.tagClear}`} data-clear-all onClick={onClear}>
+          <button type="button" className={`${tags.tag} ${tags.tagClear}`} data-clear-all onClick={clear}>
             {copy.clearAll}
             <CloseIcon />
           </button>
@@ -187,6 +204,7 @@ function ViewToggle({
 /** 排序: a trigger and a listbox of the sorts this season's data can answer. */
 function SortMenu({ state, sorts, menu, onMenu, onSort, copy }: TagRowProps) {
   const open = menu === "sort";
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Escape" || !open) return;
     e.stopPropagation();
@@ -201,6 +219,7 @@ function SortMenu({ state, sorts, menu, onMenu, onSort, copy }: TagRowProps) {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`${copy.sort}: ${sortLabel(state.sort, copy)}`}
+        ref={triggerRef}
         data-sort-trigger
         onClick={() => onMenu(open ? null : "sort")}
       >
@@ -220,6 +239,7 @@ function SortMenu({ state, sorts, menu, onMenu, onSort, copy }: TagRowProps) {
               onClick={() => {
                 onSort(key);
                 onMenu(null);
+                triggerRef.current?.focus({ preventScroll: true });
               }}
             >
               {sortLabel(key, copy)}

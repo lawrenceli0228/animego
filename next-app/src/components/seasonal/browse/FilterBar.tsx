@@ -128,7 +128,6 @@ export default function FilterBar(props: FilterBarProps) {
         open={menu === "year"}
         onToggle={toggle("year")}
         onClose={close}
-        popup="true"
       >
         {() => (
           <div className={controls.menu} hidden={menu !== "year"} data-menu-panel="year">
@@ -163,7 +162,6 @@ export default function FilterBar(props: FilterBarProps) {
         open={menu === "season"}
         onToggle={toggle("season")}
         onClose={close}
-        popup="true"
       >
         {() => (
           <div className={controls.menu} hidden={menu !== "season"} data-menu-panel="season">
