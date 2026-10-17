@@ -188,7 +188,14 @@
 /* ── Follow buttons ──────────────────────────────────────────────────────── */
 
 /* On the cover: hidden at rest, there under the pointer and once followed;
- * always there where nothing hovers. */
+ * always there where nothing hovers.
+ *
+ * It fades in, and that is all it does; the chart card's button only changes
+ * colour. Measured frame by frame in Chrome, a scale on a glyph this small
+ * (and the chart button's quarter turn) does not settle: in its last frames
+ * the "+" dims, moves a fraction of a pixel and snaps sharp as the transition
+ * ends and the button is painted back onto the pixel grid. Plainest at a page
+ * zoom like 80%, visible at 1x and 2x as well. */
 .add {
   position: absolute;
   right: 8px;
@@ -205,10 +212,8 @@
   color: inherit;
   cursor: pointer;
   opacity: 0;
-  transform: scale(0.6);
   transition:
     opacity 0.18s ease,
-    transform 0.3s var(--ease),
     background-color 0.2s ease,
     border-color 0.2s ease;
 }
@@ -233,7 +238,6 @@
 
 .card:hover .add {
   opacity: 1;
-  transform: none;
 }
 
 .add:focus-visible {
@@ -241,7 +245,6 @@
   outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
   opacity: 1;
-  transform: none;
 }
 
 .add[aria-disabled="true"] {
@@ -260,7 +263,6 @@
 
 .add[data-follow="on"] {
   opacity: 1;
-  transform: none;
 }
 
 .add[data-follow="on"] svg,
@@ -337,8 +339,7 @@
   cursor: pointer;
   transition:
     border-color 0.2s,
-    background-color 0.2s,
-    transform 0.3s var(--ease);
+    background-color 0.2s;
 }
 
 .chAdd::before {
@@ -357,15 +358,10 @@
 
 .chAdd:hover {
   border-color: currentColor;
-  transform: rotate(90deg);
 }
 
 .chAdd:hover svg {
   stroke: currentColor;
-}
-
-.chAdd[data-follow="on"]:hover {
-  transform: none;
 }
 
 .chAdd:focus-visible {
@@ -563,7 +559,6 @@
 @media (hover: none), (pointer: coarse) {
   .add {
     opacity: 1;
-    transform: none;
   }
 }
 
@@ -696,7 +691,6 @@
     border-color: rgba(255, 255, 255, 0.22);
     background: rgba(10, 10, 12, 0.78);
     opacity: 1;
-    transform: none;
     transition:
       transform 0.25s var(--ease),
       background-color 0.2s;

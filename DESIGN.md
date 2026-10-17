@@ -1065,7 +1065,9 @@ effect + setState）。`/api/anime/schedule` 按**服务器所在日**分组，�
 - **追番按钮**是站内同一套一键追番（`useQuickSubscribe`），作为参数传进视图，所以渲染
   测试不必带上 toast 那条依赖链。
 - 动效：卡片进场 0.3s（一张错开 16–40ms），浮层 0.22s，下拉 0.2s，底部面板 0.44s；
-  `prefers-reduced-motion` 时全部关掉。
+  `prefers-reduced-motion` 时全部关掉。追番「+」只淡入，图表卡上的「+」悬停只变色：
+  这么小的图标做缩放或旋转，过渡最后几帧会变暗、挪零点几像素，结束时再突然变清楚
+  （逐帧截图实测，页面缩放 80% 时最明显，1x、2x 也有）。
 
 ## Depth & Elevation
 
