@@ -4909,12 +4909,14 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     trailer_id = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
     trailer_site = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
     trailer_checked_at = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_checked_at ELSE anime_cache.trailer_checked_at END,
-    -- The four facts only AnimeDetailQuery selects.  COALESCE rather than
-    -- the trailer's CASE because these have no "asked, none" state worth
-    -- keeping: a release date, once known, does not become unknown again.
-    -- So a caller whose document did not select them (search, seasonal)
-    -- passes NULL and leaves the stored value standing, and a caller whose
-    -- document did select them overwrites with whatever AniList says now.
+    -- The four facts AnimeDetailQuery and SeasonalAnimeQuery select.
+    -- COALESCE rather than the trailer's CASE because these have no "asked,
+    -- none" state worth keeping: a release date, once known, does not
+    -- become unknown again.  So a caller whose document did not select them
+    -- (search) passes NULL and leaves the stored value standing, and a
+    -- caller whose document did select them overwrites with whatever
+    -- AniList says now -- except where AniList says nothing, which leaves
+    -- the stored value standing too.
     start_date = COALESCE(EXCLUDED.start_date, anime_cache.start_date),
     end_date   = COALESCE(EXCLUDED.end_date,   anime_cache.end_date),
     duration   = COALESCE(EXCLUDED.duration,   anime_cache.duration),

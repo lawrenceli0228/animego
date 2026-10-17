@@ -9,7 +9,8 @@
 // document that upserts anime_cache, so that no upsert path can carry a
 // row without them.  Adding a scalar to a document costs nothing in
 // requests; it is the request count, not the byte count, that the
-// budgets are about.
+// budgets are about.  SeasonalAnimeQuery has since taken the four 0034
+// facts as well; see its comment.
 //
 // Source files (Express):
 //   - server/queries/searchAnime.graphql.js
@@ -79,6 +80,19 @@ const SearchAnimeQuery = `
 //	$seasonYear Int          four-digit year (e.g. 2025)
 //
 // Server-side filters: type=ANIME, isAdult=false, sort=POPULARITY_DESC.
+//
+// Selects the four facts 0034 taught the upsert to write (startDate,
+// endDate, duration, source) besides the listing fields, because the
+// seasonal listing returns start date, duration and source, and its
+// cold-start path answers from the rows this document has just written:
+// without them a season fetched for the first time would list every title
+// with no date, length or source until the facts sweep reached it.  The
+// warm job reads this document too, so those facts are also re-read daily
+// for the current and next season, which the sweep re-checks only once a
+// month.  The upsert COALESCEs all four, so a date AniList has not stated
+// leaves a stored one standing.  Measured against AniList on 2026-10-18,
+// a full page of 50: no complexity error, one request as before.  Studios
+// and relations stay out -- see internal/anime/seasonal.go.
 const SeasonalAnimeQuery = `
   query SeasonalAnime($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int) {
     Page(page: $page, perPage: $perPage) {
@@ -103,6 +117,10 @@ const SeasonalAnimeQuery = `
         averageScore
         genres
         format
+        startDate { year month day }
+        endDate   { year month day }
+        duration
+        source
         popularity
         favourites
         idMal
