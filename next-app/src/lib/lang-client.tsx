@@ -15,10 +15,10 @@
 // step (see its own note below, which was right all along).
 //
 // It matters because it was load-bearing for other people's reasoning: the
-// same claim is repeated in about a dozen files — including the note beside
-// SeasonalFilterChips in app/[lang]/seasonal/[season]/[year]/page.tsx, which
-// cites it to justify a design decision — and it was cited as the reason the
-// 404 page could not be trusted to render in the URL's language. It does; that
+// same claim is repeated in about a dozen files — the seasonal page cited it
+// to justify a design decision, in a note that went with that page's old
+// filter chips — and it was cited as the reason the 404 page could not be
+// trusted to render in the URL's language. It does; that
 // is now asserted in a browser, in all three locales, by
 // e2e/specs/sandbox/not-found-status.spec.ts. Cleaning up the other copies is
 // its own pass; see TODOS.md.

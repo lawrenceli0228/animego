@@ -14,9 +14,9 @@
 // they most likely arrived at from search. The prop would say "zh" there.
 //
 // That makes these a deliberate divergence from the rest of the page rather
-// than a workaround. See the note beside SeasonalFilterChips in
-// app/[lang]/seasonal/[season]/[year]/page.tsx — reconciling URL locale
-// against cookie preference is one decision for the whole site.
+// than a workaround. See the note at the top of lib/lang-client.tsx —
+// reconciling URL locale against cookie preference is one decision for the
+// whole site.
 //
 // Genre text under en is byte-identical to before — genreLabel is the identity
 // for en. The format badge is not: en now reads "Short"/"Movie"/"Special"

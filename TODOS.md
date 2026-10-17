@@ -262,8 +262,9 @@
   （admin / library / login / register），`?lang=` 是 `proxy.ts` 里的遗留**查询参数**，
   不是 cookie。而这些注释描述的是一套完整的机制：hydration 后有个 effect 把语言换成
   cookie 值，所以客户端语言和服务端渲染「故意不一致」。这套机制不存在。
-- **Pros:** 这不是措辞问题，它已经在改变判断。`seasonal/[season]/[year]/page.tsx`
-  第 207 行用它当作一个设计决定的依据；`not-found.tsx` 曾用它论证 404 页的语言不可信
+- **Pros:** 这不是措辞问题，它已经在改变判断。旧版季度页
+  （`seasonal/[season]/[year]/page.tsx`）曾用它当作一个设计决定的依据（那段注释随旧的
+  筛选药丸一起删了）；`not-found.tsx` 曾用它论证 404 页的语言不可信
   （实测可信，现由 `e2e/specs/sandbox/not-found-status.spec.ts` 三语在浏览器里钉住）。
 - **Cons:** 纯注释改动，没有测试能防止它再次发生；14 个文件要一个个读，不能批量替换，
   因为其中确实有几处是准确的历史陈述。
