@@ -188,6 +188,26 @@ export interface SeasonalAnime {
   descriptionCnSource?: string | null;
   descriptionHant?: string | null;
   descriptionHantSource?: string | null;
+  // What the seasonal page browses by. Additive fields, all optional: a
+  // go-api that predates them sends none, and the page then offers fewer
+  // controls rather than breaking (lib/seasonal/facets.ts decides which).
+  /** The main studio's name, when one is recorded. */
+  studio?: string | null;
+  /** The next episode's air time, RFC 3339 UTC. Paired with nextAiringEpisode. */
+  nextAiringAt?: string | null;
+  nextAiringEpisode?: number | null;
+  /** AniList list-membership count. */
+  popularity?: number | null;
+  /** AniList favourites count. */
+  favourites?: number | null;
+  /** AniList source enum: ORIGINAL, MANGA, LIGHT_NOVEL, … */
+  source?: string | null;
+  /** The premiere date, `YYYY-MM-DD` (only complete dates are stored). */
+  startDate?: string | null;
+  /** Minutes per episode. */
+  duration?: number | null;
+  /** True when a prequel exists on AniList as an animated work. */
+  isSequel?: boolean | null;
 }
 
 // ─── Community discovery (/api/community/discussions/trending) ───
