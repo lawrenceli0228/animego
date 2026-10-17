@@ -243,3 +243,23 @@ describe("numbers and calendar words", () => {
     expect(dateLabel("not-a-date", "en")).toBe("");
   });
 });
+
+describe("coverBadge on the reader's clock", () => {
+  const SYDNEY = () => 11 * 60;
+
+  test("today or tomorrow, and the time, are the reader's", () => {
+    // NOW is Friday 20:00 in Beijing; the episode is at Friday 23:30 there.
+    const show = item({ id: 9, next: { at: NOW + 3.5 * HOUR_MS, ep: 2 } });
+    expect(coverBadge(show, NOW, DEFAULT_STATE, "weekday", ZH, "zh")).toEqual({ kind: "soon", text: "今天 23:30" });
+    // In Sydney it is Friday 23:00 now and Saturday 02:30 then.
+    expect(coverBadge(show, NOW, DEFAULT_STATE, "weekday", ZH, "zh", SYDNEY)).toEqual({ kind: "soon", text: "明天 02:30" });
+    expect(coverBadge(show, NOW, DEFAULT_STATE, "weekday", EN, "en", SYDNEY)).toEqual({ kind: "soon", text: "Tomorrow 02:30" });
+  });
+
+  test("under a weekday filter the plain badge is the reader's clock time", () => {
+    const show = item({ id: 10, next: { at: NOW + 3 * DAY_MS, ep: 5 } }); // Monday 20:00 in Beijing
+    const monday = { ...DEFAULT_STATE, wd: 1 };
+    expect(coverBadge(show, NOW, monday, "weekday", ZH, "zh")).toEqual({ kind: "plain", text: "20:00" });
+    expect(coverBadge(show, NOW, monday, "weekday", ZH, "zh", SYDNEY)).toEqual({ kind: "plain", text: "23:00" });
+  });
+});

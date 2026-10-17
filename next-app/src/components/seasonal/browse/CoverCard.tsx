@@ -14,6 +14,7 @@ import Link from "@/components/ui/LocaleLink";
 import { oklchCss, toneLadder } from "@/lib/home/tone";
 import type { Lang } from "@/lib/i18n/lang";
 import type { BarMode } from "@/lib/seasonal/bars";
+import type { ZoneOffset } from "@/lib/seasonal/clock";
 import {
   airingText,
   bangumiScoreText,
@@ -36,6 +37,7 @@ interface CoverCardProps {
   hidden: boolean;
   delayMs: number;
   nowMs: number;
+  zone: ZoneOffset;
   state: BrowseState;
   mode: BarMode;
   lang: Lang;
@@ -45,11 +47,11 @@ interface CoverCardProps {
   priority: boolean;
 }
 
-function CoverCard({ item, hidden, delayMs, nowMs, state, mode, lang, copy, Follow, priority }: CoverCardProps) {
+function CoverCard({ item, hidden, delayMs, nowMs, zone, state, mode, lang, copy, Follow, priority }: CoverCardProps) {
   const tone = toneLadder(item.hue);
   const pop = oklchCss(21, 0.02, item.hue);
   const href = `/anime/${item.id}`;
-  const badge = coverBadge(item, nowMs, state, mode, copy, lang);
+  const badge = coverBadge(item, nowMs, state, mode, copy, lang, zone);
   const isNew = badge?.kind === "new";
   const bangumi = bangumiScoreText(item.bangumi);
 

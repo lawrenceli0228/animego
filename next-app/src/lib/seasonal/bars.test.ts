@@ -161,3 +161,24 @@ describe("seasonBars", () => {
     expect(seasonBars(shows, "weekday", DEFAULT_STATE, NOW)).toHaveLength(7);
   });
 });
+
+describe("weekday bars on the reader's clock", () => {
+  // Beijing's Monday 00:30 is Sunday 09:30 in Los Angeles (PDT, -7).
+  const LOS_ANGELES = () => -7 * 60;
+  const AUCKLAND = () => 13 * 60; // NZDT
+  const lateNight = item({ id: 1, next: { at: Date.UTC(2026, 9, 18, 16, 30), ep: 3 } });
+
+  test("a late-night show sits under the weekday it airs where the reader is", () => {
+    expect(airWeekday(lateNight)).toBe(1);
+    expect(airWeekday(lateNight, LOS_ANGELES)).toBe(7);
+    const counts = weekdayBars([lateNight], DEFAULT_STATE, NOW, LOS_ANGELES).map((b) => b.count);
+    expect(counts).toEqual([0, 0, 0, 0, 0, 0, 1]);
+  });
+
+  test("today is the reader's today", () => {
+    // NOW is Friday 20:00 in Beijing and already Saturday 01:00 in Auckland.
+    expect(weekdayBars([lateNight], DEFAULT_STATE, NOW).find((b) => b.today)?.weekday).toBe(5);
+    expect(weekdayBars([lateNight], DEFAULT_STATE, NOW, AUCKLAND).find((b) => b.today)?.weekday).toBe(6);
+    expect(seasonBars([lateNight, lateNight], "weekday", DEFAULT_STATE, NOW, AUCKLAND).find((b) => b.kind === "weekday" && b.today)).toBeTruthy();
+  });
+});

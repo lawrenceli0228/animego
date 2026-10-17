@@ -84,7 +84,7 @@ function listKeyOf(state: BrowseState): string {
 export default function BrowseView({ items, initial, serverNowMs, season, year, clockYear, heading, Follow }: BrowseViewProps) {
   const { lang } = useLang();
   const copy = useBrowseCopy();
-  const nowMs = useSeasonClock(serverNowMs);
+  const { nowMs, zone } = useSeasonClock(serverNowMs);
   const layout = useLayout();
 
   const facets = useMemo(() => facetsOf(items), [items]);
@@ -145,8 +145,8 @@ export default function BrowseView({ items, initial, serverNowMs, season, year, 
   }, []);
 
   const view = effectiveView(state.view, layout);
-  const list = useMemo(() => browseItems(items, state, mode), [items, state, mode]);
-  const bars = useMemo(() => seasonBars(items, mode, state, nowMs), [items, mode, state, nowMs]);
+  const list = useMemo(() => browseItems(items, state, mode, zone), [items, state, mode, zone]);
+  const bars = useMemo(() => seasonBars(items, mode, state, nowMs, zone), [items, mode, state, nowMs, zone]);
   const years = useMemo(() => yearOptions(year, clockYear), [year, clockYear]);
   const phoneYears = useMemo(() => years.filter((y) => y === year || (y <= clockYear + 1 && y >= clockYear - PHONE_YEARS_BACK)), [years, year, clockYear]);
 
@@ -242,6 +242,7 @@ export default function BrowseView({ items, initial, serverNowMs, season, year, 
         state={state}
         mode={mode}
         nowMs={nowMs}
+        zone={zone}
         lang={lang}
         copy={copy}
         Follow={Follow}

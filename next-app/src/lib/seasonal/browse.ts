@@ -9,7 +9,7 @@
 
 import { HUE_FAMILIES, hueFamilyOf, type HueFamilyKey } from "@/lib/home/hueFamilies";
 import { airWeekday, hasWeeklySlot, monthKeyOf, type BarMode } from "./bars";
-import { minuteOfWeek } from "./clock";
+import { SITE_ZONE, minuteOfWeek, type ZoneOffset } from "./clock";
 import type { SeasonalItem } from "./model";
 import {
   DEFAULT_STATE,
@@ -130,7 +130,8 @@ export function hueOptionsOf(items: readonly SeasonalItem[]): HueOption[] {
 
 // ── Filtering ───────────────────────────────────────────────────────────────
 
-export function matchesState(item: SeasonalItem, state: BrowseState, mode: BarMode): boolean {
+/** Whether `item` passes every filter in `state`; a weekday is read on `zone`'s clock. */
+export function matchesState(item: SeasonalItem, state: BrowseState, mode: BarMode, zone: ZoneOffset = SITE_ZONE): boolean {
   const q = state.q.trim().toLowerCase();
   if (q && !item.haystack.includes(q)) return false;
   for (const g of state.genres) if (!item.genres.includes(g)) return false;
@@ -139,7 +140,7 @@ export function matchesState(item: SeasonalItem, state: BrowseState, mode: BarMo
   if (state.source && sourceGroupOf(item.source) !== state.source) return false;
   if (state.seq === "new" && item.sequel !== false) return false;
   if (state.seq === "sequel" && item.sequel !== true) return false;
-  if (state.wd && mode === "weekday" && airWeekday(item) !== state.wd) return false;
+  if (state.wd && mode === "weekday" && airWeekday(item, zone) !== state.wd) return false;
   if (state.mon && mode === "month" && monthKeyOf(item) !== state.mon) return false;
   if (state.hue && hueFamilyOf(item.hue) !== state.hue) return false;
   return true;
@@ -165,30 +166,48 @@ function asc(a: number | string | null, b: number | string | null): number {
 
 const byPopularity = (a: SeasonalItem, b: SeasonalItem) => desc(a.popularity, b.popularity);
 
-/** Where a show's weekly slot falls in the week (the same slots the weekday chart counts). */
-const slotMinute = (item: SeasonalItem) => (hasWeeklySlot(item) && item.next ? minuteOfWeek(item.next.at) : null);
+/** Where a show's weekly slot falls in the week on `zone`'s clock (the same slots the weekday chart counts). */
+const slotMinute = (item: SeasonalItem, zone: ZoneOffset) =>
+  hasWeeklySlot(item) && item.next ? minuteOfWeek(item.next.at, zone) : null;
 
-const COMPARE: Record<SortKey, (a: SeasonalItem, b: SeasonalItem) => number> = {
-  pop: byPopularity,
-  score: (a, b) => desc(a.score, b.score) || byPopularity(a, b),
-  fav: (a, b) => desc(a.favourites, b.favourites) || byPopularity(a, b),
-  next: (a, b) => asc(a.next?.at ?? null, b.next?.at ?? null) || byPopularity(a, b),
-  time: (a, b) => asc(slotMinute(a), slotMinute(b)) || byPopularity(a, b),
-  start: (a, b) => asc(a.start, b.start) || byPopularity(a, b),
-  title: (a, b) => a.titleRank - b.titleRank,
-};
+type Compare = (a: SeasonalItem, b: SeasonalItem) => number;
 
-/** A new array; ties fall back to the API's own order, so every sort is total. */
-export function sortItems(items: readonly SeasonalItem[], sort: SortKey): SeasonalItem[] {
-  const compare = COMPARE[sort] ?? COMPARE.pop;
+function compareFor(sort: SortKey, zone: ZoneOffset): Compare {
+  switch (sort) {
+    case "score":
+      return (a, b) => desc(a.score, b.score) || byPopularity(a, b);
+    case "fav":
+      return (a, b) => desc(a.favourites, b.favourites) || byPopularity(a, b);
+    case "next":
+      return (a, b) => asc(a.next?.at ?? null, b.next?.at ?? null) || byPopularity(a, b);
+    case "time":
+      return (a, b) => asc(slotMinute(a, zone), slotMinute(b, zone)) || byPopularity(a, b);
+    case "start":
+      return (a, b) => asc(a.start, b.start) || byPopularity(a, b);
+    case "title":
+      return (a, b) => a.titleRank - b.titleRank;
+    default:
+      return byPopularity;
+  }
+}
+
+/** A new array; ties fall back to the API's own order, so every sort is total. Air time is read on `zone`'s clock. */
+export function sortItems(items: readonly SeasonalItem[], sort: SortKey, zone: ZoneOffset = SITE_ZONE): SeasonalItem[] {
+  const compare = compareFor(sort, zone);
   return [...items].sort((a, b) => compare(a, b) || a.rank - b.rank);
 }
 
-/** The list the page shows for `state`. */
-export function browseItems(items: readonly SeasonalItem[], state: BrowseState, mode: BarMode): SeasonalItem[] {
+/** The list the page shows for `state`, on `zone`'s clock. */
+export function browseItems(
+  items: readonly SeasonalItem[],
+  state: BrowseState,
+  mode: BarMode,
+  zone: ZoneOffset = SITE_ZONE,
+): SeasonalItem[] {
   return sortItems(
-    items.filter((item) => matchesState(item, state, mode)),
+    items.filter((item) => matchesState(item, state, mode, zone)),
     state.sort,
+    zone,
   );
 }
 

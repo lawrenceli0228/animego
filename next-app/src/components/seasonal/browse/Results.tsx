@@ -14,6 +14,7 @@ import { fillTemplate } from "@/lib/home/time";
 import type { Lang } from "@/lib/i18n/lang";
 import type { BarMode } from "@/lib/seasonal/bars";
 import { batchSize, hiddenCount, staggerMs, visibleCount, type Layout } from "@/lib/seasonal/batch";
+import type { ZoneOffset } from "@/lib/seasonal/clock";
 import type { SeasonalItem } from "@/lib/seasonal/model";
 import type { BrowseState, ViewKey } from "@/lib/seasonal/state";
 import ChartCard from "./ChartCard";
@@ -47,6 +48,8 @@ interface ResultsProps {
   state: BrowseState;
   mode: BarMode;
   nowMs: number;
+  /** The clock the cover badges read their day and time on. */
+  zone: ZoneOffset;
   lang: Lang;
   copy: BrowseCopy;
   Follow: FollowSlot;
@@ -98,6 +101,7 @@ function List({
   state,
   mode,
   nowMs,
+  zone,
   lang,
   copy,
   Follow,
@@ -149,6 +153,7 @@ function List({
           hidden={i >= shown}
           delayMs={staggerMs(i, view, layout)}
           nowMs={nowMs}
+          zone={zone}
           state={state}
           mode={mode}
           lang={lang}

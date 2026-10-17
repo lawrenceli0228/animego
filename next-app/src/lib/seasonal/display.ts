@@ -16,7 +16,7 @@ import { fillTemplate, parseDayKey } from "@/lib/home/time";
 import { bangumiScoreText, scoreText } from "@/lib/home/viewModels";
 import type { Lang } from "@/lib/i18n/lang";
 import type { BarMode } from "./bars";
-import { DAY_MS, WEEK_MS, siteDayNumber, siteHhmm } from "./clock";
+import { DAY_MS, SITE_ZONE, WEEK_MS, siteDayNumber, siteHhmm, type ZoneOffset } from "./clock";
 import type { SeasonalItem } from "./model";
 import type { BrowseState } from "./state";
 
@@ -282,6 +282,7 @@ export function coverBadge(
   mode: BarMode,
   copy: CardCopy,
   lang: Lang,
+  zone: ZoneOffset = SITE_ZONE,
 ): CoverBadge | null {
   const next = item.next;
   if (next) {
@@ -293,10 +294,10 @@ export function coverBadge(
       // never "today".
       if (-until < DAY_MS) return { kind: "new", text: fillTemplate(copy.badgeEpOut, { ep: next.ep }) };
     } else if (until < DAY_MS) {
-      const today = siteDayNumber(next.at) === siteDayNumber(nowMs);
+      const today = siteDayNumber(next.at, zone) === siteDayNumber(nowMs, zone);
       return {
         kind: "soon",
-        text: fillTemplate(today ? copy.badgeToday : copy.badgeTomorrow, { time: siteHhmm(next.at) }),
+        text: fillTemplate(today ? copy.badgeToday : copy.badgeTomorrow, { time: siteHhmm(next.at, zone) }),
       };
     } else {
       // The previous episode is inferred a week before the next one; the
@@ -307,7 +308,7 @@ export function coverBadge(
       }
     }
   }
-  if (state.wd && mode === "weekday" && next) return { kind: "plain", text: siteHhmm(next.at) };
+  if (state.wd && mode === "weekday" && next) return { kind: "plain", text: siteHhmm(next.at, zone) };
   if (state.mon && mode === "month" && item.start) return { kind: "plain", text: dateLabel(item.start, lang) };
   return null;
 }

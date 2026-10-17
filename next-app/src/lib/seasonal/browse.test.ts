@@ -323,3 +323,26 @@ describe("the tag row", () => {
     expect(sheetFilterCount(DEFAULT_STATE)).toBe(0);
   });
 });
+
+describe("the weekday filter and the air-time sort on the reader's clock", () => {
+  const LOS_ANGELES = () => -7 * 60;
+  // a: Monday 00:30 in Beijing = Sunday 09:30 in Los Angeles.
+  // b: Sunday 20:00 in Beijing = Sunday 05:00 in Los Angeles.
+  const a = item({ id: 1, popularity: 10, next: { at: Date.UTC(2026, 9, 18, 16, 30), ep: 2 } });
+  const b = item({ id: 2, popularity: 5, next: { at: Date.UTC(2026, 9, 18, 12, 0), ep: 2 } });
+  const sunday: BrowseState = { ...DEFAULT_STATE, wd: 7, sort: "time" };
+
+  test("Sunday holds one show in Beijing and both in Los Angeles", () => {
+    expect(browseItems([a, b], sunday, "weekday").map((i) => i.id)).toEqual([2]);
+    expect(browseItems([a, b], sunday, "weekday", LOS_ANGELES).map((i) => i.id)).toEqual([2, 1]);
+    expect(matchesState(a, sunday, "weekday", LOS_ANGELES)).toBe(true);
+    expect(matchesState(a, sunday, "weekday")).toBe(false);
+  });
+
+  test("air time orders by the reader's week: Beijing's Monday slot comes before its Sunday one in Los Angeles' Sunday", () => {
+    // In Beijing, b (Sunday 20:00) is late in the week and a (Monday 00:30) first.
+    expect(sortItems([a, b], "time").map((i) => i.id)).toEqual([1, 2]);
+    // In Los Angeles both are Sunday: b at 05:00, a at 09:30.
+    expect(sortItems([a, b], "time", LOS_ANGELES).map((i) => i.id)).toEqual([2, 1]);
+  });
+});

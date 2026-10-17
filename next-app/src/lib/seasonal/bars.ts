@@ -4,8 +4,9 @@
 //
 //   weekday  while the season is airing — at least WEEKDAY_MODE_MIN airing
 //            shows have a next episode scheduled — seven bars, Monday to
-//            Sunday, by the Beijing weekday that episode airs. Today's bar is
-//            marked.
+//            Sunday, by the weekday that episode airs on the page's clock
+//            (Beijing until hydration, the reader's zone after; see clock.ts).
+//            Today's bar is marked.
 //   month    otherwise (a past season, or one that has not started): one bar
 //            per premiere month, plus 待定 for shows with no date.
 //
@@ -15,7 +16,7 @@
 //
 // Pure: no React, no DOM.
 
-import { siteTime } from "./clock";
+import { SITE_ZONE, siteTime, type ZoneOffset } from "./clock";
 import type { SeasonalItem } from "./model";
 import { MONTH_TBD, type BrowseState } from "./state";
 
@@ -79,9 +80,9 @@ export function barModeOf(items: readonly SeasonalItem[]): BarMode {
   return slotted >= WEEKDAY_MODE_MIN ? "weekday" : "month";
 }
 
-/** The Beijing weekday of a show's weekly slot, 1–7, or 0 when it has none. */
-export function airWeekday(item: SeasonalItem): number {
-  return hasWeeklySlot(item) && item.next ? siteTime(item.next.at).weekday : 0;
+/** The weekday of a show's weekly slot on `zone`'s clock, 1–7, or 0 when it has none. */
+export function airWeekday(item: SeasonalItem, zone: ZoneOffset = SITE_ZONE): number {
+  return hasWeeklySlot(item) && item.next ? siteTime(item.next.at, zone).weekday : 0;
 }
 
 /** The premiere-month bucket a show falls in: `YYYY-MM`, or MONTH_TBD. */
@@ -93,14 +94,19 @@ function scaled(count: number, max: number): number {
   return Math.max(BAR_MIN_PX, Math.round((BAR_MAX_PX * count) / Math.max(1, max)));
 }
 
-export function weekdayBars(items: readonly SeasonalItem[], state: BrowseState, nowMs: number): WeekdayBar[] {
+export function weekdayBars(
+  items: readonly SeasonalItem[],
+  state: BrowseState,
+  nowMs: number,
+  zone: ZoneOffset = SITE_ZONE,
+): WeekdayBar[] {
   const counts = [0, 0, 0, 0, 0, 0, 0];
   for (const item of items) {
-    const wd = airWeekday(item);
+    const wd = airWeekday(item, zone);
     if (wd) counts[wd - 1] += 1;
   }
   const max = Math.max(1, ...counts);
-  const today = siteTime(nowMs).weekday;
+  const today = siteTime(nowMs, zone).weekday;
   return counts.map((count, i) => ({
     kind: "weekday",
     weekday: i + 1,
@@ -151,7 +157,8 @@ export function seasonBars(
   mode: BarMode,
   state: BrowseState,
   nowMs: number,
+  zone: ZoneOffset = SITE_ZONE,
 ): Bar[] {
-  const bars: Bar[] = mode === "weekday" ? weekdayBars(items, state, nowMs) : monthBars(items, state);
+  const bars: Bar[] = mode === "weekday" ? weekdayBars(items, state, nowMs, zone) : monthBars(items, state);
   return bars.length > 1 ? bars : [];
 }

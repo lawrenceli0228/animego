@@ -8,6 +8,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { Layout } from "@/lib/seasonal/batch";
+import { READER_ZONE, SITE_ZONE, type ZoneOffset } from "@/lib/seasonal/clock";
 
 // ── The clock ───────────────────────────────────────────────────────────────
 
@@ -33,13 +34,23 @@ function subscribeTick(onChange: () => void): () => void {
 const clientTick = () => Math.floor(Date.now() / TICK_MS);
 const serverTick = () => 0;
 
+export interface SeasonClock {
+  /** "Now", in epoch ms. */
+  nowMs: number;
+  /** Which wall clock weekdays, dates and HH:MM are read on (lib/seasonal/clock.ts). */
+  zone: ZoneOffset;
+}
+
+const SERVER_CLOCK_ZONE = SITE_ZONE;
+
 /**
- * "Now", in epoch ms: the server's render time through hydration, then the
- * browser's clock, re-read every 30 seconds.
+ * The server's render time on the site's clock through hydration, then the
+ * browser's time in the reader's own zone, re-read every 30 seconds — the
+ * same switch the home page and /calendar make.
  */
-export function useSeasonClock(serverNowMs: number): number {
+export function useSeasonClock(serverNowMs: number): SeasonClock {
   const tick = useSyncExternalStore(subscribeTick, clientTick, serverTick);
-  return tick === 0 ? serverNowMs : tick * TICK_MS;
+  return tick === 0 ? { nowMs: serverNowMs, zone: SERVER_CLOCK_ZONE } : { nowMs: tick * TICK_MS, zone: READER_ZONE };
 }
 
 // ── The layout ──────────────────────────────────────────────────────────────

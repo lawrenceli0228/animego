@@ -141,7 +141,11 @@ const visibleCards = (page: Page) => page.locator("[data-anime-card]:visible");
 const countText = (page: Page) => page.locator("[data-count]");
 
 test.describe("desktop", () => {
-  test.use({ viewport: { width: 1440, height: 900 } });
+  // On a UTC+8 browser the page's clock is Beijing's before and after
+  // hydration alike, so the weekday and badge cases below can be worked out
+  // on the Beijing clock wherever the suite runs. A reader elsewhere has
+  // their own describe block further down.
+  test.use({ viewport: { width: 1440, height: 900 }, timezoneId: "Asia/Shanghai" });
 
   test("every show is a link in the server HTML; past the first batch they wait hidden", async ({ page }) => {
     const errors = collectConsoleErrors(page);
@@ -407,6 +411,48 @@ test.describe("desktop", () => {
   });
 });
 
+test.describe("a reader outside UTC+8", () => {
+  // After hydration the page reads the reader's own zone, as the home page and
+  // /calendar do: a late-night Beijing slot sits under the weekday it airs
+  // where the reader is, and "今天 / 明天" is the reader's today.
+  const ZONE = "America/Los_Angeles";
+  test.use({ viewport: { width: 1440, height: 900 }, timezoneId: ZONE });
+
+  const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const local = (ms: number) => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: ZONE,
+      weekday: "short",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(ms));
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    return {
+      weekday: WEEKDAYS.indexOf(get("weekday")) + 1,
+      day: `${get("year")}-${get("month")}-${get("day")}`,
+      hhmm: `${get("hour")}:${get("minute")}`,
+    };
+  };
+
+  test("the weekday bars, today and the cover badges follow the reader's clock", async ({ page }) => {
+    await open(page, WEEK_URL);
+    for (let wd = 1; wd <= 7; wd += 1) {
+      const n = count((s) => s.at !== null && local(s.at).weekday === wd);
+      await expect(page.locator(`[data-bar="wd-${wd}"] em`)).toHaveText(String(n));
+    }
+    await expect(page.locator(`[data-bar="wd-${local(Date.now()).weekday}"]`)).toHaveAttribute("data-today", "true");
+    await expect(page.locator("[data-bar][data-today]")).toHaveCount(1);
+
+    const soon = local(show(0).at as number);
+    const label = `${soon.day === local(Date.now()).day ? "今天" : "明天"} ${soon.hhmm}`;
+    await expect(page.locator(`[data-anime-card][data-id="${show(0).anilistId}"] [data-badge="soon"]`)).toHaveText(label);
+  });
+});
+
 test.describe("following from a card", () => {
   test.use({ viewport: { width: 1440, height: 900 }, storageState: { cookies: [], origins: [] } });
 
@@ -440,7 +486,7 @@ test.describe("following from a card", () => {
 });
 
 test.describe("phone", () => {
-  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: "Asia/Shanghai" });
 
   test("three covers a row, 21 at a time, each with its airing line", async ({ page }) => {
     await open(page, WEEK_URL);
