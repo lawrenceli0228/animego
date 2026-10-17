@@ -524,17 +524,7 @@ const zh = {
   },
   seasonPage: {
     title: '季度番剧',
-    noAnime: '暂无番剧',
     metaDescSuffix: '评分、集数、剧情简介一站搞定。',
-    navAria: '季度切换',
-    prevSeason: '← 上一季',
-    prevSeasonAria: '上一季',
-    nextSeason: '下一季 →',
-    nextSeasonAria: '下一季',
-    switchYear: '切换年份',
-    paginationAria: '分页',
-    prevPage: '上一页',
-    nextPage: '下一页',
     // The seasonal browse page (/seasonal/{season}/{year}). Its controls are
     // client components and read the -spa twin; one key per visible string,
     // in both sets so the two stay equal.

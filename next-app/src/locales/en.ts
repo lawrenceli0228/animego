@@ -469,17 +469,7 @@ const en = {
   },
   seasonPage: {
     title: 'Seasonal Anime',
-    noAnime: 'No anime found',
     metaDescSuffix: 'scores, episodes, and synopses in one place.',
-    navAria: 'Season navigation',
-    prevSeason: '← Prev',
-    prevSeasonAria: 'Previous season',
-    nextSeason: 'Next →',
-    nextSeasonAria: 'Next season',
-    switchYear: 'Switch year',
-    paginationAria: 'Pagination',
-    prevPage: 'Prev',
-    nextPage: 'Next',
     // The seasonal browse page (/seasonal/{season}/{year}). Its controls are
     // client components and read the -spa twin; one key per visible string,
     // in both sets so the two stay equal.

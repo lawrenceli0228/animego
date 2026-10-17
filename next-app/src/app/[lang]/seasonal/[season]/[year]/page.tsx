@@ -1,18 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import type { CSSProperties } from "react";
-import { Suspense } from "react";
-import SeasonNav from "@/components/seasonal/SeasonNav";
-import SeasonalFilterChips from "@/components/seasonal/SeasonalFilterChips";
-import AnimeCard from "@/components/anime/AnimeCard";
-import { SubscriptionSetProvider } from "@/components/anime/SubscriptionSetProvider";
-import SeasonalShowMore from "@/components/seasonal/SeasonalShowMore";
+import SeasonalBrowse from "@/components/seasonal/browse/SeasonalBrowse";
 import { apiGetPaged } from "@/lib/api";
-import { FILTER_GENRES, type FilterGenre } from "@/lib/contentLabels";
 import { resolveLocale } from "@/lib/i18n/route";
-import { pickTitle } from "@/lib/formatters";
 import { buildAlternates } from "@/lib/seo/alternates";
 import { OG_LOCALE, alternateOgLocales, type Lang } from "@/lib/i18n/lang";
+import { siteTime } from "@/lib/seasonal/clock";
+import { toSeasonalItems } from "@/lib/seasonal/model";
+import { parseBrowseState, queryFromRecord } from "@/lib/seasonal/state";
 import type { SeasonalAnime } from "@/lib/types";
 
 export const revalidate = 300;
@@ -45,12 +40,10 @@ const SEASON_HEADING: Record<Lang, (season: SeasonKey, year: number) => string> 
   "zh-Hant": (season, year) => `${year}年 ${SEASON_CHAR[season]}季新番`,
 };
 
+// The whole season in one request: the endpoint caps a page at 200 and a
+// season runs to about a hundred, so every show is in the first page and the
+// page can filter, sort and reveal without asking again.
 const SEASONAL_PAGE_SIZE = 200;
-const INITIAL_COUNT = 20;
-const LOAD_MORE = 20;
-
-const FORMATS = ["TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA"] as const;
-type Format = (typeof FORMATS)[number];
 
 const EMPTY_ITEMS: SeasonalAnime[] = [];
 
@@ -67,48 +60,14 @@ function headingFor(season: SeasonKey, year: number, lang: Lang): string {
   return SEASON_HEADING[lang](season, year);
 }
 
-function getString(v: string | string[] | undefined): string {
-  if (!v) return "";
-  return Array.isArray(v) ? v[0] : v;
-}
-
-function applyFilters(
-  items: SeasonalAnime[],
-  genre: string,
-  format: string,
-  status: string,
-  sortBy: string,
-  lang: Lang,
-): SeasonalAnime[] {
-  let list = items;
-  // `genre` is the raw AniList enum in the query string (the chips only
-  // translate their label), so the whitelist check stays an English compare.
-  if (genre && FILTER_GENRES.includes(genre as FilterGenre)) {
-    list = list.filter((a) => a.genres?.includes(genre));
-  }
-  if (format && FORMATS.includes(format as Format)) {
-    list = list.filter((a) => a.format === format);
-  }
-  if (status) {
-    list = list.filter((a) => a.status === status);
-  }
-
-  const sorted = [...list];
-  switch (sortBy) {
-    case "title":
-      sorted.sort((a, b) => pickTitle(a, lang).localeCompare(pickTitle(b, lang)));
-      break;
-    case "format":
-      sorted.sort(
-        (a, b) =>
-          FORMATS.indexOf(a.format as Format) - FORMATS.indexOf(b.format as Format) ||
-          (b.averageScore ?? 0) - (a.averageScore ?? 0),
-      );
-      break;
-    default:
-      break;
-  }
-  return sorted;
+/**
+ * This request's render time — a helper rather than Date.now() in the
+ * component body, which react-hooks/purity rejects (same as the calendar
+ * page). The page's countdowns start from it, so the first paint and
+ * hydration agree; the browser's clock takes over after.
+ */
+function requestTime(): number {
+  return Date.now();
 }
 
 export async function generateMetadata({
@@ -144,39 +103,13 @@ export async function generateMetadata({
   };
 }
 
-const containerStyle: CSSProperties = {
-  paddingTop: 40,
-  paddingBottom: 40,
-};
-
-const headingStyle: CSSProperties = {
-  fontSize: "clamp(22px,3vw,34px)",
-  marginBottom: 24,
-  color: "#ffffff",
-  fontFamily: "var(--font-display)",
-};
-
-const emptyStyle: CSSProperties = {
-  textAlign: "center",
-  padding: "60px 0",
-  color: "rgba(235,235,245,0.30)",
-  fontFamily: "var(--font-display)",
-};
-
 export default async function SeasonalPage({ params, searchParams }: SeasonalPageProps) {
   const { season, year } = await params;
   const parsed = parseSeasonYear(season, year);
   if (!parsed) notFound();
 
-  const sp = await searchParams;
-  const genre = getString(sp.genre);
-  const format = getString(sp.format);
-  const status = getString(sp.status);
-  const sortBy = getString(sp.sort) || "score";
-  const visibleCount = Math.max(INITIAL_COUNT, Number(getString(sp.show)) || INITIAL_COUNT);
-
   const apiSeason = parsed.season.toUpperCase();
-  const [{ dict, lang }, items] = await Promise.all([
+  const [{ lang }, rows, query] = await Promise.all([
     resolveLocale(params),
     apiGetPaged<SeasonalAnime>(
       `/api/anime/seasonal?season=${apiSeason}&year=${parsed.year}&page=1&perPage=${SEASONAL_PAGE_SIZE}`,
@@ -184,55 +117,22 @@ export default async function SeasonalPage({ params, searchParams }: SeasonalPag
     )
       .then((env) => env.data ?? EMPTY_ITEMS)
       .catch(() => EMPTY_ITEMS),
+    searchParams,
   ]);
+  const nowMs = requestTime();
 
-  const heading = headingFor(parsed.season, parsed.year, lang);
-  const filtered = applyFilters(items, genre, format, status, sortBy, lang);
-  const displayed = filtered.slice(0, visibleCount);
-  const hasMore = visibleCount < filtered.length;
-  const emptyLabel = dict.seasonPage.noAnime;
-
+  // The heading and everything under it are one client tree: the filters, the sort,
+  // the views and "show more" all work on this list in the browser, and every
+  // show in it is still a real link in the HTML this request returns.
   return (
-    <main className="container" style={containerStyle}>
-      <h1 style={headingStyle}>{heading}</h1>
-
-      <SeasonNav season={parsed.season} year={parsed.year} dict={dict} lang={lang} />
-
-      <Suspense>
-        {/* No `lang` prop, still: the chips resolve their language client-side
-            via useLang(). This used to be a workaround for getLang() being
-            pinned to "zh"; now that the server resolves the route locale it is
-            a deliberate difference. useLang() follows the `lang` COOKIE — the
-            visitor's stated preference — which the LanguageProvider reconciles
-            after hydration for every client leaf on the site. Handing these
-            chips the route locale instead would make them the one control that
-            ignores that preference. Reconciling URL locale against cookie
-            preference is its own decision; do not settle it here. */}
-        <SeasonalFilterChips filteredCount={filtered.length} />
-      </Suspense>
-
-      {displayed.length === 0 ? (
-        <div style={emptyStyle}>{emptyLabel}</div>
-      ) : (
-        // Client provider around server-rendered children: the cards stay RSC
-        // output and travel through the boundary as an already-rendered
-        // `children` node, so this page does NOT become a Client Component.
-        // Scope is the grid only — one subscription-set fetch shared by every
-        // quick-add button, instead of one probe per card.
-        <SubscriptionSetProvider>
-          <div className="anime-grid-5col">
-            {displayed.map((a, i) => (
-              <AnimeCard key={a.anilistId} anime={a} lang={lang} prefetch={false} priority={i === 0} />
-            ))}
-          </div>
-        </SubscriptionSetProvider>
-      )}
-
-      {hasMore && (
-        <Suspense>
-          <SeasonalShowMore lang={lang} currentCount={visibleCount} step={LOAD_MORE} />
-        </Suspense>
-      )}
-    </main>
+    <SeasonalBrowse
+      items={toSeasonalItems(rows, lang)}
+      initial={parseBrowseState(queryFromRecord(query))}
+      serverNowMs={nowMs}
+      season={parsed.season}
+      year={parsed.year}
+      clockYear={siteTime(nowMs).year}
+      heading={headingFor(parsed.season, parsed.year, lang)}
+    />
   );
 }
