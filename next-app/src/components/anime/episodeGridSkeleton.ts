@@ -106,3 +106,23 @@ export function resolveEpisodeSkeleton(
     ? { kind: "inferred", total: inferred }
     : { kind: "pending" };
 }
+
+/**
+ * The total the grid draws, for the other readouts on the page — or null when
+ * the grid itself is in its pending state.
+ *
+ * The status control's "watched N / total" reads this rather than AniList's
+ * `episodes` so the two readouts on one page cannot disagree. On an airing
+ * show AniList has no count yet, the grid draws its cells from the inferred
+ * one and says "2 / 12", and the control used to hide its readout as unknown
+ * right above it. Display only, like the grid: an inferred count must never
+ * reach schema.org.
+ */
+export function gridTotal(
+  episodes: number | null,
+  episodesBgm: number | null,
+  episodeTitles: ReadonlyArray<Pick<DetailEpisodeTitle, "episode">>,
+): number | null {
+  const skeleton = resolveEpisodeSkeleton(episodes, episodesBgm, episodeTitles);
+  return skeleton.kind === "pending" ? null : skeleton.total;
+}

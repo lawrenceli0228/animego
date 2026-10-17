@@ -86,7 +86,11 @@ interface Labels {
 
 interface SubscriptionButtonProps {
   anilistId: number;
-  /** Total episodes, for the "watched N / total" readout. Null when unknown. */
+  /**
+   * Total episodes for the "watched N / total" readout: the same count the
+   * episode grid draws (`gridTotal`), so an airing show with no AniList count
+   * still shows one. Null when the grid has nothing to draw either.
+   */
   episodes: number | null;
   labels: Labels;
 }
@@ -789,8 +793,8 @@ export default function SubscriptionButton({
         {/* Read-only. The count comes from EpisodesGrid, which owns the
             watched set; there is no control here to change it, which is the
             distinction that matters — see this file's header on why the old
-            stepper was removed. Hidden when the total is unknown, because
-            "7 / ?" says less than the episode list already does. */}
+            stepper was removed. Hidden only when the grid has no total
+            either, because "7 / ?" says less than the episode list does. */}
         {shownWatched !== null && episodes && episodes > 0 ? (
           <>
             <span style={statusSepStyle} aria-hidden="true" />

@@ -15,6 +15,7 @@
 
 import type { ReactNode } from "react";
 import DetailActions from "@/components/anime/DetailActions";
+import { gridTotal } from "@/components/anime/episodeGridSkeleton";
 import HeroAccent from "@/components/anime/HeroAccent";
 import type { TrailerPreviewLabels } from "@/components/anime/TrailerPreview";
 import type { DetailTabCounts, DetailTabKey } from "@/lib/detail/tabs";
@@ -84,6 +85,11 @@ export default function DetailShell({
             <DetailActions
               anilistId={detail.anilistId}
               episodes={detail.episodes}
+              progressTotal={gridTotal(
+                detail.episodes,
+                detail.episodesBgm ?? null,
+                detail.episodeTitles ?? [],
+              )}
               titleRomaji={detail.titleRomaji}
               titleEnglish={detail.titleEnglish}
               titleChinese={detail.titleChinese}

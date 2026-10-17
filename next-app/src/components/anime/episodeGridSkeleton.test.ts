@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveEpisodeSkeleton } from "./episodeGridSkeleton";
+import { gridTotal, resolveEpisodeSkeleton } from "./episodeGridSkeleton";
 
 // The grid only ever reads `episode` off a title row, so the fixtures carry
 // only that. `nameCn` / `name` are the cell's caption, not its existence.
@@ -274,5 +274,28 @@ describe("resolveEpisodeSkeleton — the section never disappears", () => {
     expect(resolveEpisodeSkeleton(null, 5, []).kind).not.toBe("authoritative");
     expect(resolveEpisodeSkeleton(null, 5, titles(5)).kind).not.toBe("authoritative");
     expect(resolveEpisodeSkeleton(5, null, titles(5)).kind).toBe("authoritative");
+  });
+});
+
+describe("gridTotal — the count other readouts on the page share with the grid", () => {
+  test("AniList's count when it has one", () => {
+    expect(gridTotal(24, 12, [])).toBe(24);
+  });
+
+  // Koori no Jouheki S2, airing: AniList null, Bangumi 12, six titles. The
+  // grid draws twelve cells and says "2 / 12"; the status control used to
+  // read AniList alone and hide its readout as unknown right above it.
+  test("the inferred count when AniList has none", () => {
+    const titles = [1, 2, 3, 4, 5, 6].map((episode) => ({ episode }));
+    expect(gridTotal(null, 12, titles)).toBe(12);
+  });
+
+  test("the highest titled episode when that is all there is", () => {
+    expect(gridTotal(null, null, [{ episode: 1 }, { episode: 8 }])).toBe(8);
+  });
+
+  test("null when the grid itself has nothing to draw", () => {
+    expect(gridTotal(null, null, [])).toBeNull();
+    expect(gridTotal(0, 0, [])).toBeNull();
   });
 });
