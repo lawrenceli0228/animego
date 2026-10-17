@@ -100,8 +100,8 @@ const WEEK: WeekShow[] = Array.from({ length: WEEK_COUNT }, (_, i) => {
   };
 });
 
-/** Premiere months: four in July, three in August, one in September, two without a date. */
-const MONTH_STARTS = ["2099-07-04", "2099-07-11", "2099-07-18", "2099-07-25", "2099-08-01", "2099-08-08", "2099-08-15", "2099-09-02", null, null];
+/** Premiere months: four in October, three in November, one in December, two without a date. */
+const MONTH_STARTS = ["2099-10-04", "2099-10-11", "2099-10-18", "2099-10-25", "2099-11-01", "2099-11-08", "2099-11-15", "2099-12-02", null, null];
 const MONTH: SeedSeasonRow[] = MONTH_STARTS.map((start, i) => ({
   anilistId: MONTH_BASE + i,
   season: "FALL",
@@ -324,17 +324,17 @@ test.describe("desktop", () => {
     const bars = page.locator('[data-bars][data-mode="month"]');
     await expect(bars).toBeVisible();
     await expect(bars.locator("[data-bar]")).toHaveCount(4);
-    await expect(page.locator('[data-bar="mon-2099-07"] em')).toHaveText("4");
-    await expect(page.locator('[data-bar="mon-2099-08"] em')).toHaveText("3");
-    await expect(page.locator('[data-bar="mon-2099-09"] em')).toHaveText("1");
+    await expect(page.locator('[data-bar="mon-2099-10"] em')).toHaveText("4");
+    await expect(page.locator('[data-bar="mon-2099-11"] em')).toHaveText("3");
+    await expect(page.locator('[data-bar="mon-2099-12"] em')).toHaveText("1");
     await expect(page.locator('[data-bar="mon-tbd"] em')).toHaveText("2");
 
-    await page.locator('[data-bar="mon-2099-08"]').click();
+    await page.locator('[data-bar="mon-2099-11"]').click();
     await expect(countText(page)).toHaveText("3 部");
-    await expect(page).toHaveURL(/mon=2099-08/);
+    await expect(page).toHaveURL(/mon=2099-11/);
     await expect(page).toHaveURL(/sort=start/);
-    await expect(page.locator('[data-badge="plain"]')).toHaveText(["8 月 1 日", "8 月 8 日", "8 月 15 日"]);
-    await expect(page.locator('[data-tag="mon"]')).toHaveText("8 月开播");
+    await expect(page.locator('[data-badge="plain"]')).toHaveText(["11 月 1 日", "11 月 8 日", "11 月 15 日"]);
+    await expect(page.locator('[data-tag="mon"]')).toHaveText("11 月开播");
   });
 
   test("a hue dot filters to its family and tints the page", async ({ page }) => {
@@ -385,6 +385,69 @@ test.describe("desktop", () => {
     await expect(page.locator('[data-menu-panel="year"] a[href="/seasonal/spring/2025"]')).toHaveCount(1);
   });
 
+  test("arriving by a client navigation reads the new address, not the page being left", async ({ page }) => {
+    // From a page with its own query, the navbar's season link.
+    await page.goto(`/search?q=${encodeURIComponent("季测")}`);
+    await waitForHydration(page, "body");
+    await page.locator('nav a[href^="/seasonal/"]').first().click();
+    await page.waitForURL(/\/seasonal\/(winter|spring|summer|fall)\/\d{4}/);
+    await waitForHydration(page, "[data-seasonal-browse]");
+    await expect(page.locator('[data-search="desktop"]')).toHaveValue("");
+    await expect(page).not.toHaveURL(/[?&]q=/);
+
+    // From a month-filtered season, a year link (it drops the month and the sort it implied).
+    // (The year menu runs from 2000 to next year, plus the year on screen.)
+    await open(page, `${MONTH_URL}?mon=2099-10&sort=start`);
+    await page.locator('[data-field="year"] > button').click();
+    await page.locator('[data-menu-panel="year"] a[href*="/seasonal/fall/2020"]').click();
+    await page.waitForURL(/\/seasonal\/fall\/2020/);
+    await waitForHydration(page, "[data-seasonal-browse]");
+    await expect(page).not.toHaveURL(/mon=|sort=/);
+  });
+
+  test("the navbar's link to this season clears the filters with the URL", async ({ page }) => {
+    // The navbar links the current season; open it filtered, then follow that link.
+    await page.goto("/");
+    const href = await page.locator('nav a[href^="/seasonal/"]').first().getAttribute("href");
+    expect(href).toMatch(/^\/seasonal\/(winter|spring|summer|fall)\/\d{4}$/);
+    await open(page, `${href}?format=TV`);
+    await expect(page.locator('[data-field="format"] > button')).toHaveAttribute("data-set", "true");
+    await page.locator('nav a[href^="/seasonal/"]').first().click();
+    await page.waitForURL((url) => url.pathname === href && !url.search.includes("format="));
+    await waitForHydration(page, "[data-seasonal-browse]");
+    await expect(page.locator('[data-field="format"] > button')).not.toHaveAttribute("data-set", "true");
+  });
+
+  test("Back from a show reopens the batches that were open", async ({ page }) => {
+    await open(page, WEEK_URL);
+    await page.locator("[data-load-more]").evaluate((el) => (el as HTMLButtonElement).click());
+    await expect(visibleCards(page)).toHaveCount(WEEK_COUNT);
+    await visibleCards(page).nth(40).locator("a").last().click();
+    await page.waitForURL(/\/anime\/\d+/);
+    await page.goBack();
+    await page.waitForURL(/\/seasonal\/spring\/2099/);
+    await waitForHydration(page, "[data-seasonal-browse]");
+    await expect(visibleCards(page)).toHaveCount(WEEK_COUNT);
+  });
+
+  test("Escape closes a menu even when focus is not inside it", async ({ page }) => {
+    // Safari does not focus a clicked button; reproduce that by blurring.
+    await open(page, WEEK_URL);
+    await page.locator('[data-field="genre"] > button').click();
+    await expect(page.locator('[data-field="genre"] [role="listbox"]')).toBeVisible();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("Escape");
+    await expect(page.locator('[data-field="genre"] [role="listbox"]')).toHaveCount(0);
+    await expect(page.locator('[data-field="genre"] > button')).toBeFocused();
+  });
+
+  test("query values that name Object.prototype members still answer 200", async ({ request }) => {
+    for (const q of ["sort=constructor", "sort=__proto__", "sort=toString", "view=constructor", "hue=__proto__"]) {
+      const res = await request.get(`${WEEK_URL}?${q}`);
+      expect(res.status(), q).toBe(200);
+    }
+  });
+
   test("another season loads behind the skeleton", async ({ page }) => {
     await open(page, WEEK_URL);
     // Hold the route change long enough to see what stands in for it.
@@ -392,7 +455,7 @@ test.describe("desktop", () => {
       await new Promise((r) => setTimeout(r, 1_500));
       await route.continue();
     });
-    await page.locator('[data-field="season"] button[aria-haspopup]').click();
+    await page.locator('[data-field="season"] > button').click();
     await page.locator('[data-menu-panel="season"] a[href^="/seasonal/fall/2099"]').click();
     await expect(page.locator("[data-skeleton]")).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${MONTH_URL}$`));
@@ -492,7 +555,9 @@ test.describe("phone", () => {
     await open(page, WEEK_URL);
     await expect(page.locator("[data-seasonal-browse]")).toHaveAttribute("data-layout", "phone");
     await expect(visibleCards(page)).toHaveCount(21);
-    const tops = await visibleCards(page).evaluateAll((els) => els.slice(0, 4).map((el) => Math.round(el.getBoundingClientRect().top)));
+    // offsetTop, not the bounding box: the cards scale in on arrival, and a
+    // box measured mid-animation is not where the card sits.
+    const tops = await visibleCards(page).evaluateAll((els) => els.slice(0, 4).map((el) => (el as HTMLElement).offsetTop));
     expect(new Set(tops.slice(0, 3)).size).toBe(1);
     expect(tops[3]).toBeGreaterThan(tops[0] as number);
     await expect(page.locator('[data-filter-bar]')).toBeHidden();
