@@ -116,6 +116,7 @@ function List({
             lang={lang}
             copy={copy}
             Follow={Follow}
+            priority={i === 0}
           />
         ))}
       </div>

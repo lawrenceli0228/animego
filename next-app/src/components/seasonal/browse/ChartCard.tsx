@@ -28,9 +28,11 @@ interface ChartCardProps {
   lang: Lang;
   copy: BrowseCopy;
   Follow: FollowSlot;
+  /** The first chart card's cover is the view's largest paint; load it at once. */
+  priority: boolean;
 }
 
-function ChartCard({ item, hidden, delayMs, nowMs, lang, copy, Follow }: ChartCardProps) {
+function ChartCard({ item, hidden, delayMs, nowMs, lang, copy, Follow, priority }: ChartCardProps) {
   const tone = toneLadder(item.hue);
   const cd = countdown(item, nowMs, copy, lang);
   const rootStyle: CSSProperties = {
@@ -42,7 +44,7 @@ function ChartCard({ item, hidden, delayMs, nowMs, lang, copy, Follow }: ChartCa
   return (
     <div className={chart.chart} style={rootStyle} hidden={hidden} data-anime-card data-id={item.id}>
       <Link href={`/anime/${item.id}`} prefetch={false} className={chart.chCover} style={{ background: tone.fill }}>
-        <FadeImage src={item.cover} alt="" width={190} height={272} className={chart.chImg} />
+        <FadeImage src={item.cover} alt="" width={190} height={272} className={chart.chImg} priority={priority} />
         <div className={chart.chOverlay}>
           <div className={chart.chTitle}>{item.title}</div>
           {item.studio ? (
