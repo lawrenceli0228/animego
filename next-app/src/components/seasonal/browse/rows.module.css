@@ -1,0 +1,159 @@
+/* The seasonal page's table rows: a small cover, the title and its pills,
+ * then score, format and status columns, each with a second line. The pills
+ * and the score are cards.module.css's classes on their own elements.
+ *
+ * Every @media block is at the end of the file. */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rows > [hidden] {
+  display: none;
+}
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 150px 140px 190px;
+  align-items: center;
+  column-gap: 22px;
+  min-height: 84px;
+  padding: 10px 22px 10px 10px;
+  border-radius: 8px;
+  background: #0e0e10;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: cardInSoft 0.3s linear both;
+  transition: transform 0.25s var(--ease);
+}
+
+.row::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.row:hover {
+  transform: translateX(4px);
+}
+
+.row:hover::before {
+  opacity: 0.09;
+}
+
+.row > * {
+  position: relative;
+}
+
+.rowCover {
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.rowImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rowMain {
+  min-width: 0;
+  padding-left: 6px;
+}
+
+.rowTitle {
+  display: block;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: rgba(235, 235, 245, 0.9);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: color 0.2s;
+}
+
+.row:hover .rowTitle {
+  color: inherit;
+}
+
+.rowTitle:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.rowPills {
+  margin-top: 9px;
+}
+
+.col {
+  min-width: 0;
+}
+
+.colMain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: rgba(235, 235, 245, 0.88);
+  white-space: nowrap;
+}
+
+.colSub {
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--t4);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@keyframes cardInSoft {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .row {
+    grid-template-columns: 48px minmax(0, 1fr) 110px 110px 150px;
+    column-gap: 16px;
+    padding-right: 16px;
+  }
+}
+
+/* A phone never shows the table; between it and the tablet the format column goes. */
+@media (min-width: 601px) and (max-width: 767px) {
+  .row {
+    grid-template-columns: 48px minmax(0, 1fr) 96px 120px;
+  }
+
+  .row > [data-col="format"] {
+    display: none;
+  }
+}

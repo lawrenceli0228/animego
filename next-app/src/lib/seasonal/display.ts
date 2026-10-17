@@ -342,7 +342,11 @@ export function formatSubLine(item: SeasonalItem, copy: CardCopy): string {
   return item.episodes ? eps(item.episodes, copy.epCount, copy.epCountOne) : copy.epsTbd;
 }
 
-/** The table's status column, second line: when a finished show aired, otherwise the airing line. */
+/**
+ * The table's status column, second line: when a finished show aired,
+ * otherwise the airing line — or nothing, when that line would only repeat
+ * the status above it (an airing show with no episode on the schedule).
+ */
 export function statusSubLine(
   item: SeasonalItem,
   nowMs: number,
@@ -350,7 +354,9 @@ export function statusSubLine(
   lang: Lang,
   seasonYear: string,
 ): string {
-  return item.status === "FINISHED" ? seasonYear : airingText(item, nowMs, copy, lang);
+  if (item.status === "FINISHED") return seasonYear;
+  const line = airingText(item, nowMs, copy, lang);
+  return item.status && line === statusLabel(item.status, lang) ? "" : line;
 }
 
 /** Up to `max` genre labels. */

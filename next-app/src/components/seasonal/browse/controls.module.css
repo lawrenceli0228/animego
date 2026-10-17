@@ -1,0 +1,491 @@
+/* The seasonal page's controls: the desktop filter bar and its menus (the
+ * sort menu in the tag row included), and the phone's search row with the
+ * button that opens the filter sheet. The tag row is tags.module.css.
+ * Tokens (--t2, --field, --accent-text …) come from frame.module.css's .page,
+ * where they are declared with fixed values; nothing here derives a colour
+ * from them.
+ *
+ * Every @media block is at the end of the file. */
+
+/* ── Filter bar ──────────────────────────────────────────────────────────── */
+
+.filters {
+  position: relative;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 24px;
+  margin-top: 30px;
+}
+
+.field {
+  position: relative;
+  flex: none;
+  width: 196px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.86);
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  color: rgba(235, 235, 245, 0.45);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.control:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.control[aria-expanded="true"] {
+  background: #141418;
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.55);
+}
+
+.control:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.control[data-set="true"] {
+  color: var(--accent-text);
+}
+
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chev {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: rgba(235, 235, 245, 0.4);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.28s var(--ease);
+}
+
+.control[aria-expanded="true"] .chev {
+  transform: rotate(180deg);
+}
+
+.search {
+  cursor: text;
+}
+
+.search:has(input:focus-visible) {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.search svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: rgba(235, 235, 245, 0.42);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+}
+
+.search input::-webkit-search-decoration,
+.search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.search input::placeholder {
+  color: rgba(235, 235, 245, 0.4);
+}
+
+.moreField {
+  position: relative;
+  margin-left: auto;
+}
+
+.moreBtn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  color: rgba(235, 235, 245, 0.55);
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    box-shadow 0.2s;
+}
+
+.moreBtn:hover,
+.moreBtn[aria-expanded="true"],
+.moreBtn[data-set="true"] {
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.moreBtn:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.moreBtn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* ── Menus ───────────────────────────────────────────────────────────────── */
+
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 70;
+  min-width: 100%;
+  max-height: 360px;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(24, 24, 28, 0.98);
+  box-shadow: 0 18px 48px -10px rgba(0, 0, 0, 0.8);
+  animation: drop 0.2s ease both;
+}
+
+.menu[hidden] {
+  display: none;
+}
+
+.menuWide {
+  display: grid;
+  width: 320px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.menuRight {
+  left: auto;
+  right: 0;
+  min-width: 150px;
+}
+
+.opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(235, 235, 245, 0.8);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.opt:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.opt:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.opt[aria-selected="true"],
+.opt[aria-current="page"] {
+  color: var(--accent-text);
+}
+
+.opt svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+}
+
+.opt[aria-selected="true"] svg,
+.opt[aria-current="page"] svg {
+  opacity: 1;
+}
+
+/* The current year or season in a link menu: where you are, not a link. */
+.opt[aria-current="page"] {
+  cursor: default;
+}
+
+.opt[aria-current="page"]:hover {
+  background: transparent;
+}
+
+.extra {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 70;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  padding: 20px 22px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(24, 24, 28, 0.98);
+  box-shadow: 0 18px 48px -10px rgba(0, 0, 0, 0.8);
+  animation: drop 0.22s ease both;
+}
+
+.extraGroup + .extraGroup {
+  margin-top: 18px;
+}
+
+.extraLabel {
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--t4);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  height: 30px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--t2);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    transform 0.2s var(--ease);
+}
+
+.chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.chip:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--accent-solid);
+  color: #fff;
+}
+
+@keyframes drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ── Phone controls (hidden above 600px) ────────────────────────────────── */
+
+.searchRow {
+  display: none;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.searchRow .search {
+  flex: 1;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.searchRow .search input {
+  font-size: 15px;
+}
+
+.sheetBtn {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  color: rgba(235, 235, 245, 0.7);
+  cursor: pointer;
+  transition: transform 0.2s var(--ease);
+}
+
+.sheetBtn:active {
+  transform: scale(0.94);
+}
+
+.sheetBtn:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.sheetBtn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.sheetBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent-solid);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  animation: badgeIn 0.25s ease both;
+}
+
+@keyframes badgeIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ── Tablet: the filter bar wraps, fields narrow ────────────────────────── */
+
+@media (max-width: 1199px) {
+  .filters {
+    gap: 20px;
+  }
+
+  .field {
+    width: 172px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .filters {
+    gap: 16px 18px;
+  }
+
+  .field {
+    width: calc(33.333% - 12px);
+    min-width: 150px;
+  }
+}
+
+/* ── Phone: the search row and the sheet button stand in for the bar ────── */
+
+@media (max-width: 600px) {
+  .filters {
+    display: none;
+  }
+
+  .searchRow {
+    display: flex;
+  }
+}

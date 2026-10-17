@@ -1,0 +1,228 @@
+/* The seasonal page's result states: the shimmer skeleton shown while another
+ * season loads (the only skeleton on the page), "show more", and the empty
+ * state. The skeleton reuses the grid, chart and table containers of the
+ * other modules for its layout and adds only the mask here.
+ *
+ * Every @media block is at the end of the file. */
+
+/* ── Skeleton: only while another season is on its way ─────────────────── */
+
+.fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 330px), rgba(0, 0, 0, 0.08));
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 330px), rgba(0, 0, 0, 0.08));
+}
+
+.sk {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.sk::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 200%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.06) 40%,
+    rgba(255, 255, 255, 0.06) 60%,
+    rgba(255, 255, 255, 0)
+  );
+  animation: pulse 2s linear infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(50%);
+  }
+}
+
+.skCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skCover {
+  aspect-ratio: 190 / 272;
+  border-radius: 6px;
+}
+
+.skLine {
+  height: 12px;
+  border-radius: 3px;
+}
+
+.skShort {
+  width: 62%;
+}
+
+.skChart {
+  height: 272px;
+  border-radius: 8px;
+}
+
+.skRow {
+  height: 84px;
+  border-radius: 8px;
+}
+
+/* ── Show more and the empty state ──────────────────────────────────────── */
+
+.moreZone {
+  display: flex;
+  flex-direction: column;
+  margin-top: 28px;
+}
+
+.moreBtn {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  margin-top: 12px;
+  padding: 0 22px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 23px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(235, 235, 245, 0.9);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  animation: fadeIn 0.3s ease both;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    transform 0.25s var(--ease);
+}
+
+.moreBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.26);
+  transform: translateY(-1px);
+}
+
+.moreBtn:active {
+  transform: scale(0.97);
+}
+
+.moreBtn:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.moreLeft {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--t4);
+}
+
+.moreBtn svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.3s var(--ease);
+}
+
+.moreBtn:hover svg {
+  transform: translateY(2px);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 96px 0;
+  color: var(--t3);
+  font-size: 15px;
+  animation: fadeIn 0.3s ease both;
+}
+
+.emptyBtn {
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.emptyBtn:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .skCard {
+    gap: 7px;
+  }
+
+  .skCover {
+    aspect-ratio: 111 / 159;
+    border-radius: 5px;
+  }
+
+  .skLine {
+    height: 10px;
+  }
+
+  .skShort {
+    width: 58%;
+  }
+
+  .skChart {
+    height: 192px;
+  }
+
+  .skCard:nth-child(n + 22),
+  .skChart:nth-child(n + 8) {
+    display: none;
+  }
+
+  .fade {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 210px), rgba(0, 0, 0, 0.06));
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 210px), rgba(0, 0, 0, 0.06));
+  }
+
+  .moreZone {
+    margin-top: 18px;
+  }
+
+  .moreBtn {
+    justify-content: center;
+    align-self: stretch;
+    height: 48px;
+    margin-top: 10px;
+  }
+}

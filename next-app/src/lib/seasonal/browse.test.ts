@@ -6,6 +6,7 @@ import {
   browseItems,
   clearFilters,
   facetsOf,
+  hueOptionsOf,
   matchesState,
   resetSheet,
   settleState,
@@ -37,6 +38,23 @@ describe("sourceGroupOf", () => {
     expect(sourceGroupOf("MULTIMEDIA_PROJECT")).toBe("OTHER");
     expect(sourceGroupOf("ORIGINAL")).toBe("ORIGINAL");
     expect(sourceGroupOf(null)).toBeNull();
+  });
+});
+
+describe("hueOptionsOf", () => {
+  test("one dot per family present, in circle order, colourless covers in none", () => {
+    const shows = [
+      item({ id: 1, hue: 245 }),
+      item({ id: 2, hue: 20 }),
+      item({ id: 3, hue: 250 }),
+      item({ id: 4, hue: null }),
+      item({ id: 5, hue: 350 }),
+    ];
+    expect(hueOptionsOf(shows)).toEqual([
+      { key: "red", hue: 20, count: 2 },
+      { key: "blue", hue: 245, count: 2 },
+    ]);
+    expect(hueOptionsOf([item({ id: 6 })])).toEqual([]);
   });
 });
 

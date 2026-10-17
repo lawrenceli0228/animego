@@ -186,6 +186,8 @@ describe("info and meta lines", () => {
     expect(statusSubLine(item({ id: 6, next: { at: NOW + 2 * DAY_MS, ep: 2 } }), NOW, ZH, "zh", "2026 秋季")).toBe(
       "第 2 集 · 2 天后",
     );
+    // Airing with nothing scheduled: the status above already says 连载中.
+    expect(statusSubLine(item({ id: 7, status: "RELEASING" }), NOW, ZH, "zh", "2026 秋季")).toBe("");
   });
 
   test("runtime words", () => {

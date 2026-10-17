@@ -7,7 +7,7 @@
 //
 // Pure: no React, no DOM.
 
-import { hueFamilyOf, type HueFamilyKey } from "@/lib/home/hueFamilies";
+import { HUE_FAMILIES, hueFamilyOf, type HueFamilyKey } from "@/lib/home/hueFamilies";
 import { airWeekday, monthKeyOf, type BarMode } from "./bars";
 import { minuteOfWeek } from "./clock";
 import type { SeasonalItem } from "./model";
@@ -97,6 +97,31 @@ export function settleState(state: BrowseState, facets: Facets, mode: BarMode): 
     return state;
   }
   return { ...state, wd, mon, source, seq, sort };
+}
+
+export interface HueOption {
+  key: HueFamilyKey;
+  /** The family's representative angle, for its dot. */
+  hue: number;
+  count: number;
+}
+
+/**
+ * The hue families the season has covers in, in circle order, with how many
+ * each holds. A family with nothing in it gets no dot: a filter that empties
+ * the page is not a choice.
+ */
+export function hueOptionsOf(items: readonly SeasonalItem[]): HueOption[] {
+  const counts = new Map<HueFamilyKey, number>();
+  for (const item of items) {
+    const key = hueFamilyOf(item.hue);
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return HUE_FAMILIES.filter((f) => counts.has(f.key)).map((f) => ({
+    key: f.key,
+    hue: f.hue,
+    count: counts.get(f.key) ?? 0,
+  }));
 }
 
 // ── Filtering ───────────────────────────────────────────────────────────────

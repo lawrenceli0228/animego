@@ -1,0 +1,739 @@
+/* The seasonal page's cover grid: the card, its cover badge, the follow
+ * buttons (cover and chart variants), the hover popover, the score face and
+ * the genre pills. Chart cards, table rows and the result states have their
+ * own modules; they reuse the score, pill and follow classes from here on
+ * their own elements, through the modifier classes below, and never select
+ * them in their own rules.
+ *
+ * Each card writes its own colours inline — `color` is the show's tone and
+ * `background` its fill or popover ground — and the rules here read them
+ * through currentColor. No colour is assembled from a custom property set on
+ * another element (DESIGN.md, 派生色阶 → 陷阱).
+ *
+ * Cards past the visible batch carry `hidden`; the grid re-states display:none
+ * for them, because a class's display beats the UA's [hidden] rule.
+ *
+ * Every @media block is at the end of the file. */
+
+.results {
+  --t3: rgba(235, 235, 245, 0.62);
+  --t4: rgba(235, 235, 245, 0.55);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  margin-top: 28px;
+}
+
+/* ── Cover grid ──────────────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 28px;
+}
+
+.grid > [hidden] {
+  display: none;
+}
+
+.card {
+  position: relative;
+  display: grid;
+  grid-template-rows: min-content auto;
+  /* The grid stretches every card in a row to the tallest; the title and the
+   * phone's airing line stay under the cover instead of spreading out. */
+  align-content: start;
+  min-width: 0;
+  animation: cardIn 0.3s linear both;
+}
+
+.card:hover {
+  z-index: 30;
+}
+
+.cwrap {
+  position: relative;
+}
+
+.cover {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 190 / 272;
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow:
+    0 14px 30px -14px rgba(0, 0, 0, 0.9),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.coverImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.title {
+  display: -webkit-box;
+  margin-top: 10px;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 21px;
+  color: rgba(235, 235, 245, 0.74);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  transition: color 0.2s;
+}
+
+.card:hover .title {
+  color: inherit;
+}
+
+.title:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* The phone card's airing line, in the show's tone. */
+.air {
+  display: none;
+  margin-top: 3px;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@keyframes cardIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ── The cover badge ─────────────────────────────────────────────────────── */
+
+/* No backdrop-filter on anything in a card: blurred badges measured p95
+ * frame time 41.6ms against 19.9ms without on a mid-range phone (globals.css,
+ * .agc-quick-add). A denser scrim does the same legibility job. */
+.live {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: rgba(8, 8, 10, 0.84);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: badgeIn 0.3s ease both;
+}
+
+.liveDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.live[data-badge="soon"] .liveDot {
+  animation: dot 1.8s ease-out infinite;
+}
+
+@keyframes dot {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(0, 0, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+@keyframes badgeIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ── Follow buttons ──────────────────────────────────────────────────────── */
+
+/* On the cover: hidden at rest, there under the pointer and once followed;
+ * always there where nothing hovers. */
+.add {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 50%;
+  background: rgba(10, 10, 12, 0.82);
+  color: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity 0.18s ease,
+    transform 0.3s var(--ease),
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+/* The pill is 34px; the target around it is 44px. */
+.add::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+}
+
+.add svg,
+.chAdd svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.card:hover .add {
+  opacity: 1;
+  transform: none;
+}
+
+.add:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+  opacity: 1;
+  transform: none;
+}
+
+.add[aria-disabled="true"] {
+  cursor: progress;
+}
+
+.iconCheck {
+  display: none;
+}
+
+.add[data-follow="on"],
+.chAdd[data-follow="on"] {
+  background: currentColor;
+  border-color: transparent;
+}
+
+.add[data-follow="on"] {
+  opacity: 1;
+  transform: none;
+}
+
+.add[data-follow="on"] svg,
+.chAdd[data-follow="on"] svg {
+  stroke: rgba(8, 8, 10, 0.88);
+}
+
+.add[data-follow="on"] .iconPlus,
+.chAdd[data-follow="on"] .iconPlus {
+  display: none;
+}
+
+.add[data-follow="on"] .iconCheck,
+.chAdd[data-follow="on"] .iconCheck {
+  display: block;
+}
+
+/* Only a show followed from this page plays the check; the ones already
+ * followed when it loaded just are. */
+.add[data-follow="on"][data-fresh="true"] .iconCheck,
+.chAdd[data-follow="on"][data-fresh="true"] .iconCheck {
+  animation: check 0.34s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.add[data-follow="on"][data-fresh="true"]::after,
+.chAdd[data-follow="on"][data-fresh="true"]::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: ring 0.5s ease-out both;
+}
+
+@keyframes check {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) rotate(-30deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes ring {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+/* On a chart card's footer. */
+.chAdd {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1.5px solid rgba(235, 235, 245, 0.32);
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s,
+    transform 0.3s var(--ease);
+}
+
+.chAdd::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
+.chAdd svg {
+  width: 14px;
+  height: 14px;
+  stroke: rgba(235, 235, 245, 0.82);
+  stroke-width: 2.4;
+  transition: stroke 0.2s;
+}
+
+.chAdd:hover {
+  border-color: currentColor;
+  transform: rotate(90deg);
+}
+
+.chAdd:hover svg {
+  stroke: currentColor;
+}
+
+.chAdd[data-follow="on"]:hover {
+  transform: none;
+}
+
+.chAdd:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── The popover ─────────────────────────────────────────────────────────── */
+
+.pop {
+  position: absolute;
+  top: 6px;
+  left: calc(100% + 18px);
+  z-index: 40;
+  display: none;
+  width: 290px;
+  padding: 22px 24px 24px;
+  border-radius: 8px;
+  color: #fff;
+  box-shadow:
+    0 22px 44px -10px rgba(0, 0, 0, 0.75),
+    0 4px 6px rgba(0, 0, 0, 0.25),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+  transform-origin: 0 36px;
+}
+
+.arrow {
+  position: absolute;
+  top: 26px;
+  right: 100%;
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-right: 10px solid currentColor;
+}
+
+.popHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.popAir {
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fff;
+}
+
+.popStudio {
+  margin-top: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.popInfo {
+  margin-top: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t3);
+}
+
+.popBgm {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t3);
+}
+
+.popBgm b {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.9);
+}
+
+.pop .pills {
+  margin-top: 18px;
+}
+
+@keyframes popIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ── Score and genre pills ───────────────────────────────────────────────── */
+
+.score {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--t3);
+}
+
+.score[data-band="high"] {
+  color: var(--score-high-fg);
+}
+
+.score[data-band="mid"] {
+  color: var(--score-mid-fg);
+}
+
+.score[data-band="low"] {
+  color: var(--score-low-fg);
+}
+
+.face {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.face [data-face="eye"] {
+  stroke-width: 2.6;
+}
+
+.face [data-face="high"],
+.face [data-face="mid"],
+.face [data-face="low"] {
+  display: none;
+}
+
+.score[data-band="high"] [data-face="high"],
+.score[data-band="mid"] [data-face="mid"],
+.score[data-band="low"] [data-face="low"] {
+  display: inline;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pillsSm .pill {
+  height: 18px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+/* One line of pills that clips instead of wrapping (chart footers, table rows). */
+.pillsInline {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/* ── The popover, where there is a pointer to hover with ────────────────── */
+
+@media (hover: hover) and (pointer: fine) {
+  .card:hover .pop,
+  .card:has(.title:focus-visible) .pop {
+    display: block;
+    animation: popIn 0.22s ease both;
+  }
+}
+
+/* Where nothing hovers, the follow button is simply there. */
+@media (hover: none), (pointer: coarse) {
+  .add {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── Columns, and the last two of them open their popover to the left ───── */
+
+@media (min-width: 1200px) {
+  .grid > .card:nth-child(6n + 5) .pop,
+  .grid > .card:nth-child(6n) .pop {
+    left: auto;
+    right: calc(100% + 18px);
+    transform-origin: 100% 36px;
+  }
+
+  .grid > .card:nth-child(6n + 5) .arrow,
+  .grid > .card:nth-child(6n) .arrow {
+    right: auto;
+    left: 100%;
+    border-right: 0;
+    border-left: 10px solid currentColor;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 24px;
+  }
+
+  .grid > .card:nth-child(5n + 4) .pop,
+  .grid > .card:nth-child(5n) .pop {
+    left: auto;
+    right: calc(100% + 18px);
+    transform-origin: 100% 36px;
+  }
+
+  .grid > .card:nth-child(5n + 4) .arrow,
+  .grid > .card:nth-child(5n) .arrow {
+    right: auto;
+    left: 100%;
+    border-right: 0;
+    border-left: 10px solid currentColor;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 24px 20px;
+  }
+
+  .grid > .card:nth-child(4n + 3) .pop,
+  .grid > .card:nth-child(4n) .pop {
+    left: auto;
+    right: calc(100% + 18px);
+    transform-origin: 100% 36px;
+  }
+
+  .grid > .card:nth-child(4n + 3) .arrow,
+  .grid > .card:nth-child(4n) .arrow {
+    right: auto;
+    left: 100%;
+    border-right: 0;
+    border-left: 10px solid currentColor;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 767px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px 18px;
+  }
+
+  .grid > .card:nth-child(3n + 2) .pop,
+  .grid > .card:nth-child(3n) .pop {
+    left: auto;
+    right: calc(100% + 18px);
+    transform-origin: 100% 36px;
+  }
+
+  .grid > .card:nth-child(3n + 2) .arrow,
+  .grid > .card:nth-child(3n) .arrow {
+    right: auto;
+    left: 100%;
+    border-right: 0;
+    border-left: 10px solid currentColor;
+  }
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .results {
+    margin-top: 18px;
+  }
+
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px 12px;
+  }
+
+  .cover {
+    aspect-ratio: 111 / 159;
+    border-radius: 5px;
+    box-shadow: none;
+    transition: transform 0.25s var(--ease);
+  }
+
+  .card:active .cover {
+    transform: scale(0.965);
+  }
+
+  .title {
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 17px;
+    color: rgba(235, 235, 245, 0.76);
+  }
+
+  .air {
+    display: block;
+  }
+
+  .live {
+    top: 5px;
+    left: 5px;
+    gap: 5px;
+    height: 19px;
+    padding: 0 6px;
+    font-size: 10.5px;
+  }
+
+  .add {
+    right: 5px;
+    bottom: 5px;
+    width: 28px;
+    height: 28px;
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(10, 10, 12, 0.78);
+    opacity: 1;
+    transform: none;
+    transition:
+      transform 0.25s var(--ease),
+      background-color 0.2s;
+  }
+
+  .add::before {
+    inset: -8px;
+  }
+
+  .add:active {
+    transform: scale(0.9);
+  }
+
+  .add svg {
+    width: 14px;
+    height: 14px;
+    stroke-width: 2.4;
+  }
+
+  /* A chart card's score and its pills, which chart.module.css lays out. */
+  .scoreChart {
+    font-size: 12.5px;
+  }
+
+  .scoreChart .face {
+    width: 16px;
+    height: 16px;
+  }
+
+  .pillsTwo .pill:nth-child(n + 3) {
+    display: none;
+  }
+}
