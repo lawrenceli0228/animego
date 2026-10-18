@@ -526,7 +526,7 @@ test.describe("a reader outside UTC+8", () => {
 test.describe("following from a card", () => {
   test.use({ viewport: { width: 1440, height: 900 }, storageState: { cookies: [], origins: [] } });
 
-  test("the + writes a subscription and becomes a link to the show", async ({ page }) => {
+  test("the + writes a subscription and turns into a ✓ that stops tracking", async ({ page }) => {
     test.setTimeout(90_000);
     const user = makeUser();
     await insertPgUser({ username: user.username, email: user.email, passwordHash: user.passwordHash });
@@ -547,7 +547,9 @@ test.describe("following from a card", () => {
       const add = card.locator('[data-follow="off"]');
       await expect(add).toBeVisible();
       await add.click();
-      await expect(card.locator('[data-follow="on"]')).toHaveAttribute("href", `/anime/${target.anilistId}`);
+      const check = card.locator('[data-follow="on"]');
+      await expect(check).toHaveJSProperty("tagName", "BUTTON");
+      await expect(check).toHaveAttribute("aria-label", `取消追番: ${target.titleChinese}`);
       await expect.poll(async () => (await readSubscription(user.email, target.anilistId))?.status).toBe("watching");
     } finally {
       await resetSubscriptions(user.email, [target.anilistId]);
