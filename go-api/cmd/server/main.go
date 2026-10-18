@@ -1358,6 +1358,13 @@ func buildWorkers(d workerDeps) *river.Workers {
 	// answer is one statement.  Gated at work time by IMAGE_WARM_BASE_URL:
 	// empty, which is how dev and CI run, every pass does nothing.
 	queue.AddImageWarmWorker(workers, d.db)
+
+	// The variant warm job: has nginx encode, overnight, every variant of
+	// those images the pages ask the image optimizer for.  Like the image
+	// warm job it talks only to nginx (its internal image location) and
+	// reads one list, so the database is all it needs.  Gated at work time
+	// by IMAGE_VARIANT_WARM_BASE_URL, and by its night window.
+	queue.AddImageVariantWarmWorker(workers, d.db)
 	return workers
 }
 
