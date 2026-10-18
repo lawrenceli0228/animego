@@ -151,22 +151,24 @@
 // with a host and a path, and no query, is an ERROR every pass, and nothing
 // is requested.  In production it is nginx's internal location,
 // http://nginx:8090/_next/image.
+//
+// # Where the parts are
+//
+// This file is the pass and its answers.  What it asks for -- pageShapes,
+// variantWarmList, the request -- is image_variant_warm_targets.go; when --
+// the window, the night, its refresh group, the cursor -- is
+// image_variant_warm_night.go.
 package queue
 
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
-	"slices"
-	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -221,12 +223,6 @@ const (
 // imageVariantWarmBaseURLEnv names the switch; see the file comment.
 const imageVariantWarmBaseURLEnv = "IMAGE_VARIANT_WARM_BASE_URL"
 
-// variantWarmMirrorPrefix is the address the pages use for an AniList image
-// (next-app's NEXT_PUBLIC_IMAGE_MIRROR_BASE in production), and the one
-// nginx's cache key rewrites to the AniList address ($next_image_key_args).
-// The job asks in that form so its variants are the pages' variants.
-const variantWarmMirrorPrefix = "https://animegoclub.com/img/anilist/"
-
 const (
 	// variantWarmAccept is what a browser that takes AVIF sends; nginx keys
 	// the variant by the format it picks from it ($next_image_fmt).
@@ -240,112 +236,6 @@ const (
 	// $upstream_cache_status.
 	variantWarmCacheStatusHeader = "X-Cache-Status"
 )
-
-// imageShape names a kind of page image by where AniList keeps it.
-type imageShape string
-
-const (
-	shapeCover     imageShape = "cover"
-	shapeBanner    imageShape = "banner"
-	shapeCharacter imageShape = "character"
-	shapeStaff     imageShape = "staff"
-)
-
-// pageShape is one kind of image nginx keeps in the page zone: the AniList
-// paths it covers and the widths it is kept at.
-type pageShape struct {
-	// pattern matches the part of the URL after anilistCDNPrefix, written
-	// as nginx's map writes it once each %2F there is read as a slash.
-	pattern string
-	widths  []int
-	re      *regexp.Regexp
-}
-
-func newPageShape(pattern string, widths ...int) pageShape {
-	return pageShape{pattern: pattern, widths: widths, re: regexp.MustCompile(`^` + pattern + `$`)}
-}
-
-// allows reports whether a page asks for this kind of image, at this width,
-// for a path.
-func (s pageShape) allows(path string, width int) bool {
-	return slices.Contains(s.widths, width) && s.re.MatchString(path)
-}
-
-// The format and quality of every page variant.  The pages ask for q=85
-// only (next.config.ts allows no other), and the browsers the site serves
-// take AVIF; nginx keeps nothing else in the page zone.
-const (
-	pageShapeQuality = 85
-	pageShapeFormat  = "avif"
-)
-
-// pageShapes is the variants nginx keeps in the page zone, by kind: the
-// widths the pages lay each kind of image out at, at one and two device
-// pixels per CSS pixel.  The same list is nginx's map routing
-// /_next/image requests to the next_image zone, in nginx/default.p9.conf;
-// TestPageShapes_MatchNginx holds the two equal.  A width here and not
-// there is one this job fills a zone with that the pages never read; a
-// width there and not here is one the job never fills.
-var pageShapes = map[imageShape]pageShape{
-	shapeCover:     newPageShape(`media/(anime|manga)/cover/(large|medium)/[A-Za-z0-9_.-]+`, 64, 96, 256, 384, 640),
-	shapeBanner:    newPageShape(`media/anime/banner/[A-Za-z0-9_.-]+`, 640, 828, 1080, 1200, 1920),
-	shapeCharacter: newPageShape(`character/medium/[A-Za-z0-9_.-]+`, 64, 128),
-	shapeStaff:     newPageShape(`staff/medium/[A-Za-z0-9_.-]+`, 64, 96, 128),
-}
-
-// warmEntry is one role in variantWarmList: the kind of image that plays
-// it, and the widths the job asks for.
-type warmEntry struct {
-	shape  imageShape
-	widths []int
-}
-
-// variantWarmList is what the job asks for, by the role an image plays on a
-// page -- the names ListImageVariantWarmTargets gives the roles.  Every
-// width is one the page asks for that image at, on a desktop, a 2x laptop
-// screen or a phone, and every one is a page shape
-// (TestVariantWarmList_IsPageShapes).
-var variantWarmList = map[string]warmEntry{
-	// The show's own cover: the detail page's (256 at 1x, 640 at 2x and on
-	// phones) and the seasonal grid's (256 at 1x, 384 at 2x).
-	"cover": {shapeCover, []int{256, 384, 640}},
-	// The detail page's banner: 1920 on desktops, 1200 on phones.
-	"banner": {shapeBanner, []int{1200, 1920}},
-	// Related works' and recommendations' covers: 256 at 1x, 384 at 2x.
-	"related":     {shapeCover, []int{256, 384}},
-	"recommended": {shapeCover, []int{256, 384}},
-	// The first characters and their voices: 64 at 1x, 128 at 2x.
-	"character": {shapeCharacter, []int{64, 128}},
-	"voice":     {shapeStaff, []int{64, 128}},
-	// The first staff: 64 at 1x, 96 at 2x.
-	"staff": {shapeStaff, []int{64, 96}},
-}
-
-// How many characters and staff the detail page shows: next-app's
-// DETAIL_CHARACTERS_SHOWN and DETAIL_STAFF_SHOWN (detailPeople.ts).  The
-// query takes the first this many, in the order the API returns them.
-const (
-	variantWarmCharactersShown = 8
-	variantWarmStaffShown      = 10
-)
-
-// The window, as times of day in variantWarmZone.  A pass runs from
-// variantWarmWindowOpen to variantWarmWindowClose, less the stretch from
-// variantWarmBackupFrom to variantWarmBackupUntil, which the nightly
-// database backup has.
-const (
-	variantWarmWindowOpen  = 1 * time.Hour
-	variantWarmBackupFrom  = 3*time.Hour + 15*time.Minute
-	variantWarmBackupUntil = 4 * time.Hour
-	variantWarmWindowClose = 7 * time.Hour
-)
-
-// variantWarmZone is Asia/Shanghai as a fixed +08:00 offset.  China has kept
-// no daylight saving since 1991, so the offset is that zone's answer for any
-// night this job will see, and a fixed zone needs no tzdata in the image and
-// cannot fail to load (activity.reportingZone makes the same choice).  The
-// process itself runs in UTC; every time of day here is read in this zone.
-var variantWarmZone = time.FixedZone("UTC+8", 8*60*60)
 
 // ImageVariantWarmStore is the database surface: the one read-only list.
 // *dbgen.Queries satisfies it.
@@ -421,156 +311,6 @@ func imageVariantWarmBaseURL() (string, error) {
 			imageVariantWarmBaseURLEnv, raw)
 	}
 	return raw, nil
-}
-
-// variantRequestURL is the request for one variant: the query string
-// next/image's loader writes (url, w, q, in that order and nothing else,
-// the only shape nginx accepts), with the image's mirror address as url.
-// url.QueryEscape writes %3A and %2F in upper case and leaves the
-// characters of an allowlisted path as they are, which is the spelling
-// nginx's key rewrite matches; TestVariantRequestURL_MatchesNginx holds it
-// to nginx's two expressions.
-func variantRequestURL(base, path string, width int) string {
-	return base + "?url=" + url.QueryEscape(variantWarmMirrorPrefix+path) +
-		"&w=" + strconv.Itoa(width) + "&q=" + strconv.Itoa(pageShapeQuality)
-}
-
-// variantTarget is one request a pass sends: one image at one width.
-type variantTarget struct {
-	url   string // the AniList URL, as the database holds it
-	path  string // url after anilistCDNPrefix
-	width int
-	group int // refreshGroup(url)
-}
-
-// variantTargets turns the query's rows into tonight's list, in the query's
-// order and, within an image, by width.  An image outside the mirror's
-// allowlist is dropped, and so is every width the page shapes do not have
-// for its path: an overlay can name an image of a kind or size no page
-// asks for.  Roles the warm list does not know are returned so the pass can
-// report them; the query and variantWarmList must agree on the names.
-func variantTargets(rows []dbgen.ListImageVariantWarmTargetsRow) (targets []variantTarget, unknownRoles []string) {
-	for _, row := range rows {
-		path, ok := warmPath(row.Url)
-		if !ok {
-			continue
-		}
-		widths, unknown := variantWidths(path, row.Roles)
-		for _, role := range unknown {
-			if !slices.Contains(unknownRoles, role) {
-				unknownRoles = append(unknownRoles, role)
-			}
-		}
-		group := refreshGroup(row.Url)
-		for _, w := range widths {
-			targets = append(targets, variantTarget{url: row.Url, path: path, width: w, group: group})
-		}
-	}
-	return targets, unknownRoles
-}
-
-// variantWidths is every width the roles ask an image for that its kind of
-// path is kept at, each once, smallest first.
-func variantWidths(path string, roles []string) (widths []int, unknownRoles []string) {
-	for _, role := range roles {
-		entry, ok := variantWarmList[role]
-		if !ok {
-			unknownRoles = append(unknownRoles, role)
-			continue
-		}
-		shape := pageShapes[entry.shape]
-		for _, w := range entry.widths {
-			if shape.allows(path, w) && !slices.Contains(widths, w) {
-				widths = append(widths, w)
-			}
-		}
-	}
-	slices.Sort(widths)
-	return widths, unknownRoles
-}
-
-// refreshGroup is the refresh group of an image: every width of it is in
-// the same one.  By its URL, so an image keeps its group however the list
-// around it changes.
-func refreshGroup(imageURL string) int {
-	h := fnv.New32a()
-	_, _ = io.WriteString(h, imageURL) // a hash.Hash never fails a write
-	return int(h.Sum32() % imageVariantWarmGroups)
-}
-
-// variantWarmNight is the night a pass belongs to: its date in
-// variantWarmZone, as days since the Unix epoch.  The window lies after
-// midnight, so a night's passes all share the date.
-func variantWarmNight(t time.Time) int64 {
-	y, m, d := t.In(variantWarmZone).Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix() / (24 * 60 * 60)
-}
-
-// tonightsGroup is the refresh group a night asks to be encoded again.
-// Consecutive nights take consecutive groups, so 25 nights take every one.
-func tonightsGroup(night int64) int {
-	return int(night % imageVariantWarmGroups)
-}
-
-// variantWarmTimeOfDay is how long after midnight in variantWarmZone t is,
-// and that midnight.
-func variantWarmTimeOfDay(t time.Time) (time.Duration, time.Time) {
-	local := t.In(variantWarmZone)
-	y, m, d := local.Date()
-	midnight := time.Date(y, m, d, 0, 0, 0, 0, variantWarmZone)
-	return local.Sub(midnight), midnight
-}
-
-// inVariantWarmWindow reports whether a pass may ask at t.
-func inVariantWarmWindow(t time.Time) bool {
-	d, _ := variantWarmTimeOfDay(t)
-	return d >= variantWarmWindowOpen && d < variantWarmWindowClose &&
-		(d < variantWarmBackupFrom || d >= variantWarmBackupUntil)
-}
-
-// variantWarmWindowEnd is when the stretch of the window t is in closes:
-// the backup's start for a time before it, the window's close for one
-// after.  For a time outside the window, t itself.
-func variantWarmWindowEnd(t time.Time) time.Time {
-	if !inVariantWarmWindow(t) {
-		return t
-	}
-	d, midnight := variantWarmTimeOfDay(t)
-	if d < variantWarmBackupFrom {
-		return midnight.Add(variantWarmBackupFrom)
-	}
-	return midnight.Add(variantWarmWindowClose)
-}
-
-// variantWarmCursor is how far down tonight's list the passes have got.
-// One per process: see the file comment for why a restart starting again
-// from the top is the right thing to lose.
-type variantWarmCursor struct {
-	mu sync.Mutex
-	// night is the night the rest is about (variantWarmNight); 0, the
-	// epoch's own date, is never one a pass runs on, so a cursor nobody
-	// has saved is about no night.
-	night int64
-	next  int  // the position of the next variant to ask about
-	done  bool // the whole list has been asked about tonight
-}
-
-// at is where tonight's next pass starts, and whether there is anything
-// left: the top of the list on a night no pass has saved.
-func (c *variantWarmCursor) at(night int64) (next int, done bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.night != night {
-		return 0, false
-	}
-	return c.next, c.done
-}
-
-// save records where a pass stopped.
-func (c *variantWarmCursor) save(night int64, next int, done bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.night, c.next, c.done = night, next, done
 }
 
 // Timeout bounds one pass.
