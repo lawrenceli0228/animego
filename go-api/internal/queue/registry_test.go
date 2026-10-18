@@ -531,6 +531,7 @@ func TestDefaultRegistry_EveryKindIsDeclared(t *testing.T) {
 		EpisodesBgmArgs{},
 		EpisodeTitlesArgs{},
 		BindIdMapArgs{},
+		BgmRebindArgs{},
 		HantBackfillArgs{},
 		AnilistRatingsArgs{},
 		BangumiRatingsArgs{},
@@ -543,7 +544,7 @@ func TestDefaultRegistry_EveryKindIsDeclared(t *testing.T) {
 			"kind %q implements river.JobArgs but is not in the registry: it would get "+
 				"no queue configuration and no schedule", args.Kind())
 	}
-	assert.Len(t, Default().Kinds(), 20,
+	assert.Len(t, Default().Kinds(), 21,
 		"a kind was added to or removed from the registry without updating this list")
 }
 
@@ -573,6 +574,7 @@ func TestDefaultRegistry_RunOnStartSplit(t *testing.T) {
 		"episodes_bgm_scan":             true,
 		"episode_titles_releasing":      true,
 		"bgm_bind_idmap":                true,
+		"bgm_rebind_search":             true,
 		"anilist_ratings":               true,
 		"bangumi_ratings":               true,
 		"anime_facts":                   true,
@@ -614,6 +616,7 @@ func TestDefaultRegistry_Intervals(t *testing.T) {
 		"episodes_bgm_scan":             time.Hour,
 		"episode_titles_releasing":      6 * time.Hour,
 		"bgm_bind_idmap":                6 * time.Hour,
+		"bgm_rebind_search":             6 * time.Hour,
 		"hant_backfill":                 90 * 24 * time.Hour,
 		"anilist_ratings":               time.Hour,
 		"bangumi_ratings":               time.Hour,
@@ -631,7 +634,7 @@ func TestDefaultRegistry_PeriodicJobsMatchDeclarations(t *testing.T) {
 	t.Parallel()
 
 	jobs := Default().PeriodicJobs()
-	require.Len(t, jobs, 14, "fourteen scheduled kinds")
+	require.Len(t, jobs, 15, "fifteen scheduled kinds")
 
 	var want []Entry
 	for _, e := range Default().Entries() {

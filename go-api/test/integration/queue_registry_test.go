@@ -75,6 +75,7 @@ func inertWorkers() *river.Workers {
 	river.AddWorker(w, &inert[queue.EpisodesBgmArgs]{})
 	river.AddWorker(w, &inert[queue.EpisodeTitlesArgs]{})
 	river.AddWorker(w, &inert[queue.BindIdMapArgs]{})
+	river.AddWorker(w, &inert[queue.BgmRebindArgs]{})
 	river.AddWorker(w, &inert[queue.HantBackfillArgs]{})
 	river.AddWorker(w, &inert[queue.AnilistRatingsArgs]{})
 	river.AddWorker(w, &inert[queue.BangumiRatingsArgs]{})

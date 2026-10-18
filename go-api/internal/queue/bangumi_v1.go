@@ -231,11 +231,7 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 
 	// 7. High confidence → bind.  title_chinese only when the chosen hit
 	//    carries a real CN translation (non-empty and != native name).
-	var titleChinese *string
-	if best.NameCN != "" && best.NameCN != best.Name {
-		cn := best.NameCN
-		titleChinese = &cn
-	}
+	titleChinese := subjectChineseTitle(best)
 	bgmID := int32(best.ID)
 	// A confident score is not the same as an unclaimed subject.  One
 	// Bangumi subject describes one work, so binding a second anime to it
