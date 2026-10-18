@@ -362,3 +362,24 @@ const RatingsQueueName = "ratings"
 // And it is a kill switch like the others: pausing this queue stops the
 // warm job and nothing else, without a deploy.
 const ImageWarmQueueName = "image_warm"
+
+// ImageVariantWarmQueueName isolates the nightly variant warm job
+// (image_variant_warm.go), which has nginx encode and keep every variant of
+// an image the pages ask the image optimizer for.
+//
+// Its own queue rather than image_warm's, though both are image jobs that
+// talk only to nginx, because each pass runs for most of an hour: sharing
+// the one slot, a night of variant passes would hold the originals' warm
+// job for the night, and the other way round.  The two spend different
+// things too -- the image warm job AniList's patience, this one the
+// optimizer's CPU -- and an operator stopping one has no reason to stop the
+// other.
+//
+// One slot, because one pass at a time is what keeps this job to one
+// request in flight, and so to one encode at most on the optimizer that
+// live traffic shares.  A second slot could only run a second pass beside
+// the first.
+//
+// And it is a kill switch: pausing this queue stops the variant warm job
+// and nothing else, without a deploy.
+const ImageVariantWarmQueueName = "image_variant_warm"

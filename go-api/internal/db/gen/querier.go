@@ -1955,6 +1955,70 @@ type Querier interface {
 	// precisely because the bgm_id is map-confirmed — we never heal a fuzzy or
 	// uncertain bind (whose dandanplay title could belong to the wrong subject).
 	ListIdMapRowsMissingCn(ctx context.Context) ([]ListIdMapRowsMissingCnRow, error)
+	// image_variant_warm.sql — the nightly variant warm job
+	// (queue/image_variant_warm.go): which AniList images the site's pages
+	// show, for the job to have nginx encode and keep at the widths the pages
+	// ask the image optimizer for.
+	//
+	// Read-only.  The job keeps no record of its own: nginx's cache already
+	// says, per variant, whether it is stored, and the job asks it with HEAD.
+	// Every image a detail page or the seasonal grid shows, one row per URL,
+	// with the roles it plays on those pages.  The job turns each role into
+	// the widths a page asks for it at (variantWarmList in
+	// image_variant_warm.go), so a URL that is one show's cover and another's
+	// related work is asked for once at every width either needs.
+	//
+	// The images are the ones the detail API (internal/anime/detail.go)
+	// returns, resolved the same way, because an image the API does not
+	// return is one no page asks for, and one resolved differently is a
+	// variant encoded for nobody:
+	//
+	//   cover        anime_cache.cover_image_url.  The seasonal grid shows it
+	//                too.
+	//   banner       anime_cache.banner_image_url, where there is one.
+	//   related      every anime_relations row's cover, or, where the row has
+	//                none (NULL), the related show's own anime_cache cover:
+	//                enrichRelations keeps the row's value and falls back to
+	//                GetRelationEnrichmentByIDs only on nil.  COALESCE is that
+	//                rule exactly; an empty string is kept, as there, and
+	//                dropped by the prefix test below.
+	//   recommended  every anime_recommendations row's cover.  The API returns
+	//                them in no particular order and the page shows the first
+	//                ten, so which ten is not something this query can know;
+	//                all of them are cheap to keep.
+	//   character    the first characters_shown by display_order, id -- the
+	//                order and the image GetAnimeCharactersByID returns: an
+	//                accepted reader edit's image (entity_overlays) first, then
+	//                the stored one.
+	//   voice        the voice of each of those characters, resolved as that
+	//                query resolves it: the edit on the person, then
+	//                anime_characters.voice_actor_image_url.  Not
+	//                anime_character_voices, which the detail page never reads.
+	//   staff        the first staff_shown by display_order, id, resolved as
+	//                GetAnimeStaffByID resolves them.
+	//
+	// Shows with is_adult set are left out: the site lists none of them, so
+	// their pages are not where readers arrive.  (Their images still appear
+	// where a listed show's page names them, as a related work or a
+	// recommendation, and are kept there.)  Kept are only URLs on AniList's CDN
+	// whose original the mirror
+	// holds (image_manager.status = 'warmed'): the optimizer reads the original
+	// through the mirror, so a variant of an original it does not hold would be
+	// fetched from AniList to be encoded, which is the image warm job's to
+	// arrange, not this one's.  The job applies the path allowlist and the page
+	// shapes itself, in Go, where the one copy of them lives.
+	//
+	// Ordered by the first show that needs the URL -- anime_cache.popularity,
+	// most popular first, then anilist_id -- and within that show by role, in
+	// the order listed above, then by URL.  The job keeps its place in this
+	// order from one pass to the next, so the order has to be the same each
+	// time it is read: the URL breaks every tie.
+	//
+	// The cost is a read of the credit tables limited per show by the lateral
+	// LIMITs (each show's rows through anime_characters_anime_id_idx and
+	// anime_staff_anime_id_idx), and one primary-key probe of image_manager per
+	// candidate URL.
+	ListImageVariantWarmTargets(ctx context.Context, charactersShown int32, staffShown int32) ([]ListImageVariantWarmTargetsRow, error)
 	// The URLs one pass asks for, at most row_limit, in four tiers:
 	//
 	//   1. never asked about (no row), by URL;
