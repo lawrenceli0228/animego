@@ -24,12 +24,6 @@
   color: #fff;
 }
 
-/* The box takes focus only to keep a click on its text inside it; it is not
- * a control, so a mouse focus draws no ring. Keyboard focus still does. */
-.dialog:focus:not(:focus-visible) {
-  outline: none;
-}
-
 .heading {
   margin: 0;
   font-size: 17px;
