@@ -5,8 +5,8 @@
  *
  * At the bottom centre and never at the top: there it sat over the navigation,
  * which locale-hint.css already refuses to cover. Over the stale-tab notice,
- * which also lives at the bottom centre, it would cover that; while the notice
- * is up the toasts sit above it.
+ * which also lives at the bottom centre, it would cover that, and so it would
+ * the library's undo bar; while either is up the toasts sit above it.
  *
  * The motion is a fade and a short rise, nothing scaled: react-hot-toast's own
  * drop from 0.6x read as a bounce, and a scale on small glyphs ends in a
@@ -25,6 +25,12 @@
 
 :root:has(.agc-stale-tab) {
   --agc-toast-bottom: 88px;
+}
+
+/* The library's undo bar (UndoToast) is at the bottom centre as well, 24px
+ * up; it publishes its height while it shows. */
+:root:has([data-bottom-notice]) {
+  --agc-toast-bottom: calc(24px + var(--agc-bottom-notice-h, 80px) + 12px);
 }
 
 .agc-toast {
