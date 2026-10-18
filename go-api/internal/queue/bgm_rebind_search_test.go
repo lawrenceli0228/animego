@@ -2,7 +2,10 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -468,4 +471,56 @@ func TestBgmRebindWorker_StopsWhenOutOfTime(t *testing.T) {
 	assert.Equal(t, 1, bgm.calls,
 		"every remaining search would fail the same way; the rows stay unstamped for the next fire")
 	assert.Empty(t, db.stamped)
+}
+
+func TestSearchFailureIsSettled(t *testing.T) {
+	t.Parallel()
+
+	var notJSON struct{}
+	syntaxErr := json.Unmarshal([]byte("<html>"), &notJSON)
+	require.Error(t, syntaxErr)
+	var wrongShape struct{ List []bangumi.SearchResult }
+	typeErr := json.Unmarshal([]byte(`{"List": {"id": 1}}`), &wrongShape)
+	require.Error(t, typeErr)
+
+	cases := []struct {
+		name    string
+		err     error
+		settled bool
+	}{
+		{"400 is a rejection of the keyword", &bangumi.ErrUpstream{Status: 400}, true},
+		{"403 is a rejection too", fmt.Errorf("wrapped: %w", &bangumi.ErrUpstream{Status: 403}), true},
+		{"429 is the moment", &bangumi.ErrUpstream{Status: 429}, false},
+		{"500 is the moment", &bangumi.ErrUpstream{Status: 500}, false},
+		{"502 is the moment", &bangumi.ErrUpstream{Status: 502}, false},
+		{"a body that is not JSON", fmt.Errorf("bangumi: decode response: %w", syntaxErr), true},
+		{"JSON of the wrong shape", fmt.Errorf("bangumi: decode response: %w", typeErr), true},
+		{"a body cut off mid-read", fmt.Errorf("bangumi: decode response: %w", io.ErrUnexpectedEOF), false},
+		{"a transport failure", errors.New("bangumi: http do: dial tcp: i/o timeout"), false},
+		{"an exhausted budget", fmt.Errorf("bangumi: rate limit wait: %w", context.DeadlineExceeded), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.settled, searchFailureIsSettled(tc.err))
+		})
+	}
+}
+
+// A rejected search is stamped and waits the week; a failure of the moment is
+// not.  Without the distinction a keyword Bangumi always rejects would lead
+// every batch -- never-stamped rows sort first -- and be re-sent every pass.
+func TestBgmRebindWorker_RejectedSearchIsStamped(t *testing.T) {
+	t.Setenv(rebindSearchEnabledEnv, "true")
+	rejected := rebindRow(31, "拒否", "", "", 2026, 0)
+	unavailable := rebindRow(32, "停止中", "", "", 2026, 0)
+	db := &fakeRebindDB{rows: []dbgen.ListBgmRebindCandidatesRow{rejected, unavailable}}
+	bgm := searchByKeyword(t, map[string]func() (*bangumi.SearchResponse, error){
+		"拒否":  searchErr(&bangumi.ErrUpstream{Status: 400, Message: "Bangumi API error"}),
+		"停止中": searchErr(&bangumi.ErrUpstream{Status: 503, Message: "Bangumi API error"}),
+	})
+
+	require.NoError(t, runRebind(t, context.Background(), bgm, db, &fakeRebindBinder{}))
+
+	assert.Equal(t, []int32{rejected.AnilistID}, db.stamped)
 }

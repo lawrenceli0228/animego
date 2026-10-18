@@ -33,9 +33,11 @@
 // step V1 does not take, below.  A bind and its V2 dispatch commit together.
 //
 // Every row the pass settles is stamped (bgm_rebind_checked_at), bound or
-// not, so it waits out the week.  A row the pass could not settle -- the
-// search failed, a read failed, the transaction rolled back -- is left
-// unstamped and comes back on the next fire.
+// not, so it waits out the week.  So is a search Bangumi rejected outright,
+// which would fail the same way on every retry (searchFailureIsSettled).  A
+// row the pass could not settle -- the search failed for the moment, a read
+// failed, the transaction rolled back -- is left unstamped and comes back on
+// the next fire.
 //
 // # The step V1 does not take: the season gate
 //
@@ -69,9 +71,11 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -189,8 +193,10 @@ func (w *BgmRebindWorker) Work(ctx context.Context, _ *river.Job[BgmRebindArgs])
 	}
 
 	tally := map[rebindOutcome]int{}
+	reached := 0
 	for _, row := range rows {
 		tally[w.rebindOne(ctx, row)]++
+		reached++
 		if ctx.Err() != nil {
 			break // out of budget: every remaining search would fail the same way
 		}
@@ -200,11 +206,13 @@ func (w *BgmRebindWorker) Work(ctx context.Context, _ *river.Job[BgmRebindArgs])
 		"candidates", len(rows),
 		"bound", tally[rebindOutcomeBound],
 		"noHit", tally[rebindOutcomeNoHit],
+		"rejected", tally[rebindOutcomeRejected],
 		"lowConfidence", tally[rebindOutcomeLowConfidence],
 		"seasonMismatch", tally[rebindOutcomeSeasonMismatch],
 		"taken", tally[rebindOutcomeTaken],
 		"refused", tally[rebindOutcomeRefused],
 		"failed", tally[rebindOutcomeFailed],
+		"unreached", len(rows)-reached,
 		"duration", time.Since(start))
 	return nil
 }
@@ -219,6 +227,9 @@ const (
 	rebindOutcomeBound
 	// rebindOutcomeNoHit — no title to search by, or Bangumi had nothing.
 	rebindOutcomeNoHit
+	// rebindOutcomeRejected — the search failed in a way it will fail again
+	// (searchFailureIsSettled).  Stamped like any settled answer.
+	rebindOutcomeRejected
 	// rebindOutcomeLowConfidence — the best candidate fell short of TierHigh.
 	rebindOutcomeLowConfidence
 	// rebindOutcomeSeasonMismatch — confident, but another season's subject.
@@ -238,20 +249,19 @@ func (w *BgmRebindWorker) rebindOne(ctx context.Context, row dbgen.ListBgmRebind
 		return w.stamp(ctx, id, rebindOutcomeNoHit)
 	}
 
-	var list []bangumi.SearchResult
-	resp, err := w.bgm.Search(ctx, keyword)
-	switch {
-	case errors.Is(err, bangumi.ErrNotFound):
-		// The legacy endpoint answers "no results" with a 404.
-	case err != nil:
+	list, err := w.search(ctx, keyword)
+	if err != nil {
 		slog.WarnContext(ctx, "bgm_rebind_search search failed", "anilistId", id, "keyword", keyword, "err", err)
+		if searchFailureIsSettled(err) {
+			return w.stamp(ctx, id, rebindOutcomeRejected)
+		}
 		return rebindOutcomeFailed
-	default:
-		list = resp.List
 	}
 
 	d := decideRebind(row, list)
 	switch d.verdict {
+	case rebindBind:
+		return w.bind(ctx, id, d)
 	case rebindNoHit:
 		return w.stamp(ctx, id, rebindOutcomeNoHit)
 	case rebindLowConfidence:
@@ -260,8 +270,32 @@ func (w *BgmRebindWorker) rebindOne(ctx context.Context, row dbgen.ListBgmRebind
 		slog.InfoContext(ctx, "bgm_rebind_search season mismatch",
 			"anilistId", id, "bgmId", d.best.ID, "subject", d.best.Name, "score", d.score)
 		return w.stamp(ctx, id, rebindOutcomeSeasonMismatch)
+	default:
+		// A verdict added without a case here must not fall through to a
+		// bind.  Unstamped, so the row is asked about again once it has one.
+		slog.ErrorContext(ctx, "bgm_rebind_search unhandled verdict", "anilistId", id, "verdict", int(d.verdict))
+		return rebindOutcomeFailed
 	}
+}
 
+// search runs V1's search for keyword.  "No results" comes back from the
+// legacy endpoint as a 404, which is an empty list here, not an error.
+func (w *BgmRebindWorker) search(ctx context.Context, keyword string) ([]bangumi.SearchResult, error) {
+	resp, err := w.bgm.Search(ctx, keyword)
+	switch {
+	case errors.Is(err, bangumi.ErrNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case resp == nil:
+		return nil, nil
+	}
+	return resp.List, nil
+}
+
+// bind writes a rebindBind decision: the collision check, then the bind and
+// its V2 dispatch as one transaction.
+func (w *BgmRebindWorker) bind(ctx context.Context, id int32, d rebindDecision) rebindOutcome {
 	bgmID := int32(d.best.ID)
 	taken, err := w.db.CountAnimeBoundToBgmID(ctx, bgmID, id)
 	if err != nil {
@@ -274,7 +308,8 @@ func (w *BgmRebindWorker) rebindOne(ctx context.Context, row dbgen.ListBgmRebind
 		return w.stamp(ctx, id, rebindOutcomeTaken)
 	}
 
-	bound, err := w.binder.BindAndEnqueue(ctx, id, bgmID, subjectChineseTitle(d.best))
+	titleChinese := subjectChineseTitle(d.best)
+	bound, err := w.binder.BindAndEnqueue(ctx, id, bgmID, titleChinese)
 	if err != nil {
 		slog.WarnContext(ctx, "bgm_rebind_search bind failed", "anilistId", id, "bgmId", bgmID, "err", err)
 		return rebindOutcomeFailed
@@ -284,8 +319,29 @@ func (w *BgmRebindWorker) rebindOne(ctx context.Context, row dbgen.ListBgmRebind
 		return w.stamp(ctx, id, rebindOutcomeRefused)
 	}
 	slog.InfoContext(ctx, "bgm_rebind_search bound",
-		"anilistId", id, "bgmId", bgmID, "score", d.score, "hasChinese", subjectChineseTitle(d.best) != nil)
+		"anilistId", id, "bgmId", bgmID, "score", d.score, "hasChinese", titleChinese != nil)
 	return rebindOutcomeBound
+}
+
+// searchFailureIsSettled reports whether a failed search is an answer about
+// the keyword rather than about the moment: Bangumi rejected the request
+// itself (a 4xx other than 429), or answered with a body that is not the
+// search document.  Those fail the same way on every retry, so they are
+// stamped like any other settled outcome.  Left unstamped, such a row would
+// lead every batch -- never-stamped rows sort first -- and be re-sent every
+// pass for good.
+//
+// Everything else is about the moment and is retried on the next fire:
+// transport errors, 5xx, 429, a body cut off mid-read, an exhausted budget.
+func searchFailureIsSettled(err error) bool {
+	var upstream *bangumi.ErrUpstream
+	if errors.As(err, &upstream) {
+		return upstream.Status >= 400 && upstream.Status < 500 &&
+			upstream.Status != http.StatusTooManyRequests
+	}
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	return errors.As(err, &syntaxErr) || errors.As(err, &typeErr)
 }
 
 // stamp records a settled search and returns outcome, or rebindOutcomeFailed

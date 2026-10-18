@@ -37,9 +37,9 @@
 -- nightly pg_dump holds that on every table for the whole dump.  While it
 -- waits, every read of anime_cache queues behind it, which is every catalogue
 -- page.  lock_timeout makes the deploy fail fast instead, the call 0025 and
--- 0046 made.  The file runs as one transaction, so a timeout leaves the
--- schema at 0050; golang-migrate records 51 as dirty, and `migrate force 50`
--- before the next deploy clears it.
+-- 0046 made.  The ALTER is the file's only change, so a timeout leaves the
+-- schema at 0050; golang-migrate records 51 as dirty, which stops the next
+-- deploy until `migrate force 50` clears it.
 SET lock_timeout = '3s';
 
 ALTER TABLE anime_cache ADD COLUMN IF NOT EXISTS bgm_rebind_checked_at timestamptz;

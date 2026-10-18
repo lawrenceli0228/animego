@@ -380,6 +380,33 @@ func TestBgmRebindWorker(t *testing.T) {
 		assert.Len(t, enq.jobs, 1)
 	})
 
+	t.Run("two rows reaching for one subject in a pass bind only the first", func(t *testing.T) {
+		// One subject, one work.  The first row's bind commits before the
+		// second row's collision check runs, so the second sees the subject
+		// held and is stamped as taken.  The rows must be written one after
+		// another for that: two binds in flight at once would each pass the
+		// other's NOT EXISTS, and both would stand.
+		subject := bangumi.SearchResult{ID: 9919311, Name: "同じ作品", NameCN: "同一部作品", Date: "2026-10-01"}
+		first := rebindFixture{id: 9910311, native: "同じ作品", popularity: 200, seasonYear: 2026}
+		second := rebindFixture{id: 9910312, native: "同じ作品", popularity: 100, seasonYear: 2026}
+		rebindSeed(t, ctx, pool, first, second)
+		t.Setenv(rebindWorkerEnv, "true")
+		search := &rebindStubSearch{answers: map[string][]bangumi.SearchResult{"同じ作品": {subject}}}
+		enq := &rebindStubEnqueuer{}
+
+		rebindRun(t, ctx, pool, search, enq)
+
+		require.Len(t, search.keywords, 2, "both rows were searched")
+		won := rebindRead(t, ctx, pool, first.id)
+		require.NotNil(t, won.bgmID, "the more popular row comes first and binds")
+		assert.EqualValues(t, subject.ID, *won.bgmID)
+
+		lost := rebindRead(t, ctx, pool, second.id)
+		assert.Nil(t, lost.bgmID, "a second row on the same subject would show the first one's titles")
+		assert.True(t, lost.stamped, "taken is a settled answer for the week")
+		assert.Equal(t, []queue.BangumiV2Args{{AnilistID: first.id, BgmID: subject.ID}}, enq.jobs)
+	})
+
 	t.Run("an enqueue failure rolls the bind back and leaves the row for the next fire", func(t *testing.T) {
 		rebindSeed(t, ctx, pool, edgerunnersRow)
 		t.Setenv(rebindWorkerEnv, "true")
