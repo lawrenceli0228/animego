@@ -51,18 +51,12 @@ func TestPageShapes_MatchNginx(t *testing.T) {
 	conf := string(raw)
 
 	zm, found := readNginxZoneMap(t, conf)
-	if !found {
-		require.NotContains(t, conf, "next_image_misc",
-			"nginx/default.p9.conf has a misc zone but no $next_image_zone map this test can find")
-		t.Skip("nginx/default.p9.conf has no $next_image_zone map yet (the page/misc zone split has not " +
-			"landed in this checkout); the guard is skipped until it has. TestPageShapes_ReadsTheZoneMap " +
-			"still runs the guard on the map's expected form.")
-	}
+	require.True(t, found, "nginx/default.p9.conf has no $next_image_zone map this test can find")
 	assertZoneMapIsPageShapes(t, zm)
 }
 
 // TestPageShapes_ReadsTheZoneMap runs the drift guard on the map's expected
-// form, so the guard is tested even where the conf has no map yet.
+// form, and checks that it notices drift.
 func TestPageShapes_ReadsTheZoneMap(t *testing.T) {
 	t.Parallel()
 

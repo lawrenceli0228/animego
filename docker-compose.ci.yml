@@ -68,3 +68,6 @@ services:
       # is nothing to warm and every pass would only fail to connect. Empty
       # turns the job off.
       IMAGE_WARM_BASE_URL: ""
+      # The variant warm job asks the same nginx's internal image location,
+      # for the same reason off here.
+      IMAGE_VARIANT_WARM_BASE_URL: ""
