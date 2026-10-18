@@ -31,7 +31,7 @@ interface HeroFollowButtonProps {
 
 export default function HeroFollowButton({ anilistId, title, progress, className }: HeroFollowButtonProps) {
   const { t } = useLang();
-  const { ready, mode, busy, press } = useQuickSubscribe(anilistId);
+  const { ready, mode, busy, press } = useQuickSubscribe(anilistId, title);
 
   if (ready && mode === "open") {
     const label = progress && progress > 0 ? fillTemplate(t("home.heroWatching"), { ep: progress }) : t("card.quickAdded");

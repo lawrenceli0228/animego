@@ -28,7 +28,7 @@ import cards from "./cards.module.css";
 
 export default function FollowButton({ anilistId, title, variant }: FollowSlotProps) {
   const { t } = useLang();
-  const { ready, mode, busy, press, unfollow, unfollowAnyway } = useQuickSubscribe(anilistId);
+  const { ready, mode, busy, press, unfollow, unfollowAnyway } = useQuickSubscribe(anilistId, title);
   // Pressed on this page: the ✓ that follows is announced with the check and
   // ring. Shows already followed when the page loaded simply show their ✓.
   const [pressed, setPressed] = useState(false);

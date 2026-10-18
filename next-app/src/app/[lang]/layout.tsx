@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
-import { Toaster } from "react-hot-toast";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { LocaleHint } from "@/components/layout/LocaleHint";
 import { StaleTabNotice } from "@/components/layout/StaleTabNotice";
+import SiteToaster from "@/components/ui/SiteToaster";
 import { LanguageProvider } from "@/lib/lang-client";
 import { HTML_LANG, OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { localeParams, resolveLocale, type LangParams } from "@/lib/i18n/route";
@@ -178,17 +178,7 @@ export default async function RootLayout({
               on the server. */}
           <LocaleHint />
           <StaleTabNotice />
-          <Toaster
-            position="top-center"
-            toastOptions={{
-              duration: 3500,
-              style: {
-                background: "#141414",
-                color: "#fff",
-                border: "1px solid rgba(255,255,255,0.08)",
-              },
-            }}
-          />
+          <SiteToaster />
           <div style={{ flex: 1 }}>{children}</div>
           <Footer dict={dict} season={season} year={year} />
         </LanguageProvider>

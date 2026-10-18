@@ -158,7 +158,7 @@ export default function QuickSubscribeToggle({
   // What a press means and what it does — the write, the toast with its Undo,
   // the signed-out round trip — lives in useQuickSubscribe, shared with the
   // homepage hero. This component is only the poster-corner look of it.
-  const { ready, mode, busy, press } = useQuickSubscribe(anilistId);
+  const { ready, mode, busy, press } = useQuickSubscribe(anilistId, title);
   const [hovered, setHovered] = useState(false);
 
   // Until the provider settles we render nothing rather than guess. The

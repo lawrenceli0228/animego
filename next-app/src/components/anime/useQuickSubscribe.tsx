@@ -17,40 +17,15 @@
 
 import Link from "@/components/ui/LocaleLink";
 import { useLocaleRouter } from "@/components/ui/LocaleLink";
-import { useRef, useState, type CSSProperties } from "react";
+import { useRef, useState } from "react";
 import toast, { type Toast } from "react-hot-toast";
+import { ToastChevron, ToastWhat } from "@/components/ui/ToastParts";
 import { useLang } from "@/lib/lang-client";
 import { stashPendingSubscribe } from "@/lib/pendingSubscribe";
 import type { SubscriptionDoc } from "@/lib/subscriptionBus";
 import { useSubscriptionSet } from "./SubscriptionSetProvider";
 import { LIST_HINT_TOAST_MS, hintStore, takeListHint } from "./subscriptionToast";
 import { loginTarget, quickSubscribeMode, type QuickSubscribeMode } from "./quickSubscribeState";
-
-const toastRowStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  flexWrap: "wrap",
-  gap: 10,
-};
-
-const toastLinkStyle: CSSProperties = {
-  color: "#0a84ff",
-  fontWeight: 600,
-  textDecoration: "none",
-  whiteSpace: "nowrap",
-};
-
-// Undo is an action, not a destination, so it is a <button> that merely looks
-// like the link next to it.
-const toastActionStyle: CSSProperties = {
-  ...toastLinkStyle,
-  padding: 0,
-  border: "none",
-  background: "transparent",
-  font: "inherit",
-  fontWeight: 600,
-  cursor: "pointer",
-};
 
 export interface QuickSubscribe {
   /** False until the subscription set has loaded; a press before then is ignored. */
@@ -75,7 +50,13 @@ export type UnfollowOutcome =
   /** The row holds history and is untouched; `doc` is what it holds (null if the read failed). */
   | { kind: "ask"; doc: SubscriptionDoc | null };
 
-export function useQuickSubscribe(anilistId: number): QuickSubscribe {
+/**
+ * `title` is the show's name as the caller shows it. The toasts lead with it:
+ * the site shows one toast at a time (SiteToaster), and a run of follows
+ * replaces each one's "已加入「在看」 · 撤销" with the next, so the name is
+ * what says whose Undo is on screen.
+ */
+export function useQuickSubscribe(anilistId: number, title?: string): QuickSubscribe {
   const router = useLocaleRouter();
   const { t } = useLang();
   const subs = useSubscriptionSet();
@@ -94,18 +75,18 @@ export function useQuickSubscribe(anilistId: number): QuickSubscribe {
    * just made.
    */
   const undo = async () => {
-    if (await subs.remove(anilistId)) toast.success(t("sub.toastRemoved"));
+    if (await subs.remove(anilistId)) toast.success(<ToastWhat name={title}>{t("sub.toastRemoved")}</ToastWhat>);
     else toast.error(t("card.quickAddFail"));
   };
 
   const notifyAdded = (withListHint: boolean) => {
     toast.success(
       (instance: Toast) => (
-        <span style={toastRowStyle}>
-          {t("sub.toastAdded")}
+        <>
+          <ToastWhat name={title}>{t("sub.toastAdded")}</ToastWhat>
           <button
             type="button"
-            style={toastActionStyle}
+            className="agc-toast-action"
             onClick={() => {
               // Dismiss first: the button vanishes with the toast, which is
               // what stops a double-tap becoming two DELETEs.
@@ -119,13 +100,14 @@ export function useQuickSubscribe(anilistId: number): QuickSubscribe {
             <Link
               href="/profile"
               prefetch={false}
-              style={toastLinkStyle}
+              className="agc-toast-link"
               onClick={() => toast.dismiss(instance.id)}
             >
               {t("sub.toastViewList")}
+              <ToastChevron />
             </Link>
           ) : null}
-        </span>
+        </>
       ),
       // Carries up to two actions; the Toaster's 3500ms default is gone before
       // a thumb reaches the top of a phone screen.
@@ -134,7 +116,7 @@ export function useQuickSubscribe(anilistId: number): QuickSubscribe {
   };
 
   const refollow = async () => {
-    if (await subs.add(anilistId)) toast.success(t("sub.toastAdded"));
+    if (await subs.add(anilistId)) toast.success(<ToastWhat name={title}>{t("sub.toastAdded")}</ToastWhat>);
     else toast.error(t("card.quickAddFail"));
   };
 
@@ -143,11 +125,11 @@ export function useQuickSubscribe(anilistId: number): QuickSubscribe {
   const notifyUnfollowed = () => {
     toast.success(
       (instance: Toast) => (
-        <span style={toastRowStyle}>
-          {t("sub.toastUnfollowed")}
+        <>
+          <ToastWhat name={title}>{t("sub.toastUnfollowed")}</ToastWhat>
           <button
             type="button"
-            style={toastActionStyle}
+            className="agc-toast-action"
             onClick={() => {
               toast.dismiss(instance.id);
               void refollow();
@@ -155,7 +137,7 @@ export function useQuickSubscribe(anilistId: number): QuickSubscribe {
           >
             {t("sub.toastUndo")}
           </button>
-        </span>
+        </>
       ),
       { duration: LIST_HINT_TOAST_MS },
     );
@@ -185,7 +167,7 @@ export function useQuickSubscribe(anilistId: number): QuickSubscribe {
     busyRef.current = true;
     setBusy(true);
     try {
-      if (await subs.remove(anilistId)) toast.success(t("sub.toastUnfollowed"));
+      if (await subs.remove(anilistId)) toast.success(<ToastWhat name={title}>{t("sub.toastUnfollowed")}</ToastWhat>);
       else toast.error(t("card.quickAddFail"));
     } finally {
       busyRef.current = false;

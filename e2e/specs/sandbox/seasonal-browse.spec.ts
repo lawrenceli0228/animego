@@ -556,6 +556,50 @@ test.describe("following from a card", () => {
     }
   });
 
+  test("a run of follows keeps one toast on screen, at the bottom, naming the last show", async ({ page }) => {
+    test.setTimeout(90_000);
+    const user = makeUser();
+    await insertPgUser({ username: user.username, email: user.email, passwordHash: user.passwordHash });
+    const run = [show(6), show(7), show(8)];
+    try {
+      await page.goto("/login");
+      await waitForHydration(page, "#login-email");
+      await page.locator("#login-email").fill(user.email);
+      await page.locator("#login-password").fill(user.password);
+      await Promise.all([
+        page.waitForURL((url) => !url.pathname.startsWith("/login")),
+        page.locator('button[type="submit"]').click(),
+      ]);
+      await open(page, WEEK_URL);
+
+      for (const s of run) {
+        const card = page.locator(`[data-anime-card][data-id="${s.anilistId}"]`);
+        // Mid-screen: a card at the bottom edge would sit under the toast.
+        await card.evaluate((el) => el.scrollIntoView({ block: "center" }));
+        await card.hover();
+        await card.locator('[data-follow="off"]').click();
+        await expect(card.locator('[data-follow="on"]')).toBeAttached();
+        await expect(page.locator('[data-toast][data-visible="true"]')).toHaveCount(1);
+      }
+      const toast = page.locator('[data-toast][data-visible="true"]');
+      const last = run[run.length - 1] as WeekShow;
+      await expect(toast).toContainText(last.titleChinese as string);
+      await expect(toast).toContainText("已加入「在看」");
+      await expect(toast.getByRole("button", { name: "撤销" })).toBeVisible();
+
+      // At the bottom of the window, clear of the navigation.
+      const box = await toast.boundingBox();
+      const viewport = page.viewportSize();
+      expect(box && viewport).toBeTruthy();
+      if (box && viewport) {
+        expect(box.y).toBeGreaterThan(viewport.height / 2);
+        expect(viewport.height - (box.y + box.height)).toBeLessThan(60);
+      }
+    } finally {
+      await resetSubscriptions(user.email, run.map((s) => s.anilistId));
+    }
+  });
+
   test("✓ pressed again unfollows a bare follow, and asks first before progress goes", async ({ page }) => {
     test.setTimeout(90_000);
     const user = makeUser();
@@ -585,7 +629,7 @@ test.describe("following from a card", () => {
       await expect.poll(() => readSubscription(user.email, bare.anilistId)).toBeNull();
       await expect(page.locator("[data-unfollow-dialog]")).toHaveCount(0);
       // The toast's Undo follows it again.
-      await page.locator("span", { hasText: "已取消追番" }).getByRole("button", { name: "撤销" }).click();
+      await page.locator("[data-toast]", { hasText: "已取消追番" }).getByRole("button", { name: "撤销" }).click();
       await expect(bareCard.locator('[data-follow="on"]')).toBeAttached();
       await expect.poll(async () => (await readSubscription(user.email, bare.anilistId))?.status).toBe("watching");
 

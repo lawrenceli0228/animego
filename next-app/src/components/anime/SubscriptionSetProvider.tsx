@@ -34,10 +34,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type SetStateAction,
 } from "react";
 import toast, { type Toast } from "react-hot-toast";
+import { ToastChevron, ToastWhat } from "@/components/ui/ToastParts";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { useLang } from "@/lib/lang-client";
@@ -104,19 +104,6 @@ const SubscriptionSetContext = createContext<SubscriptionSetApi | null>(null);
 // Shared confirmation toast
 // ---------------------------------------------------------------------------
 
-const toastRowStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 10,
-};
-
-const toastLinkStyle: CSSProperties = {
-  color: "#0a84ff",
-  fontWeight: 600,
-  textDecoration: "none",
-  whiteSpace: "nowrap",
-};
-
 /**
  * The confirmation shown when a stashed intent is replayed after login.
  *
@@ -142,17 +129,18 @@ export function showReplayAddedToast(t: (key: string) => string): void {
   }
   toast.success(
     (instance: Toast) => (
-      <span style={toastRowStyle}>
-        {t("sub.toastAdded")}
+      <>
+        <ToastWhat>{t("sub.toastAdded")}</ToastWhat>
         <Link
           href="/profile"
           prefetch={false}
-          style={toastLinkStyle}
+          className="agc-toast-link"
           onClick={() => toast.dismiss(instance.id)}
         >
           {t("sub.toastViewList")}
+          <ToastChevron />
         </Link>
-      </span>
+      </>
     ),
     // Same budget the click path gives its actionable toast. A toast whose
     // point is that the reader travels somewhere cannot use the Toaster's
