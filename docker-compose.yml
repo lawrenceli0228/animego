@@ -257,6 +257,11 @@ services:
       # mirror switch above, an empty value in .env.production turns the job
       # off.
       IMAGE_WARM_BASE_URL: ${IMAGE_WARM_BASE_URL-http://nginx:8090/warm/}
+      # The variant warm job asks nginx's internal image location, overnight,
+      # for every variant of those images the pages show, so nginx encodes and
+      # keeps each before a reader needs it. The same internal-only port. An
+      # empty value in .env.production turns the job off.
+      IMAGE_VARIANT_WARM_BASE_URL: ${IMAGE_VARIANT_WARM_BASE_URL-http://nginx:8090/_next/image}
     volumes:
       # Member-pass photos live here (served at /api/avatars/*). A named
       # volume keeps them across deploys — back this up alongside postgres.

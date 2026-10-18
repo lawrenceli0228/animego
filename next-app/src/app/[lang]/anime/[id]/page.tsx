@@ -37,6 +37,7 @@ import {
   parseAnimeId,
 } from "./_detail/detailData";
 import { seasonLabel, statusLabel } from "./_detail/detailLabels";
+import { PORTRAIT_H, PORTRAIT_W, POSTER_SRC_H, POSTER_SRC_W, STAFF_AVATAR } from "./_detail/sectionImageSizes";
 import { characterRoleLabel } from "@/lib/detail/cast";
 import { detailTabHref } from "@/lib/detail/tabs";
 import { characterPath, personPath } from "@/lib/people/paths";
@@ -273,27 +274,9 @@ const DESC_TRUNCATE_WIDTH = 300;
 
 // --- Relations section ---
 
-// --- Intrinsic sizes for the images in these four sections ---
-//
-// These are next/image's srcset basis, NOT the CSS box: the layout lives in
-// sections.module.css and the tiles are fluid. Next derives a 1x/2x pair from
-// `width`, so the number has to be at least the widest the tile ever renders
-// or every cover is upscaled on a retina screen — which is exactly what the
-// old width={110} did to a 110px tile the moment anything grew it.
-//
-// Poster: 7:10, matching the hero cover. AniList's large covers are 460x650,
-// so 7:10 crops almost nothing (page.module.css says the same thing about
-// `.cover`). 160 is the widest a `.posterGrid` track gets — 192px at a 400px
-// viewport, where the 2x candidate Next emits (384w) still covers it.
-const POSTER_SRC_W = 160;
-const POSTER_SRC_H = 229;
-// Character / voice-actor portraits. Enlarged from 58x76 — see the note on
-// `.people` in sections.module.css for why the grid track had to widen with
-// them rather than after them.
-const PORTRAIT_W = 64;
-const PORTRAIT_H = 86;
-// Staff avatar, up from 36. A 36px circle beside a name reads as a bullet.
-const STAFF_AVATAR = 44;
+// The intrinsic sizes for the images in these four sections live in
+// _detail/sectionImageSizes.ts, with why each is what it is and the
+// contract they hold with nginx's cache.
 
 
 /* The complete record, as a definition list.

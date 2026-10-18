@@ -163,6 +163,14 @@ var productionQueues = map[string]Concurrency{
 	// only run a second pass beside it at twice the rate against AniList.
 	ImageWarmQueueName: FixedConcurrency(1,
 		"a pass paces its own requests; a second slot could only add a second pass at twice the rate against AniList"),
+
+	// Variant warm.  Its own queue because a pass runs for most of an hour,
+	// every hour of the night, and on image_warm's slot the two jobs would
+	// hold each other off for whole nights (see ImageVariantWarmQueueName).
+	// One slot because one pass at a time is one request at a time: a
+	// second pass would put a second encode on the optimizer readers use.
+	ImageVariantWarmQueueName: FixedConcurrency(1,
+		"one pass is one request at a time; a second slot could only put a second encode on the optimizer readers share"),
 }
 
 // productionEntries declares every job kind.
@@ -333,5 +341,18 @@ var productionEntries = []Entry{
 		Args:     ImageWarmArgs{},
 		Queue:    ImageWarmQueueName,
 		Periodic: &PeriodicSpec{Interval: imageWarmInterval, RunOnStart: true},
+	},
+
+	// --- page variants of those images, encoded overnight ---
+
+	// Hourly and RunOnStart for the reason every sweep here has it, though
+	// the job runs only at night: a pass outside the window returns at once,
+	// and the night's progress is the job's own cursor, not river's
+	// schedule, so a deploy at night costs a walk from the top of the list
+	// (cheap: what was asked for is stored) and never a skipped night.
+	{
+		Args:     ImageVariantWarmArgs{},
+		Queue:    ImageVariantWarmQueueName,
+		Periodic: &PeriodicSpec{Interval: imageVariantWarmInterval, RunOnStart: true},
 	},
 }

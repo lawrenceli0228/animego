@@ -934,3 +934,31 @@
 **Context** — 2026-10-11 核对时，首轮回填预计还要 3–4 天：角色约 30 小时，人物资料约 1 天，角色资料约 3 天，职员约 4 天。判断跑完的办法：`ListAnimeCastCandidates` / `ListAnimeStaffCandidates` 里不再有从未扫过（`cast_checked_at` / `staff_checked_at` 为空）的行，`ListPeopleCandidates` / `ListCharacterCandidates` 不再返回缺资料的人物和角色。下一个数据包是 2026-10-13，届时用最新的那份。
 
 **Depends on / blocked by** — 两条 sweep 的首轮回填完成。
+
+## 预压范围第二期：详情页的预告片缩略图
+
+**What** — 把详情页的预告片缩略图（i.ytimg.com，页面实际请求的宽度）加进 `image_variant_warm` 的夜间预压清单，并在 nginx 的 `$next_image_zone` 里把这些尺寸算作页面尺寸。
+
+**Why** — 第一期上线后，详情页首屏只剩预告片缩略图在第一次打开时要现压，实测要好几秒。
+
+**Pros** — 有预告片的番，详情页首屏的图全部从缓存出。
+
+**Cons** — 源图在 YouTube，不在我们的原图镜像里：压图服务要直接回源 YouTube，`image_manager` 也不记录这类图，所以「只压镜像里已有原图的」这条规则管不到它，YouTube 回源的失败和限流要单独处理。分区规则现在只认 AniList 地址，要为 YouTube 地址另写一条。
+
+**Context** — 第一期只覆盖 AniList 图（详情页、季度页）：见 `nginx/default.p9.conf` 的 `$next_image_zone`、`go-api/internal/queue/image_variant_warm.go`、`next-app/src/lib/images/imageVariantShapes.test.tsx`。预告片缩略图由 `next.config.ts` 里 i.ytimg.com 的 remotePatterns 放行。
+
+**Depends on / blocked by** — 第一期上线后，用 `/_next/image` 访问日志行尾的 `cache=… zone=…` 字段确认预告片缩略图的请求占比和命中率，值得再做。
+
+## 预压范围第二期：2 倍屏手机用的 828 宽横幅
+
+**What** — 把 828 宽的横幅加进夜间预压清单（`image_variant_warm` 的清单和对应测试）。分区规则已经把 828 算作页面尺寸，只是没有预压。
+
+**Why** — 宽 390 点上下的 2 倍屏手机打开老番时，横幅要的是 828 宽，第一次打开仍要现压；桌面、2 倍屏 Mac 用 1920，3 倍屏 iPhone 用 1200，都已预压。
+
+**Pros** — 只多一个宽度，每部有横幅的番多压一张。
+
+**Cons** — 不知道真实访客里有多少会请求 828，可能是为很少的人多压一批。
+
+**Context** — `next.config.ts` 的 `deviceSizes` 是 640/828/1080/1200/1920，横幅是 `sizes="100vw"`，浏览器按屏宽和倍率挑一个。
+
+**Depends on / blocked by** — 第一期上线后，用访问日志统计横幅各宽度的请求占比；828 占比明显再做。

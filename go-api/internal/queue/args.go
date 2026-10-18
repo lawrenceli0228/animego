@@ -568,6 +568,33 @@ func (ImageWarmArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// ImageVariantWarmArgs has nginx encode and keep, overnight, every variant
+// of an image the site's pages ask the image optimizer for.  See
+// image_variant_warm.go.
+//
+// No fields, like ImageWarmArgs and for its reasons: the work list is a
+// query (ListImageVariantWarmTargets), and one job is one pass rather than
+// one image, because a pass is many thousands of requests paced a few
+// milliseconds apart and per-variant jobs would only add bookkeeping.
+type ImageVariantWarmArgs struct{}
+
+// Kind returns the river job kind for the variant warm job.
+func (ImageVariantWarmArgs) Kind() string { return "image_variant_warm" }
+
+// InsertOpts pins the job to its own queue (see ImageVariantWarmQueueName)
+// and collapses a second enqueue into the pass already in flight, with
+// ratingsUniqueStates for the reason ImageWarmArgs gives: an hourly job
+// whose unique states included completed would fire once a day.
+func (ImageVariantWarmArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: ImageVariantWarmQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: ratingsUniqueStates,
+		},
+	}
+}
+
 // BangumiRatingsArgs re-reads Bangumi's score and vote count for the
 // rows that are due, one subject request per row.
 //

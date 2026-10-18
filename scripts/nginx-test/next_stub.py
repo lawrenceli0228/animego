@@ -1,8 +1,10 @@
 """Stand-in for next-image (and next-app) in the nginx behaviour harness.
 
 :3000 answers every request with a 1x1 PNG.  The url query parameter picks a
-delay, so the harness can make an image slow on purpose: a url starting with
-/veryslow waits 40s, /slower 5s, /slow 1s, anything else answers at once.
+delay, so the harness can make an image slow on purpose: a url whose file
+name starts with veryslow waits 40s, slower 5s, slow 1s, anything else
+answers at once.  (The file name, so that an AniList-shaped address such as
+.../cover/large/slower-x.png can be slow too, not only /slower-x.png.)
 X-Stub names the stand-in that answered (STUB_NAME), and X-Url echoes the
 url it was asked for, which shows whose bytes a cached answer holds.
 
@@ -19,15 +21,16 @@ PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
     "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082"
 )
-DELAYS = (("/veryslow", 40.0), ("/slower", 5.0), ("/slow", 1.0))
+DELAYS = (("veryslow", 40.0), ("slower", 5.0), ("slow", 1.0))
 
 lock = threading.Lock()
 stats = {"hits": 0, "inflight": 0, "max_inflight": 0}
 
 
 def delay_for(url: str) -> float:
+    name = url.rsplit("/", 1)[-1]
     for prefix, seconds in DELAYS:
-        if url.startswith(prefix):
+        if name.startswith(prefix):
             return seconds
     return 0.0
 
