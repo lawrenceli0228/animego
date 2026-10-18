@@ -193,10 +193,11 @@
   }
 }
 
-/* Under the pointer the artwork eases in, on a layer of its own the whole
- * time: cards.module.css's pointer block says why it is never dropped. */
+/* Under the pointer the artwork eases in; the box and the image keep layers
+ * of their own the whole time, as cards.module.css's pointer block explains. */
 @media (hover: hover) and (pointer: fine) {
-  .chArt {
+  .chArt,
+  .chImg {
     will-change: transform;
   }
 

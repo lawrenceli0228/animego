@@ -565,11 +565,14 @@
   }
 
   /* Under the pointer the artwork eases in a little; the frame, the badge and
-   * the follow button stay where they are. The artwork keeps a layer of its
-   * own the whole time: one that is dropped as the zoom settles has the image
-   * drawn afresh, and it visibly sharpens in that last frame (measured frame
-   * by frame at 1x, 2x and 80% zoom). */
-  .art {
+   * the follow button stay where they are. The box and the image each keep a
+   * layer of their own the whole time (measured frame by frame at 1x, 2x and
+   * 80% zoom): a box whose layer is dropped as the zoom settles has the image
+   * drawn afresh, and it visibly sharpens in that last frame; an image without
+   * its own is repainted into the box's layer as it grows, and flickers
+   * between soft and sharp on the way. */
+  .art,
+  .coverImg {
     will-change: transform;
   }
 
