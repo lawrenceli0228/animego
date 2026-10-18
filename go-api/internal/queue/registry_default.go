@@ -108,7 +108,18 @@ var productionQueues = map[string]Concurrency{
 	// passes could each pass it for the same subject and both bind, and
 	// anime_cache.bgm_id has no unique index to catch it.  A single slot is
 	// what makes that race unreachable BETWEEN JOBS IN THIS PROCESS, and it
-	// is why every writer of anime_cache.bgm_id shares this queue.
+	// is why every writer of anime_cache.bgm_id shares this queue.  Two run
+	// here: the id-map sweep and the weekly re-search (bgm_rebind_search.go),
+	// whose single-row bind has the same check-then-write shape.  V1 is the
+	// exception -- it rides the default queue with V2 -- so this slot does
+	// not serialise a V1 bind against either sweep.  V1 and the re-search
+	// never share a ROW (V1 writes version-0 rows only, and every re-search
+	// write refuses them), but they can reach for the same SUBJECT, as V1 and
+	// the id-map sweep always could.  Each bind's NOT EXISTS sees only
+	// committed binds, so the exposure is V1's single-statement UPDATE
+	// overlapping a sweep's bind transaction -- milliseconds.  Closing it for
+	// every writer is the TODOS.md entry on making the database enforce
+	// one-subject-one-row.
 	//
 	// Be precise about what it buys, because the obvious reading is wrong
 	// in two directions.
@@ -232,6 +243,16 @@ var productionEntries = []Entry{
 		Args:     BindIdMapArgs{},
 		Queue:    BgmBindQueueName,
 		Periodic: &PeriodicSpec{Interval: bindIdMapInterval, RunOnStart: true},
+	},
+
+	// The weekly re-search of airing and upcoming rows V1 parked.  Same queue
+	// as the id-map sweep because it writes the same column; RunOnStart for
+	// the reason every sweep here has it, and the read stamp is what makes a
+	// boot pass cheap: rows searched within the week are not candidates.
+	{
+		Args:     BgmRebindArgs{},
+		Queue:    BgmBindQueueName,
+		Periodic: &PeriodicSpec{Interval: rebindSearchInterval, RunOnStart: true},
 	},
 
 	// --- zh-Hant sweep ---

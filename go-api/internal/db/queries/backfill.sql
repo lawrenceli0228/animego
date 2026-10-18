@@ -35,6 +35,8 @@ SET bgm_id           = NULL,
     bgm_match_source = NULL,
     admin_flag       = NULL,
     bangumi_version  = 0,
+    -- No version-0 row carries the rebind sweep's stamp; see bgm_rebind.sql.
+    bgm_rebind_checked_at = NULL,
     updated_at       = now()
 WHERE anilist_id = ANY($1::integer[]);
 
