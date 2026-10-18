@@ -59,7 +59,7 @@
 //	      200 HIT, STALE, UPDATING, REVALIDATED ─► hit: stored already
 //	      200 MISS, EXPIRED ────────────────────► filled: encoded and stored now
 //	      200 BYPASS ───────────────────────────► refreshed: encoded again, replacing the entry
-//	      503, 429 ─────────────────────────────► the optimizer is busy: pause 10 minutes
+//	      503, 429 ─────────────────────────────► the optimizer is busy: pause 2 minutes
 //	      404, 410, other 4xx but 400 ──────────► missing; one WARN a pass
 //	      400, 401, 403, 3xx, other 5xx,
 //	      a timeout, a 200 with no cache
@@ -67,7 +67,7 @@
 //	      cannot connect ───────────────────────► WARN; STOP; the 3rd pass in a row to
 //	                                              stop here ─► ERROR
 //	      pass cancelled ───────────────────────► STOP, quietly (a deploy)
-//	    and any answer that took longer than 5 s ─► pause 10 minutes as well
+//	    and an answer that is merely slow ──────► nothing: the next request waits for it
 //	 INFO: one summary line
 //
 // # When
@@ -123,12 +123,20 @@
 //
 // A 503 is nginx saying the optimizer is busy (its answer when the
 // optimizer is saturated or down), which is not a failure of anything this
-// job asked for: the pass pauses and goes on.  A request slower than
-// imageVariantWarmSlowAfter says the same thing more quietly -- the
-// optimizer is working through other traffic -- and pauses the pass too.
-// After a pause the pass moves on to the next variant: the one that met the
-// 503 is left for tomorrow's pass, or for a reader, rather than asked again
-// into the same queue.  A pause never outlasts the budget or the window.
+// job asked for: the pass pauses and goes on.  After a pause the pass moves
+// on to the next variant: the one that met the 503 is left for tomorrow's
+// pass, or for a reader, rather than asked again into the same queue.  A
+// pause never outlasts the budget or the window.
+//
+// A slow answer is no reason to pause.  The pass sends one request at a
+// time, the next only once the last is answered, so while the optimizer
+// works through other traffic this job's request waits its turn in the
+// queue, and the job slows down with the queue by itself.  A pass that
+// paused on every slow answer as well would stand idle for as long as
+// other traffic keeps the optimizer busy, which can be most of the window.
+// What does still pause it is an answer too slow for nginx: one that has
+// not come within the minute nginx waits on the optimizer arrives as a
+// 503, and the pass pauses as it does for any busy answer.
 //
 // A 200 without an X-Cache-Status is a failure as well.  It means the
 // answer did not come through nginx's cache -- IMAGE_VARIANT_WARM_BASE_URL
@@ -205,14 +213,11 @@ const (
 	// progress is not abandoned by our hanging up.
 	imageVariantWarmRequestTimeout = 90 * time.Second
 
-	// imageVariantWarmSlowAfter is the answer time beyond which the
-	// optimizer is taken to be busy with other traffic.  A stored variant
-	// answers in milliseconds and an idle encode in about a second.
-	imageVariantWarmSlowAfter = 5 * time.Second
-
-	// imageVariantWarmPause is how long a pass waits after a busy or slow
-	// answer before it asks again.
-	imageVariantWarmPause = 10 * time.Minute
+	// imageVariantWarmPause is how long a pass waits after a busy answer (a
+	// 503 or a 429) before it asks again: one request every two minutes is
+	// nothing to a saturated optimizer, and a burst of busy answers costs
+	// the night a few minutes, not the rest of the pass.
+	imageVariantWarmPause = 2 * time.Minute
 
 	// imageVariantWarmGroups is the refresh cycle in nights: one group of
 	// images a night is encoded again (see the file comment).  Under the 30
@@ -255,10 +260,9 @@ type ImageVariantWarmWorker struct {
 	// time and the pauses all read it.  Tests replace both.
 	now   func() time.Time
 	sleep func(context.Context, time.Duration) error
-	// The pacing, the slow threshold and the pause: the constants above,
-	// held here so tests can shorten them.
+	// The pacing and the pause: the constants above, held here so tests can
+	// shorten them.
 	requestGap time.Duration
-	slowAfter  time.Duration
 	pauseFor   time.Duration
 	// unreachablePasses counts the passes in a row that stopped because the
 	// endpoint took no connection; any answer from it resets the count.
@@ -277,7 +281,6 @@ func NewImageVariantWarmWorker(store ImageVariantWarmStore) *ImageVariantWarmWor
 		now:        time.Now,
 		sleep:      sleepCtx,
 		requestGap: imageVariantWarmRequestGap,
-		slowAfter:  imageVariantWarmSlowAfter,
 		pauseFor:   imageVariantWarmPause,
 	}
 }
@@ -535,16 +538,9 @@ func (p *variantWarmPass) record(ctx context.Context, t variantTarget, a variant
 	case variantBusy:
 		// Neither a failure nor a success: it says nothing about whether
 		// the requests work, only that the optimizer has no room now.
-		p.pause(ctx, "busy", t, a, took)
-		return
+		p.pause(ctx, t, a, took)
 	default:
 		p.onFailure(ctx, t, a)
-		if p.stopped {
-			return
-		}
-	}
-	if took > p.w.slowAfter {
-		p.pause(ctx, "slow", t, a, took)
 	}
 }
 
@@ -552,7 +548,7 @@ func (p *variantWarmPass) record(ctx context.Context, t variantTarget, a variant
 // the window runs out if that is sooner, and then the pass goes on with the
 // next variant: the one that met the busy answer is left for tomorrow's
 // pass (see the file comment).
-func (p *variantWarmPass) pause(ctx context.Context, why string, t variantTarget, a variantAnswer, took time.Duration) {
+func (p *variantWarmPass) pause(ctx context.Context, t variantTarget, a variantAnswer, took time.Duration) {
 	p.paused++
 	now := p.w.clock()
 	until := now.Add(p.w.pauseFor)
@@ -564,7 +560,7 @@ func (p *variantWarmPass) pause(ctx context.Context, why string, t variantTarget
 	}
 	wait := max(until.Sub(now), 0)
 	slog.InfoContext(ctx, "image variant warm: optimizer busy, pausing",
-		"why", why, "status", a.status, "took", took.Round(time.Millisecond),
+		"status", a.status, "took", took.Round(time.Millisecond),
 		"url", t.url, "width", t.width, "pause", wait)
 	if wait == 0 {
 		return

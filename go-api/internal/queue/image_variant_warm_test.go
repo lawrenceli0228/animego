@@ -426,8 +426,7 @@ func TestImageVariantWarmTiming(t *testing.T) {
 		"longer than nginx waits on the optimizer, so nginx answers first")
 	assert.Equal(t, imageVariantWarmRequestTimeout, NewImageVariantWarmWorker(nil).client.Timeout)
 	assert.Equal(t, 5*time.Millisecond, imageVariantWarmRequestGap, "about 200 requests a second")
-	assert.Equal(t, 5*time.Second, imageVariantWarmSlowAfter)
-	assert.Equal(t, 10*time.Minute, imageVariantWarmPause)
+	assert.Equal(t, 2*time.Minute, imageVariantWarmPause)
 	assert.Less(t, time.Duration(imageVariantWarmGroups)*24*time.Hour, 30*24*time.Hour,
 		"every variant is refreshed inside the 30 days nginx keeps it valid")
 }
@@ -501,9 +500,7 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 			}
 			return stubHit
 		})
-		w := newTestVariantWorker(newVariantStore(relatedRow(1), relatedRow(2)), clock)
-		w.slowAfter = time.Hour // only the window is under test
-		runVariantPass(t, w)
+		runVariantPass(t, newTestVariantWorker(newVariantStore(relatedRow(1), relatedRow(2)), clock))
 		assert.Len(t, stub.requests(), 2, "the second answer arrives at 03:15, and nothing is sent after it")
 		summary := variantSummary(t, logs)
 		assert.Equal(t, "window", summary["stopped"])
@@ -622,7 +619,7 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 		assert.EqualValues(t, 2, variantSummary(t, logs)["hit"])
 	})
 
-	t.Run("a 503 pauses the pass ten minutes, is no failure, and the pass moves on", func(t *testing.T) {
+	t.Run("a 503 pauses the pass two minutes, is no failure, and the pass moves on", func(t *testing.T) {
 		logs := captureImageWarmLogs(t)
 		rows := []dbgen.ListImageVariantWarmTargetsRow{relatedRow(1), relatedRow(2), relatedRow(3)}
 		clock := newVariantClock(nightAvoiding(t, rows))
@@ -638,7 +635,7 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 			variantCover(1) + " 256", variantCover(1) + " 384", variantCover(2) + " 256",
 			variantCover(2) + " 384", variantCover(3) + " 256", variantCover(3) + " 384",
 		}, stub.asked(), "each variant once: the one that met a 503 is not asked again tonight")
-		assert.Equal(t, []time.Duration{10 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute},
+		assert.Equal(t, []time.Duration{2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute},
 			clock.pauses(), "four 503s in a row, four pauses, and no stop")
 		summary := variantSummary(t, logs)
 		assert.EqualValues(t, 4, summary["paused"])
@@ -659,40 +656,35 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 			return stubHit
 		})
 		runVariantPass(t, newTestVariantWorker(newVariantStore(row), clock))
-		assert.Equal(t, []time.Duration{10 * time.Minute}, clock.pauses())
+		assert.Equal(t, []time.Duration{2 * time.Minute}, clock.pauses())
 		assert.EqualValues(t, 0, variantSummary(t, logs)["failed"])
 	})
 
-	t.Run("an answer slower than the threshold pauses the pass and still counts as what it was", func(t *testing.T) {
-		for _, tc := range []struct {
-			name      string
-			slowAfter time.Duration
-			took      time.Duration
-			pauses    int
-		}{
-			{"over the 5 s default", imageVariantWarmSlowAfter, 6 * time.Second, 1},
-			{"at the 5 s default", imageVariantWarmSlowAfter, 5 * time.Second, 0},
-			{"over a short threshold", 100 * time.Millisecond, 150 * time.Millisecond, 1},
-			{"under a short threshold", 100 * time.Millisecond, 50 * time.Millisecond, 0},
-		} {
-			logs := captureImageWarmLogs(t)
-			row := relatedRow(1)
-			clock := newVariantClock(nightAvoiding(t, []dbgen.ListImageVariantWarmTargetsRow{row}))
-			newVariantStub(t, clock, func(n int, _ variantStubRequest) variantStubAnswer {
-				if n == 1 {
-					return variantStubAnswer{status: http.StatusOK, cacheStatus: "MISS", took: tc.took}
-				}
+	t.Run("slow answers never pause the pass: each request waits for the one before", func(t *testing.T) {
+		// The optimizer working through other traffic all night: every encode
+		// slow, from a few seconds to just under nginx's own minute.
+		logs := captureImageWarmLogs(t)
+		rows := []dbgen.ListImageVariantWarmTargetsRow{relatedRow(1), relatedRow(2), relatedRow(3)}
+		start := nightAvoiding(t, rows)
+		clock := newVariantClock(start)
+		took := []time.Duration{6 * time.Second, 18 * time.Second, 59 * time.Second, 6 * time.Second, 30 * time.Second}
+		stub := newVariantStub(t, clock, func(n int, _ variantStubRequest) variantStubAnswer {
+			if n > len(took) {
 				return stubHit
-			})
-			w := newTestVariantWorker(newVariantStore(row), clock)
-			w.slowAfter = tc.slowAfter
-			runVariantPass(t, w)
-			assert.Len(t, clock.pauses(), tc.pauses, tc.name)
-			summary := variantSummary(t, logs)
-			assert.EqualValues(t, tc.pauses, summary["paused"], tc.name)
-			assert.EqualValues(t, 1, summary["filled"], tc.name)
-			assert.EqualValues(t, 0, summary["failed"], tc.name)
+			}
+			return variantStubAnswer{status: http.StatusOK, cacheStatus: "MISS", took: took[n-1]}
+		})
+		runVariantPass(t, newTestVariantWorker(newVariantStore(rows...), clock))
+
+		assert.Len(t, stub.requests(), 6, "every variant, back to back")
+		assert.Empty(t, clock.pauses())
+		summary := variantSummary(t, logs)
+		for key, want := range map[string]any{"filled": 5, "hit": 1, "paused": 0, "failed": 0, "stopped": "done"} {
+			assert.EqualValues(t, want, summary[key], key)
 		}
+		assert.Equal(t, start.Add(119*time.Second), clock.now(), "the pass took as long as the answers did, and no longer")
+		assert.Empty(t, logs.messages(slog.LevelWarn))
+		assert.Empty(t, logs.messages(slog.LevelError))
 	})
 
 	t.Run("a pause never outlasts the budget", func(t *testing.T) {
@@ -701,21 +693,21 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 		start := nightAvoiding(t, rows)
 		clock := newVariantClock(start)
 		stub := newVariantStub(t, clock, func(int, variantStubRequest) variantStubAnswer {
-			return variantStubAnswer{status: http.StatusServiceUnavailable, took: 45 * time.Minute}
+			return variantStubAnswer{status: http.StatusServiceUnavailable, took: 49 * time.Minute}
 		})
 		runVariantPass(t, newTestVariantWorker(newVariantStore(rows...), clock))
 		assert.Len(t, stub.requests(), 1)
-		assert.Equal(t, []time.Duration{5 * time.Minute}, clock.pauses(), "the five minutes left of the 50")
+		assert.Equal(t, []time.Duration{time.Minute}, clock.pauses(), "the minute left of the 50")
 		assert.Equal(t, "time", variantSummary(t, logs)["stopped"])
 	})
 
 	t.Run("a pause never outlasts the window", func(t *testing.T) {
 		logs := captureImageWarmLogs(t)
-		clock := newVariantClock(cst(19, 3, 10, 0))
+		clock := newVariantClock(cst(19, 3, 14, 0))
 		stub := newVariantStub(t, clock, always(variantStubAnswer{status: http.StatusServiceUnavailable}))
 		runVariantPass(t, newTestVariantWorker(newVariantStore(relatedRow(1), relatedRow(2)), clock))
 		assert.Len(t, stub.requests(), 1)
-		assert.Equal(t, []time.Duration{5 * time.Minute}, clock.pauses(), "until 03:15, when the backup's stretch starts")
+		assert.Equal(t, []time.Duration{time.Minute}, clock.pauses(), "until 03:15, when the backup's stretch starts")
 		assert.Equal(t, "window", variantSummary(t, logs)["stopped"])
 	})
 
@@ -812,7 +804,7 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 		assert.Equal(t, variantCover(1), logAttrs(t, logs, logs.messages(slog.LevelWarn)[0])["url"], "the sample")
 	})
 
-	t.Run("a request nginx never answers is a failure, and a pause", func(t *testing.T) {
+	t.Run("a request nginx never answers is a failure, and the pass goes on", func(t *testing.T) {
 		logs := captureImageWarmLogs(t)
 		row := relatedRow(1)
 		clock := newVariantClock(nightAvoiding(t, []dbgen.ListImageVariantWarmTargetsRow{row}))
@@ -827,7 +819,7 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 		runVariantPass(t, w)
 		summary := variantSummary(t, logs)
 		assert.EqualValues(t, 1, summary["failed"])
-		assert.EqualValues(t, 1, summary["paused"])
+		assert.EqualValues(t, 0, summary["paused"], "a failure, not a busy answer")
 		assert.EqualValues(t, 1, summary["hit"])
 		assert.Equal(t, "done", summary["stopped"])
 	})
@@ -910,7 +902,6 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 			return stubHit
 		})
 		w := newTestVariantWorker(store, clock)
-		w.slowAfter = time.Hour // the cursor is under test, not the brakes
 		all := []string{
 			variantCover(1) + " 256", variantCover(1) + " 384", variantCover(2) + " 256",
 			variantCover(2) + " 384", variantCover(3) + " 256", variantCover(3) + " 384",
@@ -968,7 +959,6 @@ func TestImageVariantWarm_Pass(t *testing.T) {
 			return stubHit
 		})
 		w := newTestVariantWorker(newVariantStore(rows...), clock)
-		w.slowAfter = time.Hour
 
 		logs := captureImageWarmLogs(t)
 		runVariantPass(t, w)
