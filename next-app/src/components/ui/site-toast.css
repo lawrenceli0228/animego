@@ -1,0 +1,208 @@
+/*
+ * site-toast.css — the site's toasts (SiteToaster), in the family of the
+ * locale hint and the stale-tab notice: the same glass pill, the same white
+ * action, the same 260ms entrance.
+ *
+ * At the bottom centre and never at the top: there it sat over the navigation,
+ * which locale-hint.css already refuses to cover. Over the stale-tab notice,
+ * which also lives at the bottom centre, it would cover that, and so it would
+ * the library's undo bar; while either is up the toasts sit above it.
+ *
+ * The motion is a fade and a short rise, nothing scaled: react-hot-toast's own
+ * drop from 0.6x read as a bounce, and a scale on small glyphs ends in a
+ * visible twitch (DESIGN.md, 季度页 · 动效).
+ */
+
+:root {
+  --agc-toast-bottom: 28px;
+}
+
+@media (max-width: 600px) {
+  :root {
+    --agc-toast-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+:root:has(.agc-stale-tab) {
+  --agc-toast-bottom: 88px;
+}
+
+/* The library's undo bar (UndoToast) is at the bottom centre as well, 24px
+ * up; it publishes its height while it shows. */
+:root:has([data-bottom-notice]) {
+  --agc-toast-bottom: calc(24px + var(--agc-bottom-notice-h, 80px) + 12px);
+}
+
+.agc-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 10px 18px 10px 14px;
+  border-radius: 999px;
+  background: rgba(18, 18, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 24px 64px -20px rgba(0, 0, 0, 0.9);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 14px;
+  line-height: 1.3;
+  pointer-events: auto;
+  animation: agc-toast-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* An action pill sits 8px from the edge, like the stale-tab notice's. */
+.agc-toast:has(.agc-toast-action) {
+  padding: 8px 8px 8px 14px;
+}
+
+.agc-toast[data-type="blank"] {
+  padding-left: 18px;
+}
+
+.agc-toast[data-type="error"] {
+  border-color: rgba(255, 105, 97, 0.32);
+}
+
+.agc-toast[data-visible="false"] {
+  animation: agc-toast-out 180ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.agc-toast-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.agc-toast-spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(255, 255, 255, 0.86);
+  animation: agc-toast-spin 0.8s linear infinite;
+}
+
+.agc-toast-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* "[name] what happened": the name is quiet, and the first to give way. */
+.agc-toast-what {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agc-toast-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.6);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agc-toast-verb {
+  flex: none;
+  white-space: nowrap;
+}
+
+.agc-toast-action {
+  flex: none;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #101014;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.agc-toast-action:hover {
+  background: #ffffff;
+}
+
+.agc-toast-link {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 6px 4px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.72);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 150ms ease;
+}
+
+.agc-toast-link:hover {
+  color: #ffffff;
+}
+
+.agc-toast-link svg {
+  width: 12px;
+  height: 12px;
+}
+
+.agc-toast-action:focus-visible,
+.agc-toast-link:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@keyframes agc-toast-in {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes agc-toast-out {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes agc-toast-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* No rise and no fall; the loading ring still turns, slower, since a still
+ * one would read as stuck. */
+@media (prefers-reduced-motion: reduce) {
+  .agc-toast,
+  .agc-toast[data-visible="false"] {
+    animation-duration: 1ms;
+  }
+
+  .agc-toast-spinner {
+    animation-duration: 1.6s;
+  }
+}

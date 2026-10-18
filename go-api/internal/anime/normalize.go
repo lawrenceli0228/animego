@@ -59,8 +59,8 @@ import (
 // instead of inferring "never fetched" from an empty studio list.
 //
 // The four facts (start/end date, duration, source) need no such flag:
-// only AnimeDetailQuery selects them, every other document yields nil,
-// and the upsert COALESCEs nil away rather than writing it.
+// the detail, seasonal and facts documents select them, the search document
+// yields nil, and the upsert COALESCEs nil away rather than writing it.
 //
 // title_chinese, bgm_id, bangumi_score, bangumi_votes, bangumi_version
 // are NOT set here — Bangumi enrichment workers own those columns and

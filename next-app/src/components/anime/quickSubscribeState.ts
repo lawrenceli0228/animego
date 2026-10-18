@@ -9,6 +9,8 @@
 //
 // Everything here is string/enum in, string/enum out.
 
+import type { SubStatus, SubscriptionDoc } from "@/lib/subscriptionBus";
+
 /** What the button means right now. */
 export type QuickSubscribeMode = "signedOut" | "add" | "open";
 
@@ -23,8 +25,11 @@ export type QuickSubscribeMode = "signedOut" | "add" | "open";
  *
  * The subscribed mode is called `open`, not `remove`, on purpose: the name is
  * the contract. Whatever status the row carries — watching, completed,
- * dropped — the answer from this corner is always "go to the detail page",
- * so there is no branch here that could ever grow a DELETE.
+ * dropped — the answer from a poster corner is "go to the detail page", so
+ * there is no branch here that could ever grow a DELETE. The seasonal page's
+ * ✓ is the one exception, and it is not built on this mode alone: it unfollows
+ * through DELETE /:id/untouched, which the server refuses for any row with
+ * history, and asks first before the plain one (useQuickSubscribe.unfollow).
  */
 export function quickSubscribeMode(
   known: boolean,
@@ -47,4 +52,29 @@ export function loginTarget(pathname: string, search: string): string {
 /** Where ✓ sends the viewer: the surface that owns every other subscription verb. */
 export function detailTarget(anilistId: number): string {
   return `/anime/${anilistId}`;
+}
+
+/** The words for what a row holds, already in the page's language. */
+export interface UnfollowFactCopy {
+  /** "看到第 {{ep}} 集" */
+  episode: string;
+  /** "评分 {{score}}" */
+  score: string;
+  statuses: Record<SubStatus, string>;
+}
+
+/**
+ * What unfollowing would take, as short phrases for the question asked first:
+ * the progress, the score, and the status when it is not the quick-add one.
+ * Empty when the history is somewhere these do not reach — watch time with
+ * every mark taken back, a reply or a like on the status card — or the read
+ * failed; the dialog's sentence still says what goes.
+ */
+export function unfollowFacts(doc: SubscriptionDoc | null, copy: UnfollowFactCopy): string[] {
+  if (!doc) return [];
+  const facts: string[] = [];
+  if (doc.currentEpisode > 0) facts.push(copy.episode.split("{{ep}}").join(String(doc.currentEpisode)));
+  if (doc.score != null) facts.push(copy.score.split("{{score}}").join(String(doc.score)));
+  if (doc.status !== "watching") facts.push(copy.statuses[doc.status] ?? doc.status);
+  return facts;
 }

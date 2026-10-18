@@ -216,6 +216,23 @@ export function UndoToast({
     };
   }, [open, durationMs, dismiss]);
 
+  // The site's toasts sit at the bottom centre too (site-toast.css). While
+  // this bar is up it publishes its height, and they rise above it.
+  const regionRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = regionRef.current;
+    if (!open || !el) return undefined;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty("--agc-bottom-notice-h", `${el.offsetHeight}px`);
+    publish();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty("--agc-bottom-notice-h");
+    };
+  }, [open]);
+
   const pause = useCallback(() => {
     pausedRef.current = true;
     setPaused(true);
@@ -245,10 +262,12 @@ export function UndoToast({
 
   return (
     <div
+      ref={regionRef}
       style={s.region}
       role="status"
       aria-live="polite"
       data-testid={`${testId}-region`}
+      data-bottom-notice
     >
       <div
         data-testid={testId}

@@ -39,6 +39,66 @@ func (q *Queries) DeleteSubscription(ctx context.Context, userID uuid.UUID, anil
 	return result.RowsAffected(), nil
 }
 
+const deleteSubscriptionIfUntouched = `-- name: DeleteSubscriptionIfUntouched :execrows
+WITH untouched AS (
+    SELECT s.user_id, s.anilist_id
+    FROM subscriptions s
+    WHERE s.user_id = $1
+      AND s.anilist_id = $2
+      AND s.status = 'watching'
+      AND s.current_episode = 0
+      AND s.score IS NULL
+      AND s.last_watched_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM episode_watches w
+          WHERE w.user_id = s.user_id AND w.anilist_id = s.anilist_id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM activity_events e
+          WHERE e.user_id = s.user_id
+            AND e.anilist_id = s.anilist_id
+            AND e.event_type = 'status'
+            AND (
+                EXISTS (SELECT 1 FROM activity_likes l WHERE l.activity_event_id = e.id)
+                OR EXISTS (
+                    SELECT 1 FROM community_replies r
+                    WHERE r.activity_event_id = e.id AND r.deleted_at IS NULL
+                )
+            )
+      )
+    FOR UPDATE OF s
+), removed_status_events AS (
+    DELETE FROM activity_events e
+    USING untouched u
+    WHERE e.user_id = u.user_id
+      AND e.anilist_id = u.anilist_id
+      AND e.event_type = 'status'
+)
+DELETE FROM subscriptions s
+USING untouched u
+WHERE s.user_id = u.user_id
+  AND s.anilist_id = u.anilist_id
+`
+
+// DELETE /api/subscriptions/:anilistId/untouched: the seasonal page's ✓
+// pressed again.  Only a row that still holds nothing but the follow goes —
+// the quick-add status, no episode marked (the marks and current_episode are
+// written together; both are checked anyway), no watch time, no score, and no
+// status card that someone liked or answered.  Anything more and nothing is
+// deleted: 0 rows, which the handler tells apart from a missing row and
+// answers 409, so the page can ask before the history goes with it.
+//
+// An untouched row takes its status cards with it, as DeleteSubscription's
+// does.  FOR UPDATE holds the row against a progress write racing this one:
+// that write updates current_episode, and the re-check after the wait sees it.
+func (q *Queries) DeleteSubscriptionIfUntouched(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSubscriptionIfUntouched, userID, anilistID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getSubscription = `-- name: GetSubscription :one
 SELECT
     s.user_id,
@@ -310,6 +370,8 @@ type ListUserSubscriptionsRow struct {
 //	                                          (when the body sets ifAbsent)
 //	PATCH  /api/subscriptions/:anilistId    → UpdateSubscriptionWithActivity
 //	DELETE /api/subscriptions/:anilistId    → DeleteSubscription
+//	DELETE /api/subscriptions/:anilistId/untouched
+//	                                        → DeleteSubscriptionIfUntouched
 //
 // Express joined Subscription + AnimeCache in application code; here we
 // do the join in SQL so the network round-trip is one query for the

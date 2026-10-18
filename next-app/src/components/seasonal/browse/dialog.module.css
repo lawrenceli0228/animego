@@ -1,0 +1,106 @@
+/* The question asked before an unfollow takes history (UnfollowDialog). Modal
+ * level from DESIGN.md's Depth & Elevation table: #2c2c2e, the heavy shadow,
+ * a 0.6 overlay. It is portalled to <body>, outside the page's own scope, so
+ * it carries everything it needs here and inherits nothing from .page or
+ * .results — including the reduced-motion switch at the end. */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.6);
+  animation: fade 0.18s ease both;
+}
+
+.dialog {
+  width: min(380px, 100%);
+  padding: 22px 22px 18px;
+  border-radius: 14px;
+  background: #2c2c2e;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+
+.heading {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.show {
+  margin: 10px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: rgba(235, 235, 245, 0.9);
+  overflow-wrap: anywhere;
+}
+
+.facts {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.62);
+}
+
+.body {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(235, 235, 245, 0.62);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.keep,
+.confirm {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  color: #fff;
+  cursor: pointer;
+}
+
+.keep {
+  background: #3a3a3c;
+}
+
+/* A red dark enough for white text to clear 4.5:1 (#ff453a stops at 3.4). */
+.confirm {
+  background: #d70015;
+}
+
+.keep:focus-visible,
+.confirm:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@keyframes fade {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay {
+    animation: none;
+  }
+}

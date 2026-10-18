@@ -80,23 +80,25 @@ type fakeSubsDB struct {
 	// now calls it, and the ~20 pre-existing tests that exercise unrelated
 	// PATCH behaviour have no opinion on the episode ceiling.  Tests that
 	// DO care set it explicitly.
-	episodeCountFn func(ctx context.Context, anilistID int32) (*int32, error)
-	updateFn       func(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
-	deleteFn       func(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
-	markFn         func(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.MarkEpisodeWatchedRow, error)
-	unmarkFn       func(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.UnmarkEpisodeWatchedRow, error)
-	markManyFn     func(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error)
+	episodeCountFn      func(ctx context.Context, anilistID int32) (*int32, error)
+	updateFn            func(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
+	deleteFn            func(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	deleteIfUntouchedFn func(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	markFn              func(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.MarkEpisodeWatchedRow, error)
+	unmarkFn            func(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.UnmarkEpisodeWatchedRow, error)
+	markManyFn          func(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error)
 
-	listCalls         int32
-	getCalls          int32
-	upsertCalls       int32
-	ifAbsentCalls     int32
-	episodeCountCalls int32
-	updateCalls       int32
-	deleteCalls       int32
-	markCalls         int32
-	unmarkCalls       int32
-	markManyCalls     int32
+	listCalls              int32
+	getCalls               int32
+	upsertCalls            int32
+	ifAbsentCalls          int32
+	episodeCountCalls      int32
+	updateCalls            int32
+	deleteCalls            int32
+	deleteIfUntouchedCalls int32
+	markCalls              int32
+	unmarkCalls            int32
+	markManyCalls          int32
 }
 
 func (f *fakeSubsDB) ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error) {
@@ -182,6 +184,14 @@ func (f *fakeSubsDB) DeleteSubscription(ctx context.Context, userID uuid.UUID, a
 		panic("fakeSubsDB.DeleteSubscription not set")
 	}
 	return f.deleteFn(ctx, userID, anilistID)
+}
+
+func (f *fakeSubsDB) DeleteSubscriptionIfUntouched(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error) {
+	atomic.AddInt32(&f.deleteIfUntouchedCalls, 1)
+	if f.deleteIfUntouchedFn == nil {
+		panic("fakeSubsDB.DeleteSubscriptionIfUntouched not set")
+	}
+	return f.deleteIfUntouchedFn(ctx, userID, anilistID)
 }
 
 // fakeEnsureCachedDB satisfies anime.EnsureCachedDB with function
@@ -1486,6 +1496,78 @@ func TestDelete_MissingAuth_401(t *testing.T) {
 	req := newReq(t, http.MethodDelete, "/api/subscriptions/1", "", "1", nil)
 	rec := httptest.NewRecorder()
 	h.DeleteSubscription(rec, req)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+// -----------------------------------------------------------------------------
+// DeleteUntouchedSubscription — the seasonal page's ✓ pressed again
+// -----------------------------------------------------------------------------
+
+func TestDeleteUntouched(t *testing.T) {
+	t.Parallel()
+	boom := errors.New("boom")
+	cases := []struct {
+		name       string
+		deleted    int64
+		deleteErr  error
+		lookupErr  error // GetSubscription's answer after 0 rows; nil = the row is there
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "an untouched row goes", deleted: 1, wantStatus: http.StatusOK, wantBody: `{"data":{"message":"Deleted"}}`},
+		{name: "a row with history stays", wantStatus: http.StatusConflict, wantBody: `{"error":{"code":"CONFLICT","message":"Subscription has history"}}`},
+		// 200, not 404: on this route a 404 must only ever mean a server
+		// without the endpoint, which the page treats as a failure.
+		{name: "no row is already done", lookupErr: pgx.ErrNoRows, wantStatus: http.StatusOK, wantBody: `{"data":{"message":"Deleted"}}`},
+		{name: "the delete fails", deleteErr: boom, wantStatus: http.StatusInternalServerError},
+		{name: "the read fails", lookupErr: boom, wantStatus: http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			userID := uuid.New()
+			db := &fakeSubsDB{
+				deleteIfUntouchedFn: func(_ context.Context, gotUser uuid.UUID, anilistID int32) (int64, error) {
+					assert.Equal(t, userID, gotUser)
+					assert.Equal(t, int32(42), anilistID)
+					return tc.deleted, tc.deleteErr
+				},
+				getFn: func(_ context.Context, _ uuid.UUID, _ int32) (dbgen.GetSubscriptionRow, error) {
+					return dbgen.GetSubscriptionRow{}, tc.lookupErr
+				},
+			}
+			h := makeHandlersWithFakes(db, nil, nil)
+
+			ctx := withUserClaims(t, context.Background(), userID, "alice")
+			req := newReq(t, http.MethodDelete, "/api/subscriptions/42/untouched", "", "42", ctx)
+			rec := httptest.NewRecorder()
+			h.DeleteUntouchedSubscription(rec, req)
+
+			require.Equal(t, tc.wantStatus, rec.Code, "body=%s", rec.Body.String())
+			if tc.wantBody != "" {
+				assert.Equal(t, tc.wantBody, rec.Body.String())
+			}
+			assert.Zero(t, atomic.LoadInt32(&db.deleteCalls), "the unguarded delete never runs")
+		})
+	}
+}
+
+func TestDeleteUntouched_InvalidAnilistID_400(t *testing.T) {
+	t.Parallel()
+	h := makeHandlersWithFakes(&fakeSubsDB{}, nil, nil)
+	ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+	req := newReq(t, http.MethodDelete, "/api/subscriptions/abc/untouched", "", "abc", ctx)
+	rec := httptest.NewRecorder()
+	h.DeleteUntouchedSubscription(rec, req)
+	assertError(t, rec, http.StatusBadRequest, "BAD_REQUEST", "Invalid anime ID")
+}
+
+func TestDeleteUntouched_MissingAuth_401(t *testing.T) {
+	t.Parallel()
+	h := makeHandlersWithFakes(&fakeSubsDB{}, nil, nil)
+	req := newReq(t, http.MethodDelete, "/api/subscriptions/1/untouched", "", "1", nil)
+	rec := httptest.NewRecorder()
+	h.DeleteUntouchedSubscription(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 

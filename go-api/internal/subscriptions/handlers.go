@@ -130,6 +130,10 @@ type SubscriptionsDB interface {
 	// error.
 	UpdateSubscriptionWithActivity(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	// DeleteSubscriptionIfUntouched backs DELETE /{anilistId}/untouched: it
+	// deletes only a row holding nothing but the follow, and 0 rows means
+	// "missing" or "has history" — the handler reads the row to tell which.
+	DeleteSubscriptionIfUntouched(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 }
 
 // Handlers carries the deps shared by every /api/subscriptions/* handler.
@@ -785,6 +789,57 @@ func (h *Handlers) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 	if affected == 0 {
 		httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgSubscriptionNotFound))
 		return
+	}
+
+	httpx.Data(w, http.StatusOK, deleteResp{Message: msgDeletedSuccessMessage})
+}
+
+// DeleteUntouchedSubscription implements DELETE
+// /api/subscriptions/{anilistId}/untouched — the seasonal page's ✓ pressed
+// again.  It deletes the row only while it holds nothing but the follow (see
+// DeleteSubscriptionIfUntouched), and answers 409 CONFLICT for one holding
+// progress, a score, another status or a conversation on its status card, so
+// the page can ask before the plain DELETE takes all of that.
+//
+// A route of its own and not a flag on DELETE /{anilistId}: a server from
+// before this endpoint answers the path 404 and deletes nothing, where it
+// would have ignored an unknown query parameter and deleted the row
+// outright.  For the same reason "nothing to delete" is 200 here rather than
+// 404, so that a 404 can only mean "this server has no such endpoint".
+//
+// Flow:
+//  1. Auth claims check.
+//  2. Parse :anilistId.
+//  3. DeleteSubscriptionIfUntouched; 1 row → 200.
+//  4. 0 rows: read the row — missing → 200 (already gone), present → 409.
+func (h *Handlers) DeleteUntouchedSubscription(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	anilistID, ok := parseAnilistID(w, r)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+
+	affected, err := h.Queries.DeleteSubscriptionIfUntouched(ctx, claims.UserID, anilistID)
+	if err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "delete subscription failed"))
+		return
+	}
+	if affected == 0 {
+		_, err := h.Queries.GetSubscription(ctx, claims.UserID, anilistID)
+		switch {
+		case err == nil:
+			httpx.Fail(w, httpx.NewError(http.StatusConflict, httpx.CodeConflict, msgSubscriptionHasHistory))
+			return
+		case !errors.Is(err, pgx.ErrNoRows):
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "get subscription failed"))
+			return
+		}
 	}
 
 	httpx.Data(w, http.StatusOK, deleteResp{Message: msgDeletedSuccessMessage})

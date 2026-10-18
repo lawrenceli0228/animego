@@ -291,9 +291,9 @@ export default function AnimeCard({
   // traffic lands — those disagree. Following the cookie keeps these chips
   // English for an English reader instead of the "zh" the prop would give.
   // useLang() is SSR-seeded from the route locale and reconciled from
-  // the `lang` cookie after mount: the same source SearchExperience and
-  // SeasonalFilterChips read, so a card badge can never disagree with the
-  // filter chip sitting directly above it in the /search and /seasonal grids.
+  // the `lang` cookie after mount: the same source SearchExperience reads,
+  // so a card badge can never disagree with the filter chip sitting directly
+  // above it in the /search grid.
   const { lang: viewerLang } = useLang();
   const href = `/anime/${anime.anilistId}`;
   const title = pickTitle(anime, lang);

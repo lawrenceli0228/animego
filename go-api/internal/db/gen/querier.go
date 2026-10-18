@@ -483,6 +483,18 @@ type Querier interface {
 	// The title's status events go with it (migration 0046): off the list is
 	// off the anime's community tab, with the replies and likes on those cards.
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	// DELETE /api/subscriptions/:anilistId/untouched: the seasonal page's ✓
+	// pressed again.  Only a row that still holds nothing but the follow goes —
+	// the quick-add status, no episode marked (the marks and current_episode are
+	// written together; both are checked anyway), no watch time, no score, and no
+	// status card that someone liked or answered.  Anything more and nothing is
+	// deleted: 0 rows, which the handler tells apart from a missing row and
+	// answers 409, so the page can ask before the history goes with it.
+	//
+	// An untouched row takes its status cards with it, as DeleteSubscription's
+	// does.  FOR UPDATE holds the row against a progress write racing this one:
+	// that write updates current_episode, and the re-check after the wait sees it.
+	DeleteSubscriptionIfUntouched(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 	// So LockEntityOverlay has a row to lock even for a first edit.
 	EnsureEntityOverlay(ctx context.Context, kind string, entityID int32) error
 	// POST /api/admin/enrichment/:anilistId/flag — set admin_flag to one of
@@ -1194,6 +1206,17 @@ type Querier interface {
 	// silently matched nothing (lib/types.ts called this exact failure out as a
 	// risk of the cutover).  The subquery costs nothing extra in practice: the
 	// Hentai exclusion below already forces the same anime_genres lookup.
+	//
+	// The columns after trailer_site are what the seasonal page sorts, filters
+	// and badges by: popularity and favourites (sorts), the next episode (the
+	// air-time countdown and the weekday bars), start_date (the premiere-month
+	// bars), source (the source filter), duration and the main studio (the
+	// card's details), and is_sequel (new or sequel).  Two of them are read
+	// from child tables that only the detail fetch writes -- studio from
+	// anime_studios, is_sequel from anime_relations -- so a row that only
+	// listing upserts have written answers NULL for the studio ("not known
+	// yet", not "AniList has none") and relations_known false, which the
+	// handler turns into a null isSequel.  See internal/anime/seasonal.go.
 	GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error)
 	// /api/subscriptions/:anilistId — single subscription read.
 	// pgx.ErrNoRows → 404 "Subscription not found".
@@ -2165,6 +2188,8 @@ type Querier interface {
 	//                                             (when the body sets ifAbsent)
 	//   PATCH  /api/subscriptions/:anilistId    → UpdateSubscriptionWithActivity
 	//   DELETE /api/subscriptions/:anilistId    → DeleteSubscription
+	//   DELETE /api/subscriptions/:anilistId/untouched
+	//                                           → DeleteSubscriptionIfUntouched
 	//
 	// Express joined Subscription + AnimeCache in application code; here we
 	// do the join in SQL so the network round-trip is one query for the

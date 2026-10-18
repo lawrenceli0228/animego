@@ -50,8 +50,10 @@ func TestUpsertAnimeCache_FactsSurviveListingUpsert(t *testing.T) {
 	require.True(t, row.DetailFetchedAt.Valid, "detail document must stamp the row")
 	stampedAt := row.DetailFetchedAt.Time
 
-	// 2. Listing document for the same id: no facts selected, no children
-	//    selected.  Nothing it does not know may be erased.
+	// 2. Listing document for the same id, stating none of the facts (search
+	//    never selects them; the seasonal document does, and AniList answers
+	//    null for what it does not know), and no children selected.  Nothing
+	//    it does not know may be erased.
 	listing := anilist.Media{ID: 174184, Title: &anilist.Title{Romaji: sptr("Dearest Blue (listing)")}}
 	require.NoError(t, q.UpsertAnimeCache(ctx, NormalizeMainRow(listing, anilist.SeasonalDocument)))
 	row, err = q.GetAnimeMainByID(ctx, 174184)

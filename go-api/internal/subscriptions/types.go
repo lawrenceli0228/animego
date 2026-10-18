@@ -9,6 +9,7 @@
 //	POST   /api/subscriptions                            → CreateSubscription
 //	PATCH  /api/subscriptions/:anilistId                 → UpdateSubscription
 //	DELETE /api/subscriptions/:anilistId                 → DeleteSubscription
+//	DELETE /api/subscriptions/:anilistId/untouched       → DeleteUntouchedSubscription
 //	PUT    /api/subscriptions/:anilistId/episodes        → MarkEpisodesWatched
 //	PUT    /api/subscriptions/:anilistId/episodes/:ep    → MarkEpisodeWatched
 //	DELETE /api/subscriptions/:anilistId/episodes/:ep    → UnmarkEpisodeWatched

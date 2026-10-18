@@ -60,6 +60,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Link from "@/components/ui/LocaleLink";
 import { useLocaleRouter } from "@/components/ui/LocaleLink";
 import toast from "react-hot-toast";
+import { ToastChevron, ToastWhat } from "@/components/ui/ToastParts";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
 import {
@@ -116,20 +117,6 @@ const STATUS_VALUES: readonly SubStatus[] = [
 // the detail page and the card grid draw the same one-shot hint from the same
 // store, so a value that drifts between them would show the same user two
 // different windows for the same message and no test would catch it.
-
-const toastBodyStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "baseline",
-  flexWrap: "wrap",
-  gap: 10,
-};
-
-const toastLinkStyle: CSSProperties = {
-  color: "#0a84ff",
-  fontWeight: 600,
-  textDecoration: "none",
-  whiteSpace: "nowrap",
-};
 
 const wrapStyle: CSSProperties = {
   display: "flex",
@@ -550,16 +537,17 @@ export default function SubscriptionButton({
     // toast doesn't outlive the navigation it just triggered.
     toast.success(
       (instance) => (
-        <span style={toastBodyStyle}>
-          {t("sub.toastAdded")}
+        <>
+          <ToastWhat>{t("sub.toastAdded")}</ToastWhat>
           <Link
             href="/profile"
-            style={toastLinkStyle}
+            className="agc-toast-link"
             onClick={() => toast.dismiss(instance.id)}
           >
             {t("sub.toastViewList")}
+            <ToastChevron />
           </Link>
-        </span>
+        </>
       ),
       { duration: LIST_HINT_TOAST_MS },
     );

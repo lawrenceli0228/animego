@@ -2123,7 +2123,47 @@ SELECT
     -- See GetCompletedGems for why trailer_checked_at stays out of list
     -- projections.
     trailer_id,
-    trailer_site
+    trailer_site,
+    -- The alphabetically first main studio: the one GetAnimeStudiosByID
+    -- lists first, so the card and the detail page's Studio row agree.
+    --
+    -- An array of at most one rather than a scalar, for sqlc: it types a
+    -- scalar subquery over the NOT NULL studio column as a non-null string,
+    -- which cannot scan the NULL of a title with no main studio.  The
+    -- handler takes the first element.  Not a LEFT JOIN on anime_studios
+    -- either, which sqlc would type as nullable: the planner answers that
+    -- join with a hash over every main studio in the table, where this is
+    -- one primary-key probe per listed title.
+    ARRAY(
+        SELECT s.studio
+        FROM anime_studios s
+        WHERE s.anime_id = anime_cache.anilist_id AND s.is_main
+        ORDER BY s.studio
+        LIMIT 1
+    )::text[] AS main_studio,
+    -- The next episode as AniList last stated it.  As fresh as the row, so
+    -- it can lie in the past; the reader compares it with its own clock.
+    next_airing_at,
+    next_airing_episode,
+    popularity,
+    favourites,
+    source,
+    start_date,
+    duration,
+    -- A PREQUEL that is itself an anime.  A PREQUEL edge can also point at
+    -- a manga or a novel -- a prequel story nobody animated -- and that does
+    -- not make this title an anime sequel.
+    EXISTS (
+        SELECT 1 FROM anime_relations r
+        WHERE r.anime_id = anime_cache.anilist_id
+          AND r.relation_type = 'PREQUEL'
+          AND r.format IN ('TV', 'TV_SHORT', 'MOVIE', 'SPECIAL', 'OVA', 'ONA', 'MUSIC')
+    ) AS is_sequel,
+    -- Whether anime_relations has been written for this title at all: the
+    -- detail fetch writes it and stamps detail_fetched_at.  Until then
+    -- is_sequel's false cannot tell "no prequel" from "not fetched", and the
+    -- item says null.
+    (detail_fetched_at IS NOT NULL)::boolean AS relations_known
 FROM anime_cache
 WHERE
     season = $1
@@ -2139,34 +2179,44 @@ LIMIT $3 OFFSET $4
 `
 
 type GetSeasonalAnimeRow struct {
-	AnilistID             int32    `json:"anilistId"`
-	TitleRomaji           *string  `json:"titleRomaji"`
-	TitleEnglish          *string  `json:"titleEnglish"`
-	TitleNative           *string  `json:"titleNative"`
-	TitleChinese          *string  `json:"titleChinese"`
-	TitleHant             *string  `json:"titleHant"`
-	TitleHantSource       *string  `json:"titleHantSource"`
-	TitleHantSeo          *string  `json:"titleHantSeo"`
-	CoverImageUrl         *string  `json:"coverImageUrl"`
-	BannerImageUrl        *string  `json:"bannerImageUrl"`
-	CoverImageColor       *string  `json:"coverImageColor"`
-	PosterAccent          *string  `json:"posterAccent"`
-	AverageScore          *float64 `json:"averageScore"`
-	BangumiScore          *float64 `json:"bangumiScore"`
-	Episodes              *int32   `json:"episodes"`
-	Season                *string  `json:"season"`
-	SeasonYear            *int32   `json:"seasonYear"`
-	Status                *string  `json:"status"`
-	Format                *string  `json:"format"`
-	Description           *string  `json:"description"`
-	DescriptionCn         *string  `json:"descriptionCn"`
-	DescriptionCnSource   *string  `json:"descriptionCnSource"`
-	DescriptionHant       *string  `json:"descriptionHant"`
-	DescriptionHantSource *string  `json:"descriptionHantSource"`
-	Genres                []string `json:"genres"`
-	DiscussionCount       int64    `json:"discussionCount"`
-	TrailerID             *string  `json:"trailerId"`
-	TrailerSite           *string  `json:"trailerSite"`
+	AnilistID             int32              `json:"anilistId"`
+	TitleRomaji           *string            `json:"titleRomaji"`
+	TitleEnglish          *string            `json:"titleEnglish"`
+	TitleNative           *string            `json:"titleNative"`
+	TitleChinese          *string            `json:"titleChinese"`
+	TitleHant             *string            `json:"titleHant"`
+	TitleHantSource       *string            `json:"titleHantSource"`
+	TitleHantSeo          *string            `json:"titleHantSeo"`
+	CoverImageUrl         *string            `json:"coverImageUrl"`
+	BannerImageUrl        *string            `json:"bannerImageUrl"`
+	CoverImageColor       *string            `json:"coverImageColor"`
+	PosterAccent          *string            `json:"posterAccent"`
+	AverageScore          *float64           `json:"averageScore"`
+	BangumiScore          *float64           `json:"bangumiScore"`
+	Episodes              *int32             `json:"episodes"`
+	Season                *string            `json:"season"`
+	SeasonYear            *int32             `json:"seasonYear"`
+	Status                *string            `json:"status"`
+	Format                *string            `json:"format"`
+	Description           *string            `json:"description"`
+	DescriptionCn         *string            `json:"descriptionCn"`
+	DescriptionCnSource   *string            `json:"descriptionCnSource"`
+	DescriptionHant       *string            `json:"descriptionHant"`
+	DescriptionHantSource *string            `json:"descriptionHantSource"`
+	Genres                []string           `json:"genres"`
+	DiscussionCount       int64              `json:"discussionCount"`
+	TrailerID             *string            `json:"trailerId"`
+	TrailerSite           *string            `json:"trailerSite"`
+	MainStudio            []string           `json:"mainStudio"`
+	NextAiringAt          pgtype.Timestamptz `json:"nextAiringAt"`
+	NextAiringEpisode     *int32             `json:"nextAiringEpisode"`
+	Popularity            *int32             `json:"popularity"`
+	Favourites            *int32             `json:"favourites"`
+	Source                *string            `json:"source"`
+	StartDate             pgtype.Date        `json:"startDate"`
+	Duration              *int32             `json:"duration"`
+	IsSequel              bool               `json:"isSequel"`
+	RelationsKnown        bool               `json:"relationsKnown"`
 }
 
 // Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
@@ -2181,6 +2231,17 @@ type GetSeasonalAnimeRow struct {
 // silently matched nothing (lib/types.ts called this exact failure out as a
 // risk of the cutover).  The subquery costs nothing extra in practice: the
 // Hentai exclusion below already forces the same anime_genres lookup.
+//
+// The columns after trailer_site are what the seasonal page sorts, filters
+// and badges by: popularity and favourites (sorts), the next episode (the
+// air-time countdown and the weekday bars), start_date (the premiere-month
+// bars), source (the source filter), duration and the main studio (the
+// card's details), and is_sequel (new or sequel).  Two of them are read
+// from child tables that only the detail fetch writes -- studio from
+// anime_studios, is_sequel from anime_relations -- so a row that only
+// listing upserts have written answers NULL for the studio ("not known
+// yet", not "AniList has none") and relations_known false, which the
+// handler turns into a null isSequel.  See internal/anime/seasonal.go.
 func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error) {
 	rows, err := q.db.Query(ctx, getSeasonalAnime,
 		season,
@@ -2224,6 +2285,16 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 			&i.DiscussionCount,
 			&i.TrailerID,
 			&i.TrailerSite,
+			&i.MainStudio,
+			&i.NextAiringAt,
+			&i.NextAiringEpisode,
+			&i.Popularity,
+			&i.Favourites,
+			&i.Source,
+			&i.StartDate,
+			&i.Duration,
+			&i.IsSequel,
+			&i.RelationsKnown,
 		); err != nil {
 			return nil, err
 		}
@@ -4911,12 +4982,14 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     trailer_id = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
     trailer_site = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
     trailer_checked_at = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_checked_at ELSE anime_cache.trailer_checked_at END,
-    -- The four facts only AnimeDetailQuery selects.  COALESCE rather than
-    -- the trailer's CASE because these have no "asked, none" state worth
-    -- keeping: a release date, once known, does not become unknown again.
-    -- So a caller whose document did not select them (search, seasonal)
-    -- passes NULL and leaves the stored value standing, and a caller whose
-    -- document did select them overwrites with whatever AniList says now.
+    -- The four facts AnimeDetailQuery and SeasonalAnimeQuery select.
+    -- COALESCE rather than the trailer's CASE because these have no "asked,
+    -- none" state worth keeping: a release date, once known, does not
+    -- become unknown again.  So a caller whose document did not select them
+    -- (search) passes NULL and leaves the stored value standing, and a
+    -- caller whose document did select them overwrites with whatever
+    -- AniList says now -- except where AniList says nothing, which leaves
+    -- the stored value standing too.
     start_date = COALESCE(EXCLUDED.start_date, anime_cache.start_date),
     end_date   = COALESCE(EXCLUDED.end_date,   anime_cache.end_date),
     duration   = COALESCE(EXCLUDED.duration,   anime_cache.duration),

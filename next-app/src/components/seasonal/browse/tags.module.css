@@ -1,0 +1,391 @@
+/* The seasonal page's tag row: the season's fixed tags, one removable tag per
+ * active filter, the hue dots, the sort trigger and the view toggles — and on
+ * a phone, the hue dots' own scrolling row. The sort menu itself is drawn
+ * with controls.module.css's menu classes, on its own element.
+ *
+ * Every @media block is at the end of the file. */
+
+/* ── Tag row: active filters, hue dots, sort, views ─────────────────────── */
+
+.tags {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 30px;
+  margin-top: 30px;
+}
+
+.tagsLeft {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tagIcon {
+  width: 19px;
+  height: 15px;
+  flex: none;
+  fill: rgba(235, 235, 245, 0.35);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--accent-solid);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: tagIn 0.22s ease both;
+  transition: filter 0.15s;
+}
+
+.tag:hover {
+  filter: brightness(1.12);
+}
+
+.tag:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.tag svg {
+  width: 8px;
+  height: 8px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0.8;
+}
+
+.tagFixed {
+  cursor: default;
+}
+
+.tagFixed:hover {
+  filter: none;
+}
+
+.tagClear {
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(235, 235, 245, 0.88);
+}
+
+@keyframes tagIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.tagsRight {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.hues {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-right: 8px;
+  padding-right: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.hue {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  max-width: 32px;
+  height: 32px;
+  padding: 0 0 0 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(235, 235, 245, 0.9);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    max-width 0.45s var(--ease),
+    background-color 0.3s,
+    box-shadow 0.3s;
+}
+
+.hue:focus-visible {
+  max-width: 132px;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.hueDot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  transition: transform 0.3s var(--ease);
+}
+
+.hueName,
+.hueCount {
+  opacity: 0;
+  transition: opacity 0.2s ease 0.08s;
+}
+
+.hueCount {
+  padding-right: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+  color: rgba(235, 235, 245, 0.55);
+}
+
+.hue:hover,
+.hue[aria-pressed="true"] {
+  max-width: 132px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.hue:hover .hueName,
+.hue:hover .hueCount,
+.hue:focus-visible .hueName,
+.hue:focus-visible .hueCount,
+.hue[aria-pressed="true"] .hueName,
+.hue[aria-pressed="true"] .hueCount {
+  opacity: 1;
+}
+
+.hue[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.hue[aria-pressed="true"] .hueDot {
+  transform: scale(1.12);
+}
+
+.sortWrap {
+  position: relative;
+}
+
+.sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--t3);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    background-color 0.2s;
+}
+
+.sort:hover,
+.sort[aria-expanded="true"] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sort:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.sort svg {
+  width: 10px;
+  height: 14px;
+  fill: currentColor;
+  opacity: 0.7;
+}
+
+.views {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.view {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: rgba(235, 235, 245, 0.32);
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    background-color 0.2s;
+}
+
+.view:hover {
+  color: rgba(235, 235, 245, 0.75);
+}
+
+.view:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.view[aria-pressed="true"] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.view svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.hueRow {
+  display: none;
+  gap: 6px;
+  margin: 12px calc(-1 * var(--gutter)) 0;
+  padding: 0 var(--gutter) 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hueRow::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Tablet ──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023px) {
+  .tags {
+    flex-wrap: wrap;
+  }
+
+  .tagsRight {
+    margin-left: auto;
+  }
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .hueRow {
+    display: flex;
+  }
+
+  .tags {
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .tagsLeft {
+    gap: 8px;
+    padding-top: 3px;
+  }
+
+  .tag {
+    height: 26px;
+    font-size: 12.5px;
+  }
+
+  .tagIcon {
+    display: none;
+  }
+
+  .tagsRight .hues,
+  .tagsRight .sortWrap {
+    display: none;
+  }
+
+  .views {
+    flex: none;
+    margin: 0;
+    padding-left: 8px;
+  }
+
+  .view {
+    position: relative;
+    width: 36px;
+    height: 32px;
+  }
+
+  /* The pills stay 36×32; the target reaches 44px tall. */
+  .view::before {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
+
+  .view[data-view-toggle="table"] {
+    display: none;
+  }
+
+  .hueRow .hue {
+    height: 38px;
+    max-width: 38px;
+    padding-left: 11px;
+    border-radius: 19px;
+  }
+
+  .hueRow .hue:hover {
+    max-width: 38px;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .hueRow .hue:hover .hueName,
+  .hueRow .hue:hover .hueCount {
+    opacity: 0;
+  }
+
+  .hueRow .hue[aria-pressed="true"] {
+    max-width: 140px;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .hueRow .hue[aria-pressed="true"] .hueName,
+  .hueRow .hue[aria-pressed="true"] .hueCount {
+    opacity: 1;
+  }
+}

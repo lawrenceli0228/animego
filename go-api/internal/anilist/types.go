@@ -188,10 +188,12 @@ type SchedulePage struct {
 // are pointer types so encoding/json preserves the absent/null
 // distinction the downstream cache layer relies on.
 //
-// The detail-only fields (StartDate, EndDate, Duration, Source,
-// BannerImage with full payload, Studios, Relations, Characters, Staff,
-// Recommendations, Trailer) are populated only by AnimeDetailQuery and
-// will marshal as `null` / empty slices for search & seasonal hits.
+// The child connections (Studios, Relations, Characters, Staff,
+// Recommendations) are populated only by AnimeDetailQuery and will
+// marshal as `null` / empty slices for search & seasonal hits.  Trailer
+// comes from the seasonal and detail documents; the four 0034 facts
+// (StartDate, EndDate, Duration, Source) from the seasonal, detail and
+// facts documents, never from search.
 type Media struct {
 	// Always populated (search, seasonal, detail)
 	ID           int         `json:"id"`
@@ -224,11 +226,13 @@ type Media struct {
 	Tags          []MediaTag     `json:"tags,omitempty"`
 	ExternalLinks []ExternalLink `json:"externalLinks,omitempty"`
 
-	// Detail-only fields (AnimeDetailQuery)
-	StartDate       *FuzzyDate                `json:"startDate,omitempty"`
-	EndDate         *FuzzyDate                `json:"endDate,omitempty"`
-	Duration        *int                      `json:"duration,omitempty"`
-	Source          *string                   `json:"source,omitempty"`
+	// The four 0034 facts: seasonal, detail and facts documents.
+	StartDate *FuzzyDate `json:"startDate,omitempty"`
+	EndDate   *FuzzyDate `json:"endDate,omitempty"`
+	Duration  *int       `json:"duration,omitempty"`
+	Source    *string    `json:"source,omitempty"`
+
+	// Detail-only fields (AnimeDetailQuery), and Trailer (seasonal too).
 	Studios         *StudioConnection         `json:"studios,omitempty"`
 	Relations       *RelationConnection       `json:"relations,omitempty"`
 	Characters      *CharacterConnection      `json:"characters,omitempty"`

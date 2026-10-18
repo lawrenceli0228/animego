@@ -1,0 +1,261 @@
+/* The phone's filter sheet (A-mobile): a bottom sheet over a dark backdrop,
+ * portalled to <body> — outside the page's <main>, so it declares the tokens
+ * it reads itself.
+ *
+ * Every @media block is at the end of the file. */
+
+.wrap {
+  --t2: rgba(235, 235, 245, 0.8);
+  --t3: rgba(235, 235, 245, 0.62);
+  --t4: rgba(235, 235, 245, 0.55);
+  --accent-text: #3d9bff;
+  --accent-solid: #0a6fe0;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  color: #fff;
+  font-family: var(--font-sans);
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.6);
+  cursor: default;
+  animation: fadeIn 0.3s ease both;
+}
+
+.sheet {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  max-width: 600px;
+  max-height: calc(100dvh - 48px);
+  margin: 0 auto;
+  border-radius: 16px 16px 0 0;
+  background: #161618;
+  box-shadow:
+    0 -24px 48px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  outline: none;
+  animation: up 0.44s var(--ease) both;
+}
+
+.grab {
+  flex: none;
+  width: 36px;
+  height: 5px;
+  margin: 8px auto 0;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 4px 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.reset {
+  height: 44px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reset:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 6px 16px 18px;
+}
+
+.section + .section {
+  margin-top: 20px;
+}
+
+.sectionLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t4);
+}
+
+.sectionYear {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 19px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--t2);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    transform 0.2s var(--ease);
+}
+
+.chip:active {
+  transform: scale(0.95);
+}
+
+.chip:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.chip[aria-pressed="true"],
+.chip[aria-current="page"] {
+  background: var(--accent-solid);
+  color: #fff;
+}
+
+.chip[aria-current="page"] {
+  cursor: default;
+}
+
+/* The season control: four links over a pill that slides to the chosen one. */
+.seg {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.segPill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 20px) / 4);
+  border-radius: 9px;
+  background: var(--accent-solid);
+  transition: transform 0.38s var(--ease);
+}
+
+.segItem {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  height: 38px;
+  border-radius: 9px;
+  color: var(--t3);
+  font-size: 14px;
+  font-weight: 600;
+  transition: color 0.25s;
+}
+
+.segItem[aria-current="page"] {
+  color: #fff;
+}
+
+.segItem:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.foot {
+  flex: none;
+  padding: 12px 16px calc(26px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.apply {
+  width: 100%;
+  height: 50px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent-solid);
+  color: #fff;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s var(--ease);
+}
+
+.apply:active {
+  transform: scale(0.98);
+}
+
+.apply:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@keyframes up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wrap *,
+  .wrap *::before,
+  .wrap *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

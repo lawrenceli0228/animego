@@ -34,10 +34,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type SetStateAction,
 } from "react";
 import toast, { type Toast } from "react-hot-toast";
+import { ToastChevron, ToastWhat } from "@/components/ui/ToastParts";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { useLang } from "@/lib/lang-client";
@@ -64,10 +64,13 @@ import {
   applySubscriptionChange,
   classifyCreateStatus,
   classifyDeleteStatus,
+  classifyGuardedDeleteStatus,
+  docFromRead,
   docFromResponse,
   nextSubscriptionSet,
   subscribedIdsFromList,
   withIds,
+  type GuardedRemoveVerdict,
   type SubscriptionSetApi,
   type SubscriptionSetState,
 } from "./subscriptionSetState";
@@ -85,6 +88,7 @@ export {
   nextSubscriptionSet,
   subscribeToSignedOut,
   subscribedIdsFromList,
+  type GuardedRemoveVerdict,
   type SubscriptionSetApi,
   type SubscriptionSetState,
   type WriteIntent,
@@ -99,19 +103,6 @@ const SubscriptionSetContext = createContext<SubscriptionSetApi | null>(null);
 // ---------------------------------------------------------------------------
 // Shared confirmation toast
 // ---------------------------------------------------------------------------
-
-const toastRowStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 10,
-};
-
-const toastLinkStyle: CSSProperties = {
-  color: "#0a84ff",
-  fontWeight: 600,
-  textDecoration: "none",
-  whiteSpace: "nowrap",
-};
 
 /**
  * The confirmation shown when a stashed intent is replayed after login.
@@ -138,17 +129,18 @@ export function showReplayAddedToast(t: (key: string) => string): void {
   }
   toast.success(
     (instance: Toast) => (
-      <span style={toastRowStyle}>
-        {t("sub.toastAdded")}
+      <>
+        <ToastWhat>{t("sub.toastAdded")}</ToastWhat>
         <Link
           href="/profile"
           prefetch={false}
-          style={toastLinkStyle}
+          className="agc-toast-link"
           onClick={() => toast.dismiss(instance.id)}
         >
           {t("sub.toastViewList")}
+          <ToastChevron />
         </Link>
-      </span>
+      </>
     ),
     // Same budget the click path gives its actionable toast. A toast whose
     // point is that the reader travels somewhere cannot use the Toaster's
@@ -349,6 +341,41 @@ export function SubscriptionSetProvider({
     [commit],
   );
 
+  const removeIfUntouched = useCallback(
+    async (anilistId: number): Promise<GuardedRemoveVerdict> => {
+      try {
+        const res = await authFetch(`/api/subscriptions/${anilistId}/untouched`, {
+          method: "DELETE",
+          skipRedirectOnFailure: true,
+        });
+        const verdict = classifyGuardedDeleteStatus(res.status);
+        if (verdict === "removed") {
+          commit((prev) =>
+            withIds(prev, nextSubscriptionSet(prev.ids, anilistId, "remove", "confirmed")),
+          );
+          broadcastSubscription({ anilistId, sub: null });
+        } else if (verdict === "signedOut") {
+          commit(ANONYMOUS_STATE);
+        }
+        return verdict;
+      } catch {
+        return "failed";
+      }
+    },
+    [commit],
+  );
+
+  const read = useCallback(async (anilistId: number) => {
+    try {
+      const res = await authFetch(`/api/subscriptions/${anilistId}`, {
+        skipRedirectOnFailure: true,
+      });
+      return res.ok ? docFromRead(await res.json().catch(() => null)) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   // Replay the intent a signed-out visitor stashed before we bounced them to
   // /login. Gated on `known` so we never fire the write against a session that
   // does not exist; guarded by a ref so a re-render (or a second set update)
@@ -387,8 +414,10 @@ export function SubscriptionSetProvider({
       has: (anilistId: number) => state.ids.has(anilistId),
       add,
       remove,
+      removeIfUntouched,
+      read,
     }),
-    [state, add, remove],
+    [state, add, remove, removeIfUntouched, read],
   );
 
   return (

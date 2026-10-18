@@ -925,6 +925,7 @@ func main() {
 		r.Get("/{anilistId}", subscriptionsHandlers.GetSubscriptionByAnilistID)
 		r.Patch("/{anilistId}", subscriptionsHandlers.UpdateSubscription)
 		r.Delete("/{anilistId}", subscriptionsHandlers.DeleteSubscription)
+		r.Delete("/{anilistId}/untouched", subscriptionsHandlers.DeleteUntouchedSubscription)
 		r.Put("/{anilistId}/episodes", subscriptionsHandlers.MarkEpisodesWatched)
 		r.Put("/{anilistId}/episodes/{episode}", subscriptionsHandlers.MarkEpisodeWatched)
 		r.Delete("/{anilistId}/episodes/{episode}", subscriptionsHandlers.UnmarkEpisodeWatched)

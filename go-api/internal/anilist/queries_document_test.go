@@ -85,6 +85,24 @@ func TestMediaFactsQuerySelectsExactlyTheFourFacts(t *testing.T) {
 	}
 }
 
+// TestSeasonalDocumentSelectsTheFourFacts — the seasonal listing returns
+// start date, duration and source, and on its cold-start path the only
+// place they can come from is the row this document has just written.
+// Drop one and a season fetched for the first time lists every title
+// without it, with no error anywhere: the upsert COALESCEs, so a missing
+// fact reads as "AniList said nothing".  This is the test that fails
+// instead.  The child connections stay out, because the cold-start path
+// writes no child tables (see internal/anime/seasonal.go).
+func TestSeasonalDocumentSelectsTheFourFacts(t *testing.T) {
+	for _, sel := range []string{"startDate { year month day }", "endDate   { year month day }", "duration", "source"} {
+		assert.Contains(t, SeasonalAnimeQuery, sel, "SeasonalAnimeQuery must select %q", sel)
+	}
+	for _, child := range []string{"studios", "relations"} {
+		assert.NotContains(t, SeasonalAnimeQuery, child,
+			"SeasonalAnimeQuery selects %q now; nothing on the seasonal paths writes that child table", child)
+	}
+}
+
 // TestEveryUpsertingDocumentSelectsTheScalarBlock — the 0036 scalars are
 // written by UpsertAnimeCache without a "did the document select this"
 // flag, which is only honest if every document that reaches the upsert

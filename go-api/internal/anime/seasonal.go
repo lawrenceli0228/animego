@@ -18,6 +18,20 @@
 // workers) have populated the child table.  Warmed seasons — every one
 // the site actually lists — carry genres on the first request.
 //
+// `studio` and `isSequel` are read the same way, from anime_studios and
+// anime_relations, so the same holds for them: a row no detail fetch has
+// reached answers studio null and isSequel null, which means "not known
+// yet" rather than "no main studio" or "no prequel" (isSequel is known once
+// detail_fetched_at is set).  That is accepted on
+// purpose.  Selecting studios and relations in SeasonalAnimeQuery would
+// put two nested connections on every Media of a 50-row page and make
+// this path write child tables, which is the detail fetch's job; and no
+// sweep exists to fill them for listing-only rows.  Every other field the
+// response carries is on the main row, which the cold-start upsert does
+// write: popularity, favourites and the next episode come with the 0036
+// scalar block, and start date, end date, duration and source with the
+// four facts SeasonalAnimeQuery selects for exactly this response.
+//
 // Express equivalent: server/services/anilist.service.js:238-330
 // getSeasonalAnime + server/controllers/anime.controller.js:113-127
 // getSeasonal.  The Bangumi enrichment trigger (Express
@@ -177,13 +191,9 @@ func (s *SeasonalService) Handler() http.HandlerFunc {
 			totalPages = int(math.Ceil(float64(total) / float64(perPage)))
 		}
 
-		// Ensure rows is never nil so an empty result serialises as [].
-		if rows == nil {
-			rows = []dbgen.GetSeasonalAnimeRow{}
-		}
-
 		writeSeasonalEnvelope(w, http.StatusOK, seasonalResponse{
-			Data: rows,
+			// Never nil, so an empty result serialises as [].
+			Data: seasonalItemsFromRows(rows),
 			Pagination: seasonalPagination{
 				Page:       page,
 				PerPage:    perPage,
@@ -344,7 +354,8 @@ func (s *SeasonalService) coldStart(
 	// and GetAnimeByAnilistIDsRow, and keeps the response struct
 	// identical between the warm and cold paths — which matters more
 	// than it used to, since only GetSeasonalAnime carries the
-	// aggregated `genres` column the season filter reads.
+	// aggregated `genres` column the season filter reads, and the
+	// studio / sequel / scalar columns the page sorts and badges by.
 	yearI32 := int32(year)
 	offset := int32((page - 1) * perPage)
 	limit := int32(perPage)

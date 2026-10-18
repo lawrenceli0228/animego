@@ -31,9 +31,10 @@
 //
 // SCOPE: This worker does NOT touch child tables (anime_studios,
 // anime_characters, etc).  Seasonal warm only needs the listing-card
-// surface (title, cover, score, episodes); detail-table population
-// happens on /anime/:id detail fetches.  Mirrors Express behaviour
-// which also limits warmSeasonCache to the main row.
+// surface (title, cover, score, episodes, and the scalars and dates the
+// seasonal page sorts and filters by -- see anilist.SeasonalAnimeQuery);
+// detail-table population happens on /anime/:id detail fetches.  Mirrors
+// Express behaviour which also limits warmSeasonCache to the main row.
 
 package queue
 

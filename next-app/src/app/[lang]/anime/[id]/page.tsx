@@ -110,9 +110,9 @@ export const dynamicParams = true;
 // Two surfaces still render through client leaves (LocalizedChips) and follow
 // the `lang` COOKIE after mount rather than the URL: the genre row and the
 // format badge. That is now a divergence rather than the workaround it was
-// created as — see the note beside SeasonalFilterChips in
-// seasonal/[season]/[year]/page.tsx. Reconciling URL locale against cookie
-// preference is one decision for the whole site, not a per-chip one.
+// created as — see the note at the top of lib/lang-client.tsx. Reconciling
+// URL locale against cookie preference is one decision for the whole site,
+// not a per-chip one.
 //
 // Do not extend the client-leaf treatment item-by-item to staff roles or
 // relation / recommendation titles. Those are dozens of nodes each, they are
