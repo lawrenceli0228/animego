@@ -572,6 +572,13 @@ test.describe("following from a card", () => {
       ]);
       await open(page, WEEK_URL);
 
+      // The first follow's write comes back last, after the other two have
+      // shown theirs: it must not take the screen back from the third.
+      let posts = 0;
+      await page.route("**/api/subscriptions", async (route) => {
+        if (route.request().method() === "POST" && ++posts === 1) await new Promise((r) => setTimeout(r, 1500));
+        await route.continue();
+      });
       for (const s of run) {
         const card = page.locator(`[data-anime-card][data-id="${s.anilistId}"]`);
         // Mid-screen: a card at the bottom edge would sit under the toast.
@@ -579,9 +586,11 @@ test.describe("following from a card", () => {
         await card.hover();
         await card.locator('[data-follow="off"]').click();
         await expect(card.locator('[data-follow="on"]')).toBeAttached();
-        await expect(page.locator('[data-toast][data-visible="true"]')).toHaveCount(1);
       }
+      await expect.poll(async () => (await readSubscription(user.email, run[0].anilistId))?.status).toBe("watching");
+      await page.waitForTimeout(400);
       const toast = page.locator('[data-toast][data-visible="true"]');
+      await expect(toast).toHaveCount(1);
       const last = run[run.length - 1] as WeekShow;
       await expect(toast).toContainText(last.titleChinese as string);
       await expect(toast).toContainText("已加入「在看」");

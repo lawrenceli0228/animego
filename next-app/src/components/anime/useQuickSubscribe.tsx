@@ -23,6 +23,7 @@ import { ToastChevron, ToastWhat } from "@/components/ui/ToastParts";
 import { useLang } from "@/lib/lang-client";
 import { stashPendingSubscribe } from "@/lib/pendingSubscribe";
 import type { SubscriptionDoc } from "@/lib/subscriptionBus";
+import { createPressOrder } from "./pressOrder";
 import { useSubscriptionSet } from "./SubscriptionSetProvider";
 import { LIST_HINT_TOAST_MS, hintStore, takeListHint } from "./subscriptionToast";
 import { loginTarget, quickSubscribeMode, type QuickSubscribeMode } from "./quickSubscribeState";
@@ -49,6 +50,9 @@ export type UnfollowOutcome =
   | { kind: "done" }
   /** The row holds history and is untouched; `doc` is what it holds (null if the read failed). */
   | { kind: "ask"; doc: SubscriptionDoc | null };
+
+/** One order for every quick-subscribe button on the page (pressOrder.ts). */
+const pressOrder = createPressOrder();
 
 /**
  * `title` is the show's name as the caller shows it. The toasts lead with it:
@@ -147,10 +151,11 @@ export function useQuickSubscribe(anilistId: number, title?: string): QuickSubsc
     if (!subs.ready || busyRef.current || mode !== "open") return { kind: "done" };
     busyRef.current = true;
     setBusy(true);
+    const turn = pressOrder.takeTurn();
     try {
       const verdict = await subs.removeIfUntouched(anilistId);
       if (verdict === "removed") {
-        notifyUnfollowed();
+        if (pressOrder.mayConfirm(turn)) notifyUnfollowed();
         return { kind: "done" };
       }
       if (verdict === "kept") return { kind: "ask", doc: await subs.read(anilistId) };
@@ -191,11 +196,14 @@ export function useQuickSubscribe(anilistId: number, title?: string): QuickSubsc
 
     busyRef.current = true;
     setBusy(true);
+    const turn = pressOrder.takeTurn();
     try {
       if (!(await subs.add(anilistId))) {
         toast.error(t("card.quickAddFail"));
         return;
       }
+      // Overtaken by a later press: its toast is the one on screen.
+      if (!pressOrder.mayConfirm(turn)) return;
       // The first successful add on this browser carries a signpost to the
       // list it just filled; later adds stay a plain confirmation. Shared with
       // SubscriptionButton so only one surface spends the one-time hint.
