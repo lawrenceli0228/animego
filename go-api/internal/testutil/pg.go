@@ -250,16 +250,53 @@ func migrationsDirAbs() (string, error) {
 // schema.
 func MigrateTo(t *testing.T, pgURI string, version uint) {
 	t.Helper()
-	migrationsDir, err := migrationsDirAbs()
-	require.NoError(t, err, "MigrateTo: migrations dir")
-	m, err := gomigrate.New("file://"+migrationsDir, pgURI)
-	require.NoError(t, err, "MigrateTo: migrate.New")
-	if err := m.Migrate(version); err != nil && err != gomigrate.ErrNoChange {
-		require.NoError(t, err, "MigrateTo: migrate to %d", version)
+	require.NoError(t, TryMigrateTo(t, pgURI, version), "MigrateTo: migrate to %d", version)
+}
+
+// TryMigrateTo is MigrateTo for a test whose subject is a migration that is
+// meant to FAIL -- one guarded by lock_timeout, say.  It hands the
+// migration's own error back instead of failing the test; setting up and
+// closing the migrator still fail it.  ErrNoChange is not an error.
+//
+// A failed migration leaves golang-migrate's version row dirty.
+// ForceMigrationVersion is the `migrate force` that clears it.
+func TryMigrateTo(t *testing.T, pgURI string, version uint) error {
+	t.Helper()
+	m := newMigrator(t, pgURI)
+	err := m.Migrate(version)
+	closeMigrator(t, m)
+	if err == gomigrate.ErrNoChange {
+		return nil
 	}
+	return err
+}
+
+// ForceMigrationVersion records version as the current, clean schema version
+// without running any file: the `migrate force` an operator runs after a
+// migration failed inside its transaction and left the schema where it was.
+func ForceMigrationVersion(t *testing.T, pgURI string, version int) {
+	t.Helper()
+	m := newMigrator(t, pgURI)
+	require.NoError(t, m.Force(version), "ForceMigrationVersion: force %d", version)
+	closeMigrator(t, m)
+}
+
+// newMigrator opens golang-migrate over the repo's migrations directory.
+func newMigrator(t *testing.T, pgURI string) *gomigrate.Migrate {
+	t.Helper()
+	migrationsDir, err := migrationsDirAbs()
+	require.NoError(t, err, "migrations dir")
+	m, err := gomigrate.New("file://"+migrationsDir, pgURI)
+	require.NoError(t, err, "migrate.New")
+	return m
+}
+
+// closeMigrator closes both ends of a migrator, failing the test on either.
+func closeMigrator(t *testing.T, m *gomigrate.Migrate) {
+	t.Helper()
 	srcErr, dbErr := m.Close()
-	require.NoError(t, srcErr, "MigrateTo: close source")
-	require.NoError(t, dbErr, "MigrateTo: close db")
+	require.NoError(t, srcErr, "migrate: close source")
+	require.NoError(t, dbErr, "migrate: close db")
 }
 
 // LatestMigrationVersion returns the highest version present in the

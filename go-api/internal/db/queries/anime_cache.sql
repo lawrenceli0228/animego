@@ -1066,6 +1066,8 @@ SET bgm_id                        = NULL,
     episode_titles_at             = NULL,
     bangumi_rating_checked_at     = NULL,
     bangumi_subject_unreadable_at = NULL,
+    -- No version-0 row carries the rebind sweep's stamp; see bgm_rebind.sql.
+    bgm_rebind_checked_at         = NULL,
     bangumi_version               = 0,
     updated_at                    = now()
 FROM target

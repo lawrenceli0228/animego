@@ -31,6 +31,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -74,6 +75,8 @@ type rebindFixture struct {
 	titleCN    *string
 	seasonYear int
 	episodes   int
+	pendingV1  bool // bangumi_version 0: V1's queue, not the sweep's
+	mappedTo   *int // a bgm_id_map entry naming this subject
 }
 
 func strp(s string) *string { return &s }
@@ -82,7 +85,9 @@ func intp(n int) *int       { return &n }
 func rebindSeed(t *testing.T, ctx context.Context, pool *pgxpool.Pool, rows ...rebindFixture) {
 	t.Helper()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM anime_cache WHERE anilist_id >= $1`, rebindIDFloor)
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM bgm_id_map WHERE anilist_id >= $1`, rebindIDFloor)
+		_, _ = pool.Exec(bg, `DELETE FROM anime_cache WHERE anilist_id >= $1`, rebindIDFloor)
 	})
 	for _, r := range rows {
 		require.GreaterOrEqual(t, r.id, rebindIDFloor)
@@ -91,7 +96,10 @@ func rebindSeed(t *testing.T, ctx context.Context, pool *pgxpool.Pool, rows ...r
 			status = "RELEASING"
 		}
 		version := r.version
-		if version == 0 {
+		switch {
+		case r.pendingV1:
+			version = 0
+		case version == 0:
 			version = 2
 		}
 		romaji := r.romaji
@@ -111,6 +119,11 @@ func rebindSeed(t *testing.T, ctx context.Context, pool *pgxpool.Pool, rows ...r
 			r.id, r.native, romaji, status, version, r.bgmID, r.adult, r.adminFlag, r.source, r.popularity,
 			stamped, r.titleCN, r.seasonYear, r.episodes)
 		require.NoError(t, err, "seed anime_cache %d", r.id)
+		if r.mappedTo != nil {
+			_, err = pool.Exec(ctx, `INSERT INTO bgm_id_map (anilist_id, bgm_id, source) VALUES ($1, $2, 'test')`,
+				r.id, *r.mappedTo)
+			require.NoError(t, err, "seed bgm_id_map %d", r.id)
+		}
 	}
 }
 
@@ -194,16 +207,16 @@ func TestBgmRebindCandidates(t *testing.T) {
 
 		// Not candidates, one reason each.
 		rebindFixture{id: 9910101, status: "FINISHED"},
-		rebindFixture{id: 9910102},                       // moved to version 0 below
+		rebindFixture{id: 9910102, pendingV1: true},      // V1's queue
 		rebindFixture{id: 9910103, bgmID: intp(9919103)}, // bound
 		rebindFixture{id: 9910104, adult: true},          // R18
 		rebindFixture{id: 9910105, adminFlag: strp("manually-corrected")},
 		rebindFixture{id: 9910106, stampedAgo: 24 * time.Hour}, // searched this week
 		rebindFixture{id: 9910107, status: "CANCELLED"},
+		rebindFixture{id: 9910108, status: "HIATUS"},
+		// The map names a subject the id-map sweep declined to bind.
+		rebindFixture{id: 9910109, mappedTo: intp(9919109), popularity: 999999},
 	)
-	// Version 0 is V1's: seed it explicitly, since the fixture's zero means 2.
-	_, err := pool.Exec(ctx, `UPDATE anime_cache SET bangumi_version = 0 WHERE anilist_id = 9910102`)
-	require.NoError(t, err)
 
 	rows, err := q.ListBgmRebindCandidates(ctx, weekInterval(), 100)
 	require.NoError(t, err)
@@ -276,6 +289,32 @@ func TestBgmRebindBindStatement(t *testing.T) {
 		require.NoError(t, err)
 		assert.Zero(t, n)
 		assert.EqualValues(t, 9919206, *rebindRead(t, ctx, pool, 9910206).bgmID)
+	})
+
+	t.Run("keeps a review flag a human raised", func(t *testing.T) {
+		// FlagAnimeEnrichment writes needs-review too.  Only V1's park pairs it
+		// with fuzzy_low; on any other row the flag is a reviewer's, and the
+		// bind must not drop the row from their queue.
+		rebindSeed(t, ctx, pool, rebindFixture{id: 9910208, adminFlag: strp("needs-review")})
+		n, err := q.BindBgmIdFromRebindSearch(ctx, 9919208, nil, 9910208)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, n)
+		assert.Equal(t, strp("needs-review"), rebindRead(t, ctx, pool, 9910208).adminFlag)
+	})
+
+	t.Run("refuses a row reset to version 0 since the read", func(t *testing.T) {
+		// An admin reset between the candidate read and this write hands the
+		// row to V1.  A bind here would be overwritten or parked by V1, and the
+		// V2 job queued with it would then write this subject's title onto a
+		// row that no longer holds it.
+		rebindSeed(t, ctx, pool, rebindFixture{id: 9910209, pendingV1: true})
+		n, err := q.BindBgmIdFromRebindSearch(ctx, 9919209, nil, 9910209)
+		require.NoError(t, err)
+		assert.Zero(t, n)
+
+		stamped, err := q.MarkBgmRebindChecked(ctx, 9910209)
+		require.NoError(t, err)
+		assert.Zero(t, stamped, "nor stamped: V1 is about to search it, and a stamp would hold a re-park back a week")
 	})
 
 	t.Run("the stamp leaves a bound row alone", func(t *testing.T) {
@@ -359,4 +398,61 @@ func TestBgmRebindWorker(t *testing.T) {
 		assert.False(t, s.stamped, "nothing was decided, so the row must not wait a week")
 		assert.Equal(t, strp("needs-review"), s.adminFlag)
 	})
+}
+
+// TestBgmRebindStampLeavesWithTheBinding pins the invariant the bind
+// statement's provenance claim rests on: no version-0 row carries a stamp.
+// Every statement that sends a row back to V1 clears it with the binding, so
+// a later V1 bind (also 'fuzzy_high') cannot be mistaken for the sweep's.
+func TestBgmRebindStampLeavesWithTheBinding(t *testing.T) {
+	ctx := context.Background()
+	pool := newPGPool(t, ctx)
+	testutil.TruncateAll(t, ctx, pool)
+	q := dbgen.New(pool)
+
+	resets := []struct {
+		name  string
+		row   rebindFixture
+		reset func(id int) error
+	}{
+		{
+			name: "admin reset",
+			row:  rebindFixture{id: 9910401, bgmID: intp(9919401), source: strp("fuzzy_high"), stampedAgo: time.Hour},
+			reset: func(id int) error {
+				return q.ResetAnimeEnrichment(ctx, int32(id))
+			},
+		},
+		{
+			name: "backfill reset",
+			row:  rebindFixture{id: 9910402, bgmID: intp(9919402), source: strp("fuzzy_high"), stampedAgo: time.Hour},
+			reset: func(id int) error {
+				return q.BackfillResetRows(ctx, []int32{int32(id)})
+			},
+		},
+		{
+			// Repudiation only reaches a binding nothing vouched for, so this
+			// row has no recorded source.
+			name: "legacy binding withdrawn",
+			row:  rebindFixture{id: 9910403, bgmID: intp(9919403), stampedAgo: time.Hour},
+			reset: func(id int) error {
+				n, err := q.RepudiateLegacyBangumiBinding(ctx, int32(id), 9919403)
+				if err == nil && n != 1 {
+					return fmt.Errorf("repudiation reached %d rows, want 1", n)
+				}
+				return err
+			},
+		},
+	}
+	for _, tc := range resets {
+		t.Run(tc.name, func(t *testing.T) {
+			rebindSeed(t, ctx, pool, tc.row)
+			require.True(t, rebindRead(t, ctx, pool, tc.row.id).stamped)
+
+			require.NoError(t, tc.reset(tc.row.id))
+
+			s := rebindRead(t, ctx, pool, tc.row.id)
+			require.EqualValues(t, 0, s.version, "the reset hands the row back to V1")
+			assert.False(t, s.stamped, "a version-0 row must not carry the sweep's stamp")
+		})
+	}
 }

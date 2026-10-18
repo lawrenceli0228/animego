@@ -112,11 +112,14 @@ var productionQueues = map[string]Concurrency{
 	// here: the id-map sweep and the weekly re-search (bgm_rebind_search.go),
 	// whose single-row bind has the same check-then-write shape.  V1 is the
 	// exception -- it rides the default queue with V2 -- so this slot does
-	// not serialise a V1 bind against either sweep.  They never share a ROW
-	// (V1 takes version 0 only, the sweeps never do), but they can reach for
-	// the same SUBJECT; each statement's NOT EXISTS leaves that open only to
-	// two statements in flight at the same instant, the exposure V1 already
-	// had against the id-map sweep.
+	// not serialise a V1 bind against either sweep.  V1 and the re-search
+	// never share a ROW (V1 writes version-0 rows only, and every re-search
+	// write refuses them), but they can reach for the same SUBJECT, as V1 and
+	// the id-map sweep always could.  Each bind's NOT EXISTS sees only
+	// committed binds, so the exposure is V1's single-statement UPDATE
+	// overlapping a sweep's bind transaction -- milliseconds.  Closing it for
+	// every writer is the TODOS.md entry on making the database enforce
+	// one-subject-one-row.
 	//
 	// Be precise about what it buys, because the obvious reading is wrong
 	// in two directions.

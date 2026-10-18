@@ -25,8 +25,9 @@
 // # What a pass does
 //
 // Up to rebindSearchBatch candidates (ListBgmRebindCandidates: unbound,
-// past V1, RELEASING or NOT_YET_RELEASED, not adult, not hand-corrected,
-// not searched in the last week), each through the steps V1 takes:
+// past V1, RELEASING or NOT_YET_RELEASED, not adult, not hand-corrected, not
+// named by the vendored id map, not searched in the last week), each through
+// the steps V1 takes:
 // search by native-or-romaji title, score with bangumi.PickBest, refuse
 // anything short of TierHigh, refuse a subject another row holds.  Then one
 // step V1 does not take, below.  A bind and its V2 dispatch commit together.

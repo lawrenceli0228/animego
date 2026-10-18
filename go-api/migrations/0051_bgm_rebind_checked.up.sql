@@ -19,7 +19,7 @@
 --
 -- internal/queue/bgm_rebind_search.go searches those rows again on a weekly
 -- cycle.  This column is what makes the cycle weekly: a row is a candidate
--- only while its stamp is NULL or older than the cycle, so an hourly-ish
+-- only while its stamp is NULL or older than the cycle, so a six-hourly
 -- sweep finds a handful of rows rather than re-searching the same 253 every
 -- pass against the 800ms Bangumi bucket user-facing requests share.
 --
@@ -30,4 +30,16 @@
 --
 -- Additive and nullable: the process still running during deploy.sh's
 -- migrate-then-build window neither reads nor writes it.
+--
+-- ★ Locks.  Adding a nullable column with no default is a catalogue-only
+-- change, but it still needs ACCESS EXCLUSIVE on anime_cache for that
+-- instant, and it queues behind anything holding even ACCESS SHARE -- the
+-- nightly pg_dump holds that on every table for the whole dump.  While it
+-- waits, every read of anime_cache queues behind it, which is every catalogue
+-- page.  lock_timeout makes the deploy fail fast instead, the call 0025 and
+-- 0046 made.  The file runs as one transaction, so a timeout leaves the
+-- schema at 0050; golang-migrate records 51 as dirty, and `migrate force 50`
+-- before the next deploy clears it.
+SET lock_timeout = '3s';
+
 ALTER TABLE anime_cache ADD COLUMN IF NOT EXISTS bgm_rebind_checked_at timestamptz;
