@@ -140,6 +140,13 @@ const en = {
     quickAdd: 'Track', quickAdded: 'Tracking',
     quickAddFail: 'Something went wrong. Try again.',
     quickAddLogin: 'Log in to track',
+    // The seasonal page's ✓ unfollows; a row that holds history asks first.
+    quickUnfollow: 'Stop tracking',
+    unfollowTitle: 'Stop tracking this show?',
+    unfollowBody: 'Your progress, score and activity for it are deleted too. This can’t be undone.',
+    unfollowFactEpisode: 'Up to episode {{ep}}',
+    unfollowFactScore: 'Scored {{score}}',
+    unfollowKeep: 'Keep',
   },
   // Anime detail
   detail: {
@@ -271,6 +278,7 @@ const en = {
     // the toast's action link, not a standalone button label.
     toastAdded: 'Added to Watching',
     toastRemoved: 'Removed from your list',
+    toastUnfollowed: 'Stopped tracking',
     toastFailed: 'Something went wrong. Try again.',
     toastViewList: 'View my list',
     // toastUndo lives here, not borrowed from library.undoToast: that block

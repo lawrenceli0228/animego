@@ -6,9 +6,14 @@
 // the exact same flow instead of a second copy of it — the poster corner and
 // the hero differ only in what they look like.
 //
-// THE ONE RULE is unchanged: nothing here deletes, except the Undo inside the
-// success toast, at the one instant the row provably has no history to lose.
-// See QuickSubscribeToggle for the full argument.
+// THE ONE RULE still holds for a poster corner: nothing there deletes, except
+// the Undo inside the success toast, at the one instant the row provably has
+// no history to lose. See QuickSubscribeToggle for the full argument.
+//
+// The seasonal page's ✓ unfollows (`unfollow`), and holds to the same rule by
+// other means: it asks the server to delete only a row with nothing but the
+// follow (DELETE ?ifUntouched=1), and for a row holding more it hands back
+// what the row holds so the page can ask the reader before `unfollowAnyway`.
 
 import Link from "@/components/ui/LocaleLink";
 import { useLocaleRouter } from "@/components/ui/LocaleLink";
@@ -16,6 +21,7 @@ import { useRef, useState, type CSSProperties } from "react";
 import toast, { type Toast } from "react-hot-toast";
 import { useLang } from "@/lib/lang-client";
 import { stashPendingSubscribe } from "@/lib/pendingSubscribe";
+import type { SubscriptionDoc } from "@/lib/subscriptionBus";
 import { useSubscriptionSet } from "./SubscriptionSetProvider";
 import { LIST_HINT_TOAST_MS, hintStore, takeListHint } from "./subscriptionToast";
 import { loginTarget, quickSubscribeMode, type QuickSubscribeMode } from "./quickSubscribeState";
@@ -53,7 +59,21 @@ export interface QuickSubscribe {
   busy: boolean;
   /** Write the subscription — or, signed out, stash the intent and go log in. */
   press: () => Promise<void>;
+  /**
+   * ✓ pressed again (the seasonal page). A row with nothing but the follow is
+   * deleted, with an Undo in the toast; for one holding more nothing changes,
+   * and the outcome carries what it holds so the caller can ask first.
+   */
+  unfollow: () => Promise<UnfollowOutcome>;
+  /** The reader said yes: the plain DELETE, history and all. */
+  unfollowAnyway: () => Promise<void>;
 }
+
+/** What a press on the seasonal page's ✓ came to. */
+export type UnfollowOutcome =
+  | { kind: "done" }
+  /** The row holds history and is untouched; `doc` is what it holds (null if the read failed). */
+  | { kind: "ask"; doc: SubscriptionDoc | null };
 
 export function useQuickSubscribe(anilistId: number): QuickSubscribe {
   const router = useLocaleRouter();
@@ -113,6 +133,66 @@ export function useQuickSubscribe(anilistId: number): QuickSubscribe {
     );
   };
 
+  const refollow = async () => {
+    if (await subs.add(anilistId)) toast.success(t("sub.toastAdded"));
+    else toast.error(t("card.quickAddFail"));
+  };
+
+  // The row held nothing but the follow, so following again puts back
+  // everything that went.
+  const notifyUnfollowed = () => {
+    toast.success(
+      (instance: Toast) => (
+        <span style={toastRowStyle}>
+          {t("sub.toastUnfollowed")}
+          <button
+            type="button"
+            style={toastActionStyle}
+            onClick={() => {
+              toast.dismiss(instance.id);
+              void refollow();
+            }}
+          >
+            {t("sub.toastUndo")}
+          </button>
+        </span>
+      ),
+      { duration: LIST_HINT_TOAST_MS },
+    );
+  };
+
+  const unfollow = async (): Promise<UnfollowOutcome> => {
+    if (!subs.ready || busyRef.current || mode !== "open") return { kind: "done" };
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const verdict = await subs.removeIfUntouched(anilistId);
+      if (verdict === "removed") {
+        notifyUnfollowed();
+        return { kind: "done" };
+      }
+      if (verdict === "kept") return { kind: "ask", doc: await subs.read(anilistId) };
+      toast.error(t("card.quickAddFail"));
+      return { kind: "done" };
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const unfollowAnyway = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      if (await subs.remove(anilistId)) toast.success(t("sub.toastUnfollowed"));
+      else toast.error(t("card.quickAddFail"));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
   const press = async () => {
     if (!subs.ready || busyRef.current) return;
 
@@ -144,5 +224,5 @@ export function useQuickSubscribe(anilistId: number): QuickSubscribe {
     }
   };
 
-  return { ready: subs.ready, mode, busy, press };
+  return { ready: subs.ready, mode, busy, press, unfollow, unfollowAnyway };
 }

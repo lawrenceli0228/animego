@@ -216,6 +216,13 @@ const zhHant = {
     quickAdd: '追番', quickAdded: '已追',
     quickAddFail: '操作失敗，請重試',
     quickAddLogin: '登入後追番',
+    // The seasonal page's ✓ unfollows; a row that holds history asks first.
+    quickUnfollow: '取消追番',
+    unfollowTitle: '取消追番？',
+    unfollowBody: '這部番的觀看進度、評分和動態會一起刪除，無法復原。',
+    unfollowFactEpisode: '看到第 {{ep}} 集',
+    unfollowFactScore: '評分 {{score}}',
+    unfollowKeep: '保留',
   },
   // Anime detail
   detail: {
@@ -333,6 +340,7 @@ const zhHant = {
     // the toast's action link, not a standalone button label.
     toastAdded: '已加入「在看」',
     toastRemoved: '已移出追番列表',
+    toastUnfollowed: '已取消追番',
     toastFailed: '操作失敗，請重試',
     toastViewList: '檢視我的追番',
     // toastUndo lives here, not borrowed from library.undoToast: that block

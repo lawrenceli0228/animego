@@ -3,6 +3,7 @@ import {
   detailTarget,
   loginTarget,
   quickSubscribeMode,
+  unfollowFacts,
 } from "./quickSubscribeState";
 
 // The button's decisions — "what does this press mean?" and "where does it
@@ -85,5 +86,34 @@ describe("loginTarget", () => {
     // A blank `from` would fail the server-side sanitizeFromParam check and
     // strand the user on the login page after a successful sign-in.
     expect(loginTarget("", "")).toBe("/login?from=%2F");
+  });
+});
+
+describe("unfollowFacts", () => {
+  const copy = {
+    episode: "看到第 {{ep}} 集",
+    score: "评分 {{score}}",
+    statuses: { watching: "在看", completed: "看完", plan_to_watch: "想看", dropped: "放弃" },
+  };
+
+  test("progress, score and a status other than the quick-add one, in that order", () => {
+    expect(unfollowFacts({ status: "completed", currentEpisode: 12, score: 9 }, copy)).toEqual([
+      "看到第 12 集",
+      "评分 9",
+      "看完",
+    ]);
+  });
+
+  test("the quick-add status and an empty field say nothing", () => {
+    expect(unfollowFacts({ status: "watching", currentEpisode: 3, score: null }, copy)).toEqual(["看到第 3 集"]);
+    expect(unfollowFacts({ status: "watching", currentEpisode: 0, score: null }, copy)).toEqual([]);
+  });
+
+  test("a score of 0 is still a score", () => {
+    expect(unfollowFacts({ status: "watching", currentEpisode: 0, score: 0 }, copy)).toEqual(["评分 0"]);
+  });
+
+  test("no row read: no facts, and the dialog's sentence carries it", () => {
+    expect(unfollowFacts(null, copy)).toEqual([]);
   });
 });

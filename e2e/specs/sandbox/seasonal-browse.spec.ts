@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { waitForHydration } from "../../fixtures/hydration";
-import { closePg, insertPgUser, readSubscription, resetSubscriptions } from "../../fixtures/pg";
+import { closePg, insertPgUser, readSubscription, resetSubscriptions, seedSubscription } from "../../fixtures/pg";
 import { removeSeasonFixture, seedSeason, type SeedSeasonRow } from "../../fixtures/seasonal";
 import { makeUser } from "../../fixtures/users";
 import { collectConsoleErrors } from "../_helpers";
@@ -551,6 +551,58 @@ test.describe("following from a card", () => {
       await expect.poll(async () => (await readSubscription(user.email, target.anilistId))?.status).toBe("watching");
     } finally {
       await resetSubscriptions(user.email, [target.anilistId]);
+    }
+  });
+
+  test("✓ pressed again unfollows a bare follow, and asks first before progress goes", async ({ page }) => {
+    test.setTimeout(90_000);
+    const user = makeUser();
+    await insertPgUser({ username: user.username, email: user.email, passwordHash: user.passwordHash });
+    const bare = show(4);
+    const watched = show(5);
+    await seedSubscription(user.email, watched.anilistId, "watching", 3);
+    try {
+      await page.goto("/login");
+      await waitForHydration(page, "#login-email");
+      await page.locator("#login-email").fill(user.email);
+      await page.locator("#login-password").fill(user.password);
+      await Promise.all([
+        page.waitForURL((url) => !url.pathname.startsWith("/login")),
+        page.locator('button[type="submit"]').click(),
+      ]);
+      await open(page, WEEK_URL);
+
+      // Followed here and nothing more: ✓ takes it straight back off the list.
+      const bareCard = page.locator(`[data-anime-card][data-id="${bare.anilistId}"]`);
+      await bareCard.hover();
+      await bareCard.locator('[data-follow="off"]').click();
+      await expect(bareCard.locator('[data-follow="on"]')).toBeVisible();
+      await expect.poll(async () => (await readSubscription(user.email, bare.anilistId))?.status).toBe("watching");
+      await bareCard.locator('[data-follow="on"]').click();
+      await expect(bareCard.locator('[data-follow="off"]')).toBeAttached();
+      await expect.poll(() => readSubscription(user.email, bare.anilistId)).toBeNull();
+      await expect(page.locator("[data-unfollow-dialog]")).toHaveCount(0);
+
+      // Three episodes in: the server keeps the row and the page asks, focus on 保留.
+      const watchedCard = page.locator(`[data-anime-card][data-id="${watched.anilistId}"]`);
+      const check = watchedCard.locator('[data-follow="on"]');
+      await check.click();
+      const dialog = page.locator("[data-unfollow-dialog]");
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toContainText("看到第 3 集");
+      await expect(page.locator("[data-unfollow-keep]")).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(check).toBeFocused();
+      expect((await readSubscription(user.email, watched.anilistId))?.currentEpisode).toBe(3);
+
+      // Asked again and answered yes: the row goes, progress and all.
+      await check.click();
+      await page.locator("[data-unfollow-confirm]").click();
+      await expect(watchedCard.locator('[data-follow="off"]')).toBeAttached();
+      await expect.poll(() => readSubscription(user.email, watched.anilistId)).toBeNull();
+    } finally {
+      await resetSubscriptions(user.email, [bare.anilistId, watched.anilistId]);
     }
   });
 });

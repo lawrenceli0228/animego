@@ -64,10 +64,13 @@ import {
   applySubscriptionChange,
   classifyCreateStatus,
   classifyDeleteStatus,
+  classifyGuardedDeleteStatus,
+  docFromRead,
   docFromResponse,
   nextSubscriptionSet,
   subscribedIdsFromList,
   withIds,
+  type GuardedRemoveVerdict,
   type SubscriptionSetApi,
   type SubscriptionSetState,
 } from "./subscriptionSetState";
@@ -85,6 +88,7 @@ export {
   nextSubscriptionSet,
   subscribeToSignedOut,
   subscribedIdsFromList,
+  type GuardedRemoveVerdict,
   type SubscriptionSetApi,
   type SubscriptionSetState,
   type WriteIntent,
@@ -349,6 +353,41 @@ export function SubscriptionSetProvider({
     [commit],
   );
 
+  const removeIfUntouched = useCallback(
+    async (anilistId: number): Promise<GuardedRemoveVerdict> => {
+      try {
+        const res = await authFetch(`/api/subscriptions/${anilistId}?ifUntouched=1`, {
+          method: "DELETE",
+          skipRedirectOnFailure: true,
+        });
+        const verdict = classifyGuardedDeleteStatus(res.status);
+        if (verdict === "removed") {
+          commit((prev) =>
+            withIds(prev, nextSubscriptionSet(prev.ids, anilistId, "remove", "confirmed")),
+          );
+          broadcastSubscription({ anilistId, sub: null });
+        } else if (verdict === "signedOut") {
+          commit(ANONYMOUS_STATE);
+        }
+        return verdict;
+      } catch {
+        return "failed";
+      }
+    },
+    [commit],
+  );
+
+  const read = useCallback(async (anilistId: number) => {
+    try {
+      const res = await authFetch(`/api/subscriptions/${anilistId}`, {
+        skipRedirectOnFailure: true,
+      });
+      return res.ok ? docFromRead(await res.json().catch(() => null)) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   // Replay the intent a signed-out visitor stashed before we bounced them to
   // /login. Gated on `known` so we never fire the write against a session that
   // does not exist; guarded by a ref so a re-render (or a second set update)
@@ -387,8 +426,10 @@ export function SubscriptionSetProvider({
       has: (anilistId: number) => state.ids.has(anilistId),
       add,
       remove,
+      removeIfUntouched,
+      read,
     }),
-    [state, add, remove],
+    [state, add, remove, removeIfUntouched, read],
   );
 
   return (

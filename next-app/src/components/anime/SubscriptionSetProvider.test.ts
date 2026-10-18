@@ -7,6 +7,8 @@ import {
   broadcastSignedOut,
   classifyCreateStatus,
   classifyDeleteStatus,
+  classifyGuardedDeleteStatus,
+  docFromRead,
   hasSignedOutHere,
   nextSubscriptionSet,
   subscribeToSignedOut,
@@ -352,5 +354,47 @@ describe("useSubscriptionSet without a provider", () => {
   test("writes are inert no-ops that resolve false", async () => {
     expect(await api.add(189046)).toBe(false);
     expect(await api.remove(189046)).toBe(false);
+  });
+
+  test("the guarded unfollow fails and the read finds nothing", async () => {
+    expect(await api.removeIfUntouched(189046)).toBe("failed");
+    expect(await api.read(189046)).toBeNull();
+  });
+});
+
+describe("classifyGuardedDeleteStatus — DELETE /api/subscriptions/:id?ifUntouched=1", () => {
+  test("2xx removed the untouched row", () => {
+    expect(classifyGuardedDeleteStatus(200)).toBe("removed");
+    expect(classifyGuardedDeleteStatus(204)).toBe("removed");
+  });
+
+  test("404 is removed too: nothing is left to take back", () => {
+    expect(classifyGuardedDeleteStatus(404)).toBe("removed");
+  });
+
+  test("409 kept a row with history, and nothing changed", () => {
+    expect(classifyGuardedDeleteStatus(409)).toBe("kept");
+  });
+
+  test("401 is a session that died; anything else failed", () => {
+    expect(classifyGuardedDeleteStatus(401)).toBe("signedOut");
+    expect(classifyGuardedDeleteStatus(500)).toBe("failed");
+    expect(classifyGuardedDeleteStatus(400)).toBe("failed");
+  });
+});
+
+describe("docFromRead — GET /api/subscriptions/:id", () => {
+  test("a row reads as its doc", () => {
+    expect(docFromRead({ data: { status: "completed", currentEpisode: 12, score: 9 } })).toEqual({
+      status: "completed",
+      currentEpisode: 12,
+      score: 9,
+    });
+  });
+
+  test("{ data: null } is no row, not a fresh quick-add", () => {
+    expect(docFromRead({ data: null })).toBeNull();
+    expect(docFromRead(null)).toBeNull();
+    expect(docFromRead("nope")).toBeNull();
   });
 });
