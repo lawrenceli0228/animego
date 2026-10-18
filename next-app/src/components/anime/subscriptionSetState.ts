@@ -25,7 +25,7 @@ export interface SubscriptionSetApi {
   remove(anilistId: number): Promise<boolean>;
   /**
    * The seasonal page's ✓ pressed again: DELETE only a row holding nothing but
-   * the follow (`?ifUntouched=1`). "kept" means it holds more — progress, a
+   * the follow (`/:id/untouched`). "kept" means it holds more — progress, a
    * score, another status, a conversation on its card — and nothing changed.
    * Not optimistic: a ✓ that flipped to + and back would be the wrong answer
    * to a question the reader is about to be asked.
@@ -279,18 +279,20 @@ export function classifyDeleteStatus(status: number): WriteVerdict {
   return "failed";
 }
 
-/** What the one-tap unfollow (`DELETE ?ifUntouched=1`) did. */
+/** What the one-tap unfollow (`DELETE /api/subscriptions/:id/untouched`) did. */
 export type GuardedRemoveVerdict = "removed" | "kept" | "signedOut" | "failed";
 
 /**
- * Classify `DELETE /api/subscriptions/:id?ifUntouched=1`.
+ * Classify `DELETE /api/subscriptions/:id/untouched`.
  *
- * 404 is "removed" for the reason classifyDeleteStatus gives. 409 is the one
- * answer the plain DELETE never gives: the row holds history, and the server
- * deleted nothing.
+ * 409 is the one answer the plain DELETE never gives: the row holds history,
+ * and the server deleted nothing. Unlike classifyDeleteStatus, 404 is a
+ * FAILURE here: the endpoint answers 200 when there is nothing left to delete,
+ * so a 404 means a server without the route — and one from before it would
+ * have deleted the row outright, had the guard been a flag on the plain DELETE.
  */
 export function classifyGuardedDeleteStatus(status: number): GuardedRemoveVerdict {
-  if ((status >= 200 && status < 300) || status === 404) return "removed";
+  if (status >= 200 && status < 300) return "removed";
   if (status === 409) return "kept";
   if (status === 401) return "signedOut";
   return "failed";

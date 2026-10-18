@@ -362,14 +362,15 @@ describe("useSubscriptionSet without a provider", () => {
   });
 });
 
-describe("classifyGuardedDeleteStatus — DELETE /api/subscriptions/:id?ifUntouched=1", () => {
+describe("classifyGuardedDeleteStatus — DELETE /api/subscriptions/:id/untouched", () => {
   test("2xx removed the untouched row", () => {
     expect(classifyGuardedDeleteStatus(200)).toBe("removed");
     expect(classifyGuardedDeleteStatus(204)).toBe("removed");
   });
 
-  test("404 is removed too: nothing is left to take back", () => {
-    expect(classifyGuardedDeleteStatus(404)).toBe("removed");
+  test("404 is a FAILURE: the route answers 200 when nothing is left, so 404 is a server without it", () => {
+    expect(classifyGuardedDeleteStatus(404)).toBe("failed");
+    expect(classifyGuardedDeleteStatus(405)).toBe("failed");
   });
 
   test("409 kept a row with history, and nothing changed", () => {

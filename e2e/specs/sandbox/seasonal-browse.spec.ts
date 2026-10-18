@@ -584,6 +584,10 @@ test.describe("following from a card", () => {
       await expect(bareCard.locator('[data-follow="off"]')).toBeAttached();
       await expect.poll(() => readSubscription(user.email, bare.anilistId)).toBeNull();
       await expect(page.locator("[data-unfollow-dialog]")).toHaveCount(0);
+      // The toast's Undo follows it again.
+      await page.locator("span", { hasText: "已取消追番" }).getByRole("button", { name: "撤销" }).click();
+      await expect(bareCard.locator('[data-follow="on"]')).toBeAttached();
+      await expect.poll(async () => (await readSubscription(user.email, bare.anilistId))?.status).toBe("watching");
 
       // Three episodes in: the server keeps the row and the page asks, focus on 保留.
       const watchedCard = page.locator(`[data-anime-card][data-id="${watched.anilistId}"]`);
@@ -593,9 +597,16 @@ test.describe("following from a card", () => {
       await expect(dialog).toBeVisible();
       await expect(dialog).toContainText("看到第 3 集");
       await expect(page.locator("[data-unfollow-keep]")).toBeFocused();
+      // A click on its text must not drop the keyboard out of it: Escape still answers.
+      await dialog.locator("h2").click();
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);
       await expect(check).toBeFocused();
+      // A click on the dark outside keeps it as well.
+      await check.click();
+      await expect(dialog).toBeVisible();
+      await page.mouse.click(4, 4);
+      await expect(dialog).toHaveCount(0);
       expect((await readSubscription(user.email, watched.anilistId))?.currentEpisode).toBe(3);
 
       // Asked again and answered yes: the row goes, progress and all.

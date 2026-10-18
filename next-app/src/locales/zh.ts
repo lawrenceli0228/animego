@@ -201,7 +201,7 @@ const zh = {
     // The seasonal page's ✓ unfollows; a row that holds history asks first.
     quickUnfollow: '取消追番',
     unfollowTitle: '取消追番？',
-    unfollowBody: '这部番的观看进度、评分和动态会一起删除，无法恢复。',
+    unfollowBody: '这部番的观看进度、评分和动态会一起删除，别人在动态下的回复和点赞也会删掉，无法恢复。',
     unfollowFactEpisode: '看到第 {{ep}} 集',
     unfollowFactScore: '评分 {{score}}',
     unfollowKeep: '保留',

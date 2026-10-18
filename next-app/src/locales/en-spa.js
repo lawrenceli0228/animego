@@ -162,7 +162,7 @@ const en = {
     // The seasonal page's ✓ unfollows; a row that holds history asks first.
     quickUnfollow: 'Stop tracking',
     unfollowTitle: 'Stop tracking this show?',
-    unfollowBody: 'Your progress, score and activity for it are deleted too. This can’t be undone.',
+    unfollowBody: 'Your progress, score and activity for it are deleted too, with the replies and likes other people left on that activity. This can’t be undone.',
     unfollowFactEpisode: 'Up to episode {{ep}}',
     unfollowFactScore: 'Scored {{score}}',
     unfollowKeep: 'Keep',

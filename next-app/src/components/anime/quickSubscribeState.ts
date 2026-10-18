@@ -28,7 +28,7 @@ export type QuickSubscribeMode = "signedOut" | "add" | "open";
  * dropped — the answer from a poster corner is "go to the detail page", so
  * there is no branch here that could ever grow a DELETE. The seasonal page's
  * ✓ is the one exception, and it is not built on this mode alone: it unfollows
- * through DELETE ?ifUntouched=1, which the server refuses for any row with
+ * through DELETE /:id/untouched, which the server refuses for any row with
  * history, and asks first before the plain one (useQuickSubscribe.unfollow).
  */
 export function quickSubscribeMode(

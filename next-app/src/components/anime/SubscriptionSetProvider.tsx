@@ -356,7 +356,7 @@ export function SubscriptionSetProvider({
   const removeIfUntouched = useCallback(
     async (anilistId: number): Promise<GuardedRemoveVerdict> => {
       try {
-        const res = await authFetch(`/api/subscriptions/${anilistId}?ifUntouched=1`, {
+        const res = await authFetch(`/api/subscriptions/${anilistId}/untouched`, {
           method: "DELETE",
           skipRedirectOnFailure: true,
         });

@@ -8,7 +8,7 @@
 // in, and an Undo in the toast takes a mis-tap back); "✓" unfollows. A row
 // holding nothing but the follow goes at once, with an Undo; one holding
 // progress, a score, another status or a conversation is kept by the server
-// (DELETE ?ifUntouched=1 answers 409), and the reader is asked before the
+// (DELETE /:id/untouched answers 409), and the reader is asked before the
 // plain DELETE takes all of that — see QuickSubscribeToggle for why a poster
 // corner never deletes blind.
 //

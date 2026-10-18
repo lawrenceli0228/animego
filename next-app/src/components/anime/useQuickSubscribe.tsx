@@ -12,7 +12,7 @@
 //
 // The seasonal page's ✓ unfollows (`unfollow`), and holds to the same rule by
 // other means: it asks the server to delete only a row with nothing but the
-// follow (DELETE ?ifUntouched=1), and for a row holding more it hands back
+// follow (DELETE /:id/untouched), and for a row holding more it hands back
 // what the row holds so the page can ask the reader before `unfollowAnyway`.
 
 import Link from "@/components/ui/LocaleLink";

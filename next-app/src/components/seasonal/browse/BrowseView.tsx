@@ -163,7 +163,9 @@ export default function BrowseView({ items, initial, serverNowMs, season, year, 
       if (!target?.closest?.(`[data-menu="${menu}"]`)) setMenu(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      // defaultPrevented: an Escape something on top already answered (the
+      // unfollow dialog closes on it and must not take the menu with it).
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       setMenu(null);
       document.querySelector<HTMLElement>(`[data-menu="${menu}"] button`)?.focus({ preventScroll: true });
     };

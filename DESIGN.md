@@ -1063,7 +1063,7 @@ effect + setState）。`/api/anime/schedule` 按**服务器所在日**分组，�
   （`view=table` 在手机上画成网格）；年份只列明年到六年前（加上当前页的年份），更早的
   走桌面菜单或地址栏。
 - **追番按钮**是站内同一套一键追番（`useQuickSubscribe`），作为参数传进视图，所以渲染
-  测试不必带上 toast 那条依赖链。「✓」再点一次取消追番：先 `DELETE ?ifUntouched=1`，
+  测试不必带上 toast 那条依赖链。「✓」再点一次取消追番：先 `DELETE /api/subscriptions/:id/untouched`，
   只追了番的直接删、提示里能撤销；有进度、评分、别的状态或动态互动的，服务端不删并回 409，
   页面弹确认框（`UnfollowDialog`，挂到 body、焦点落在「保留」、Tab 只在两个按钮间走）再删。
   海报角（`QuickSubscribeToggle`）的「✓」仍是去详情页的链接。
