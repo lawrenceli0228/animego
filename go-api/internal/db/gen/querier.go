@@ -424,7 +424,7 @@ type Querier interface {
 	// The title's status events go with it (migration 0046): off the list is
 	// off the anime's community tab, with the replies and likes on those cards.
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
-	// DELETE /api/subscriptions/:anilistId?ifUntouched=1: the seasonal page's ✓
+	// DELETE /api/subscriptions/:anilistId/untouched: the seasonal page's ✓
 	// pressed again.  Only a row that still holds nothing but the follow goes —
 	// the quick-add status, no episode marked (the marks and current_episode are
 	// written together; both are checked anyway), no watch time, no score, and no
@@ -2079,6 +2079,8 @@ type Querier interface {
 	//                                             (when the body sets ifAbsent)
 	//   PATCH  /api/subscriptions/:anilistId    → UpdateSubscriptionWithActivity
 	//   DELETE /api/subscriptions/:anilistId    → DeleteSubscription
+	//   DELETE /api/subscriptions/:anilistId/untouched
+	//                                           → DeleteSubscriptionIfUntouched
 	//
 	// Express joined Subscription + AnimeCache in application code; here we
 	// do the join in SQL so the network round-trip is one query for the

@@ -130,7 +130,7 @@ type SubscriptionsDB interface {
 	// error.
 	UpdateSubscriptionWithActivity(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
-	// DeleteSubscriptionIfUntouched backs DELETE `?ifUntouched=1`: it
+	// DeleteSubscriptionIfUntouched backs DELETE /{anilistId}/untouched: it
 	// deletes only a row holding nothing but the follow, and 0 rows means
 	// "missing" or "has history" — the handler reads the row to tell which.
 	DeleteSubscriptionIfUntouched(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
@@ -768,12 +768,6 @@ func (h *Handlers) checkEpisodeUpperBound(ctx context.Context, w http.ResponseWr
 //  3. DeleteSubscription returns the affected-row count; 0 → 404.
 //  4. 200 with `{ data: { message: "Deleted" } }`.  The English string
 //     matches the FE i18n contract (zh.js maps "Deleted" → 已删除).
-//
-// With `?ifUntouched=1` — the seasonal page's ✓ pressed again — step 3 is
-// DeleteSubscriptionIfUntouched instead, which leaves alone a row holding
-// progress, a score, another status or a conversation on its status card.
-// Its 0 rows are told apart by reading the row: missing → 404 as above,
-// still there → 409 CONFLICT, so the page can ask before the history goes.
 func (h *Handlers) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requireClaims(w, r)
 	if !ok {
@@ -786,11 +780,6 @@ func (h *Handlers) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-
-	if wantsUntouchedOnly(r) {
-		h.deleteIfUntouched(ctx, w, claims.UserID, anilistID)
-		return
-	}
 
 	affected, err := h.Queries.DeleteSubscription(ctx, claims.UserID, anilistID)
 	if err != nil {
@@ -805,32 +794,55 @@ func (h *Handlers) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 	httpx.Data(w, http.StatusOK, deleteResp{Message: msgDeletedSuccessMessage})
 }
 
-// wantsUntouchedOnly reports DELETE's `?ifUntouched=1` (or `=true`).
-func wantsUntouchedOnly(r *http.Request) bool {
-	v := r.URL.Query().Get("ifUntouched")
-	return v == "1" || v == "true"
-}
+// DeleteUntouchedSubscription implements DELETE
+// /api/subscriptions/{anilistId}/untouched — the seasonal page's ✓ pressed
+// again.  It deletes the row only while it holds nothing but the follow (see
+// DeleteSubscriptionIfUntouched), and answers 409 CONFLICT for one holding
+// progress, a score, another status or a conversation on its status card, so
+// the page can ask before the plain DELETE takes all of that.
+//
+// A route of its own and not a flag on DELETE /{anilistId}: a server from
+// before this endpoint answers the path 404 and deletes nothing, where it
+// would have ignored an unknown query parameter and deleted the row
+// outright.  For the same reason "nothing to delete" is 200 here rather than
+// 404, so that a 404 can only mean "this server has no such endpoint".
+//
+// Flow:
+//  1. Auth claims check.
+//  2. Parse :anilistId.
+//  3. DeleteSubscriptionIfUntouched; 1 row → 200.
+//  4. 0 rows: read the row — missing → 200 (already gone), present → 409.
+func (h *Handlers) DeleteUntouchedSubscription(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	anilistID, ok := parseAnilistID(w, r)
+	if !ok {
+		return
+	}
 
-// deleteIfUntouched is DeleteSubscription's `?ifUntouched=1` branch.
-func (h *Handlers) deleteIfUntouched(ctx context.Context, w http.ResponseWriter, userID uuid.UUID, anilistID int32) {
-	affected, err := h.Queries.DeleteSubscriptionIfUntouched(ctx, userID, anilistID)
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+
+	affected, err := h.Queries.DeleteSubscriptionIfUntouched(ctx, claims.UserID, anilistID)
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "delete subscription failed"))
 		return
 	}
-	if affected > 0 {
-		httpx.Data(w, http.StatusOK, deleteResp{Message: msgDeletedSuccessMessage})
-		return
-	}
-	if _, err := h.Queries.GetSubscription(ctx, userID, anilistID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgSubscriptionNotFound))
+	if affected == 0 {
+		_, err := h.Queries.GetSubscription(ctx, claims.UserID, anilistID)
+		switch {
+		case err == nil:
+			httpx.Fail(w, httpx.NewError(http.StatusConflict, httpx.CodeConflict, msgSubscriptionHasHistory))
+			return
+		case !errors.Is(err, pgx.ErrNoRows):
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "get subscription failed"))
 			return
 		}
-		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "get subscription failed"))
-		return
 	}
-	httpx.Fail(w, httpx.NewError(http.StatusConflict, httpx.CodeConflict, msgSubscriptionHasHistory))
+
+	httpx.Data(w, http.StatusOK, deleteResp{Message: msgDeletedSuccessMessage})
 }
 
 // parseUpdateBody decodes the PATCH body into updateSubscriptionReq AND

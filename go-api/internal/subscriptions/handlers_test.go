@@ -1499,9 +1499,11 @@ func TestDelete_MissingAuth_401(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-// DELETE ?ifUntouched=1 is the seasonal page's ✓ pressed again: the guarded
-// statement, and on 0 rows a read that tells "missing" from "has history".
-func TestDelete_IfUntouched(t *testing.T) {
+// -----------------------------------------------------------------------------
+// DeleteUntouchedSubscription — the seasonal page's ✓ pressed again
+// -----------------------------------------------------------------------------
+
+func TestDeleteUntouched(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("boom")
 	cases := []struct {
@@ -1514,7 +1516,9 @@ func TestDelete_IfUntouched(t *testing.T) {
 	}{
 		{name: "an untouched row goes", deleted: 1, wantStatus: http.StatusOK, wantBody: `{"data":{"message":"Deleted"}}`},
 		{name: "a row with history stays", wantStatus: http.StatusConflict, wantBody: `{"error":{"code":"CONFLICT","message":"Subscription has history"}}`},
-		{name: "no row", lookupErr: pgx.ErrNoRows, wantStatus: http.StatusNotFound, wantBody: `{"error":{"code":"NOT_FOUND","message":"Subscription not found"}}`},
+		// 200, not 404: on this route a 404 must only ever mean a server
+		// without the endpoint, which the page treats as a failure.
+		{name: "no row is already done", lookupErr: pgx.ErrNoRows, wantStatus: http.StatusOK, wantBody: `{"data":{"message":"Deleted"}}`},
 		{name: "the delete fails", deleteErr: boom, wantStatus: http.StatusInternalServerError},
 		{name: "the read fails", lookupErr: boom, wantStatus: http.StatusInternalServerError},
 	}
@@ -1535,9 +1539,9 @@ func TestDelete_IfUntouched(t *testing.T) {
 			h := makeHandlersWithFakes(db, nil, nil)
 
 			ctx := withUserClaims(t, context.Background(), userID, "alice")
-			req := newReq(t, http.MethodDelete, "/api/subscriptions/42?ifUntouched=1", "", "42", ctx)
+			req := newReq(t, http.MethodDelete, "/api/subscriptions/42/untouched", "", "42", ctx)
 			rec := httptest.NewRecorder()
-			h.DeleteSubscription(rec, req)
+			h.DeleteUntouchedSubscription(rec, req)
 
 			require.Equal(t, tc.wantStatus, rec.Code, "body=%s", rec.Body.String())
 			if tc.wantBody != "" {
@@ -1548,19 +1552,23 @@ func TestDelete_IfUntouched(t *testing.T) {
 	}
 }
 
-func TestDelete_WithoutIfUntouched_IsThePlainDelete(t *testing.T) {
+func TestDeleteUntouched_InvalidAnilistID_400(t *testing.T) {
 	t.Parallel()
-	for _, target := range []string{"/api/subscriptions/42", "/api/subscriptions/42?ifUntouched=0"} {
-		db := &fakeSubsDB{
-			deleteFn: func(_ context.Context, _ uuid.UUID, _ int32) (int64, error) { return 1, nil },
-		}
-		h := makeHandlersWithFakes(db, nil, nil)
-		ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
-		rec := httptest.NewRecorder()
-		h.DeleteSubscription(rec, newReq(t, http.MethodDelete, target, "", "42", ctx))
-		require.Equal(t, http.StatusOK, rec.Code, "%s: body=%s", target, rec.Body.String())
-		assert.Zero(t, atomic.LoadInt32(&db.deleteIfUntouchedCalls), target)
-	}
+	h := makeHandlersWithFakes(&fakeSubsDB{}, nil, nil)
+	ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+	req := newReq(t, http.MethodDelete, "/api/subscriptions/abc/untouched", "", "abc", ctx)
+	rec := httptest.NewRecorder()
+	h.DeleteUntouchedSubscription(rec, req)
+	assertError(t, rec, http.StatusBadRequest, "BAD_REQUEST", "Invalid anime ID")
+}
+
+func TestDeleteUntouched_MissingAuth_401(t *testing.T) {
+	t.Parallel()
+	h := makeHandlersWithFakes(&fakeSubsDB{}, nil, nil)
+	req := newReq(t, http.MethodDelete, "/api/subscriptions/1/untouched", "", "1", nil)
+	rec := httptest.NewRecorder()
+	h.DeleteUntouchedSubscription(rec, req)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 // -----------------------------------------------------------------------------

@@ -11,8 +11,8 @@
 --                                             (when the body sets ifAbsent)
 --   PATCH  /api/subscriptions/:anilistId    → UpdateSubscriptionWithActivity
 --   DELETE /api/subscriptions/:anilistId    → DeleteSubscription
---                                             DeleteSubscriptionIfUntouched
---                                             (with ?ifUntouched=1)
+--   DELETE /api/subscriptions/:anilistId/untouched
+--                                           → DeleteSubscriptionIfUntouched
 --
 -- Express joined Subscription + AnimeCache in application code; here we
 -- do the join in SQL so the network round-trip is one query for the
@@ -565,7 +565,7 @@ WHERE s.user_id = $1
   AND s.anilist_id = $2;
 
 -- name: DeleteSubscriptionIfUntouched :execrows
--- DELETE /api/subscriptions/:anilistId?ifUntouched=1: the seasonal page's ✓
+-- DELETE /api/subscriptions/:anilistId/untouched: the seasonal page's ✓
 -- pressed again.  Only a row that still holds nothing but the follow goes —
 -- the quick-add status, no episode marked (the marks and current_episode are
 -- written together; both are checked anyway), no watch time, no score, and no

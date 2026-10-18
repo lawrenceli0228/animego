@@ -661,10 +661,14 @@ func TestEpisodeWatch_ResponseShape(t *testing.T) {
 func TestEpisodeRoutes_DoNotCollideWithTheSubscriptionRoutes(t *testing.T) {
 	t.Parallel()
 
-	var markedAnilist, markedEpisode int32
+	var markedAnilist, markedEpisode, guardedAnilist int32
 	var markedSet []int32
 	var deletedSubscription bool
 	db := &fakeSubsDB{
+		deleteIfUntouchedFn: func(_ context.Context, _ uuid.UUID, anilistID int32) (int64, error) {
+			guardedAnilist = anilistID
+			return 1, nil
+		},
 		markFn: func(_ context.Context, _ uuid.UUID, anilistID, episode int32) (dbgen.MarkEpisodeWatchedRow, error) {
 			markedAnilist, markedEpisode = anilistID, episode
 			return dbgen.MarkEpisodeWatchedRow{WatchedEpisodes: []int32{episode}, CurrentEpisode: episode}, nil
@@ -694,6 +698,7 @@ func TestEpisodeRoutes_DoNotCollideWithTheSubscriptionRoutes(t *testing.T) {
 		r.Get("/{anilistId}", h.GetSubscriptionByAnilistID)
 		r.Patch("/{anilistId}", h.UpdateSubscription)
 		r.Delete("/{anilistId}", h.DeleteSubscription)
+		r.Delete("/{anilistId}/untouched", h.DeleteUntouchedSubscription)
 		r.Put("/{anilistId}/episodes", h.MarkEpisodesWatched)
 		r.Put("/{anilistId}/episodes/{episode}", h.MarkEpisodeWatched)
 		r.Delete("/{anilistId}/episodes/{episode}", h.UnmarkEpisodeWatched)
@@ -728,6 +733,15 @@ func TestEpisodeRoutes_DoNotCollideWithTheSubscriptionRoutes(t *testing.T) {
 	r.ServeHTTP(rec3, httptest.NewRequest(http.MethodDelete, "/api/subscriptions/42/episodes/7", nil).WithContext(ctx))
 	require.Equal(t, http.StatusOK, rec3.Code, "body=%s", rec3.Body.String())
 	assert.Equal(t, int32(7), markedEpisode, "DELETE on the two-segment path must unmark, not unsubscribe")
+
+	// DELETE /{anilistId}/untouched reaches the guarded handler, and never the
+	// plain DELETE, which would take a row with history along with it.
+	deletedSubscription = false
+	rec4 := httptest.NewRecorder()
+	r.ServeHTTP(rec4, httptest.NewRequest(http.MethodDelete, "/api/subscriptions/42/untouched", nil).WithContext(ctx))
+	require.Equal(t, http.StatusOK, rec4.Code, "body=%s", rec4.Body.String())
+	assert.Equal(t, int32(42), guardedAnilist, "the guarded delete binds the id")
+	assert.False(t, deletedSubscription, "DELETE /{anilistId}/untouched must never reach the plain delete")
 }
 
 // -----------------------------------------------------------------------------

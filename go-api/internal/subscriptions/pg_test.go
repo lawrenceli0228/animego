@@ -991,10 +991,10 @@ func TestPG_Delete_RemovesRow(t *testing.T) {
 	assert.Equal(t, 0, n, "row should be deleted")
 }
 
-// TestPG_DeleteIfUntouched_OnlyAFollowWithNothingElseGoes runs the seasonal
-// page's unfollow (DELETE ?ifUntouched=1) against the real statement: a row
-// goes, with its status card, only while it holds nothing but the follow.
-func TestPG_DeleteIfUntouched_OnlyAFollowWithNothingElseGoes(t *testing.T) {
+// TestPG_DeleteUntouched_OnlyAFollowWithNothingElseGoes runs the seasonal
+// page's unfollow (DELETE /{anilistId}/untouched) against the real statement:
+// a row goes, with its status card, only while it holds nothing but the follow.
+func TestPG_DeleteUntouched_OnlyAFollowWithNothingElseGoes(t *testing.T) {
 	h, pool := pgHandlers(t)
 	defer pool.Close()
 	alice := seedUser(t, pool, "alice", "alice@example.com")
@@ -1032,9 +1032,9 @@ func TestPG_DeleteIfUntouched_OnlyAFollowWithNothingElseGoes(t *testing.T) {
 
 	unfollow := func(id int32) int {
 		t.Helper()
-		req := newReq(t, http.MethodDelete, fmt.Sprintf("/api/subscriptions/%d?ifUntouched=1", id), "", fmt.Sprint(id), ctx)
+		req := newReq(t, http.MethodDelete, fmt.Sprintf("/api/subscriptions/%d/untouched", id), "", fmt.Sprint(id), ctx)
 		rec := httptest.NewRecorder()
-		h.DeleteSubscription(rec, req)
+		h.DeleteUntouchedSubscription(rec, req)
 		return rec.Code
 	}
 	has := func(id int32) bool {
@@ -1061,5 +1061,56 @@ func TestPG_DeleteIfUntouched_OnlyAFollowWithNothingElseGoes(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, unfollow(7), "a deleted reply is not a conversation")
 	assert.False(t, has(7))
-	assert.Equal(t, http.StatusNotFound, unfollow(1), "a second press finds nothing")
+	assert.Equal(t, http.StatusOK, unfollow(1), "a second press finds nothing to do, and says so with 200")
+}
+
+// TestPG_DeleteUntouched_WaitsOutAProgressWrite holds an episode mark open on
+// the row, then sends the guarded delete: it must wait for the mark and see
+// it.  Without FOR UPDATE in the statement it would decide on the snapshot
+// from before the mark, wait only at the DELETE, and then delete the row and
+// cascade away the episode just marked.
+func TestPG_DeleteUntouched_WaitsOutAProgressWrite(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	reqCtx := withUserClaims(t, context.Background(), user, "alice")
+	postSubscription(t, h, reqCtx, `{"anilistId":1,"status":"watching"}`)
+
+	// The other request, frozen mid-flight with the row locked.
+	holder, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = holder.Rollback(ctx) }()
+	_, err = dbgen.New(holder).MarkEpisodeWatched(ctx, user, 1, 1)
+	require.NoError(t, err)
+
+	// Built out here: newReq/withUserClaims call t.Fatal on failure, which is
+	// only legal on the test's own goroutine.
+	req := newReq(t, http.MethodDelete, "/api/subscriptions/1/untouched", "", "1", reqCtx)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		h.DeleteUntouchedSubscription(rec, req)
+		done <- rec
+	}()
+
+	requireBlockedOnMark(t, pool, "DeleteSubscriptionIfUntouched")
+	require.NoError(t, holder.Commit(ctx))
+
+	select {
+	case rec := <-done:
+		require.Equal(t, http.StatusConflict, rec.Code, "body=%s", rec.Body.String())
+	case <-time.After(20 * time.Second):
+		t.Fatal("the guarded delete never returned")
+	}
+
+	var rows, marks int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM subscriptions WHERE user_id = $1 AND anilist_id = 1`, user).Scan(&rows))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM episode_watches WHERE user_id = $1 AND anilist_id = 1`, user).Scan(&marks))
+	assert.Equal(t, 1, rows, "the row the mark landed on is kept")
+	assert.Equal(t, 1, marks, "and so is the mark")
 }
