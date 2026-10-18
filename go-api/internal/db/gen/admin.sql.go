@@ -910,6 +910,9 @@ SET
     episodes_bgm_outcome      = NULL,
     episodes_bgm_reason       = NULL,
     cast_checked_at = NULL,
+    -- The rebind sweep's stamp goes with the binding: see the header of
+    -- bgm_rebind.sql for why no version-0 row may carry one.
+    bgm_rebind_checked_at = NULL,
     updated_at      = now()
 WHERE anilist_id = $1
 `

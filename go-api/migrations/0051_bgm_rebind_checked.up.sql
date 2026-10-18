@@ -1,0 +1,45 @@
+-- 0051: when the rebind sweep last searched Bangumi for an unbound row.
+--
+-- V1 searches Bangumi once per row.  A row it cannot bind -- no hit, or a
+-- best candidate below the confidence floor -- is parked at bangumi_version 2
+-- and is never searched again, because every V1 producer selects version 0.
+-- For the back catalogue that is the right call: what Bangumi says about a
+-- 2009 show will not change.  For a show that has not aired yet it is the
+-- wrong one, and it is wrong in the commonest case: AniList lists a show
+-- months ahead, the row is enriched the day it appears, and Bangumi's subject
+-- is created or filled in later.  The one search happened too early, and the
+-- row keeps AniList's romaji -- no Chinese title, invisible to a Chinese
+-- search -- for good.
+--
+-- Measured on production 2026-10-18: 253 airing or upcoming rows held no
+-- bgm_id.  Re-running V1's own search and scorer over the 215 such rows from
+-- 2025-2027 seasons bound 44 of them at high confidence today, one of them
+-- Cyberpunk: Edgerunners 2 (AniList's third most popular show of fall 2026),
+-- parked as fuzzy_low when its subject did not yet carry its final name.
+--
+-- internal/queue/bgm_rebind_search.go searches those rows again on a weekly
+-- cycle.  This column is what makes the cycle weekly: a row is a candidate
+-- only while its stamp is NULL or older than the cycle, so a six-hourly
+-- sweep finds a handful of rows rather than re-searching the same 253 every
+-- pass against the 800ms Bangumi bucket user-facing requests share.
+--
+-- A timestamp rather than a counter or a flag: the question the sweep asks
+-- is "how long since we last asked", and that is the only form that lets the
+-- answer age out.  NULL means "never searched by the sweep", which is every
+-- row at the time of writing, so no backfill is needed.
+--
+-- Additive and nullable: the process still running during deploy.sh's
+-- migrate-then-build window neither reads nor writes it.
+--
+-- ★ Locks.  Adding a nullable column with no default is a catalogue-only
+-- change, but it still needs ACCESS EXCLUSIVE on anime_cache for that
+-- instant, and it queues behind anything holding even ACCESS SHARE -- the
+-- nightly pg_dump holds that on every table for the whole dump.  While it
+-- waits, every read of anime_cache queues behind it, which is every catalogue
+-- page.  lock_timeout makes the deploy fail fast instead, the call 0025 and
+-- 0046 made.  The ALTER is the file's only change, so a timeout leaves the
+-- schema at 0050; golang-migrate records 51 as dirty, which stops the next
+-- deploy until `migrate force 50` clears it.
+SET lock_timeout = '3s';
+
+ALTER TABLE anime_cache ADD COLUMN IF NOT EXISTS bgm_rebind_checked_at timestamptz;

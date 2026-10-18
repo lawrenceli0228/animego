@@ -1318,6 +1318,13 @@ func buildWorkers(d workerDeps) *river.Workers {
 	// BGM_BIND_IDMAP_SWEEP_ENABLED.
 	queue.AddBindIdMapWorker(workers, d.pool, d.db, d.enqueuer)
 
+	// The weekly re-search of airing and upcoming rows V1 could not bind.
+	// The pool and enqueuer for the reason the id-map sweep takes them --
+	// a bind and its V2 dispatch are one transaction -- and the SAME
+	// bangumiClient so its searches draw from the shared token bucket.
+	// Gated at work time by BGM_REBIND_SWEEP_ENABLED.
+	queue.AddBgmRebindWorker(workers, d.pool, d.db, d.bangumi, d.enqueuer)
+
 	// The two rating-refresh sweeps.  Register separately for the reason
 	// every sweep above does -- they need the AniList client, which the
 	// bundle builder holds but does not hand to any worker of its own --
