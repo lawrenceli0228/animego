@@ -44,7 +44,9 @@ function ChartCard({ item, hidden, delayMs, nowMs, lang, copy, Follow, priority 
   return (
     <div className={chart.chart} style={rootStyle} hidden={hidden} data-anime-card data-id={item.id}>
       <Link href={`/anime/${item.id}`} prefetch={false} className={chart.chCover} style={{ background: tone.fill }}>
-        <FadeImage src={item.cover} alt="" width={190} height={272} className={chart.chImg} priority={priority} />
+        <span className={chart.chArt}>
+          <FadeImage src={item.cover} alt="" width={190} height={272} className={chart.chImg} priority={priority} />
+        </span>
         <div className={chart.chOverlay}>
           <div className={chart.chTitle}>{item.title}</div>
           {item.studio ? (

@@ -68,7 +68,9 @@ function CoverCard({ item, hidden, delayMs, nowMs, zone, state, mode, lang, copy
           tabIndex={-1}
           aria-hidden="true"
         >
-          <FadeImage src={item.cover} alt="" width={190} height={272} className={cards.coverImg} priority={priority} />
+          <span className={cards.art}>
+            <FadeImage src={item.cover} alt="" width={190} height={272} className={cards.coverImg} priority={priority} />
+          </span>
         </Link>
         {badge ? (
           <span
