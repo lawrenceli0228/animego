@@ -65,6 +65,9 @@ const (
 	msgSubscriptionNotFound  = "Subscription not found"
 	msgAnimeNotFound         = "Anime not found"
 	msgDeletedSuccessMessage = "Deleted"
+	// msgSubscriptionHasHistory answers DELETE ?ifUntouched=1 for a row with
+	// progress, a score, another status or a conversation on its status card.
+	msgSubscriptionHasHistory = "Subscription has history"
 )
 
 // validationMessage maps the FIRST validator FieldError to an English

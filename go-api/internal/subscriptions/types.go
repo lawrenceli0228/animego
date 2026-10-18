@@ -9,6 +9,7 @@
 //	POST   /api/subscriptions                            → CreateSubscription
 //	PATCH  /api/subscriptions/:anilistId                 → UpdateSubscription
 //	DELETE /api/subscriptions/:anilistId                 → DeleteSubscription
+//	       (?ifUntouched=1: only a row with nothing but the follow; 409 otherwise)
 //	PUT    /api/subscriptions/:anilistId/episodes        → MarkEpisodesWatched
 //	PUT    /api/subscriptions/:anilistId/episodes/:ep    → MarkEpisodeWatched
 //	DELETE /api/subscriptions/:anilistId/episodes/:ep    → UnmarkEpisodeWatched

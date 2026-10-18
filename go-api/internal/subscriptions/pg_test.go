@@ -990,3 +990,76 @@ func TestPG_Delete_RemovesRow(t *testing.T) {
 		`SELECT COUNT(*) FROM subscriptions WHERE user_id = $1 AND anilist_id = 1`, user).Scan(&n))
 	assert.Equal(t, 0, n, "row should be deleted")
 }
+
+// TestPG_DeleteIfUntouched_OnlyAFollowWithNothingElseGoes runs the seasonal
+// page's unfollow (DELETE ?ifUntouched=1) against the real statement: a row
+// goes, with its status card, only while it holds nothing but the follow.
+func TestPG_DeleteIfUntouched_OnlyAFollowWithNothingElseGoes(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+	for id := int32(1); id <= 8; id++ {
+		seedAnime(t, pool, id, fmt.Sprintf("A%d", id), fmt.Sprintf("甲%d", id))
+	}
+	ctx := withUserClaims(t, context.Background(), alice, "alice")
+	bg := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		_, err := pool.Exec(bg, sql, args...)
+		require.NoError(t, err)
+	}
+	follow := func(id int32) {
+		t.Helper()
+		postSubscription(t, h, ctx, fmt.Sprintf(`{"anilistId":%d,"status":"watching"}`, id))
+	}
+
+	follow(1)                                                 // the follow and nothing else
+	seedWatchedSubscription(t, pool, alice, 2, "watching", 3) // three episodes marked
+	follow(3)
+	exec(`UPDATE subscriptions SET score = 8 WHERE user_id = $1 AND anilist_id = 3`, alice)
+	postSubscription(t, h, ctx, `{"anilistId":4,"status":"completed"}`)
+	follow(5)
+	exec(`INSERT INTO activity_likes (activity_event_id, user_id) VALUES ($1, $2)`, statusEventID(t, pool, alice, 5), bob)
+	follow(6)
+	exec(`INSERT INTO community_replies (anilist_id, activity_event_id, user_id, body) VALUES (6, $1, $2, '加油')`,
+		statusEventID(t, pool, alice, 6), bob)
+	follow(7)
+	exec(`INSERT INTO community_replies (anilist_id, activity_event_id, user_id, body, deleted_at) VALUES (7, $1, $2, '已删', now())`,
+		statusEventID(t, pool, alice, 7), bob)
+	follow(8) // watched, then every mark taken back: progress is 0 again, the watch time stays
+	exec(`UPDATE subscriptions SET last_watched_at = now() WHERE user_id = $1 AND anilist_id = 8`, alice)
+
+	unfollow := func(id int32) int {
+		t.Helper()
+		req := newReq(t, http.MethodDelete, fmt.Sprintf("/api/subscriptions/%d?ifUntouched=1", id), "", fmt.Sprint(id), ctx)
+		rec := httptest.NewRecorder()
+		h.DeleteSubscription(rec, req)
+		return rec.Code
+	}
+	has := func(id int32) bool {
+		t.Helper()
+		var n int
+		require.NoError(t, pool.QueryRow(bg,
+			`SELECT COUNT(*) FROM subscriptions WHERE user_id = $1 AND anilist_id = $2`, alice, id).Scan(&n))
+		return n == 1
+	}
+
+	assert.Equal(t, http.StatusOK, unfollow(1))
+	assert.False(t, has(1))
+	assert.Empty(t, statusEvents(t, pool, alice, 1), "its status card goes with it")
+
+	for _, id := range []int32{2, 3, 4, 5, 6, 8} {
+		assert.Equal(t, http.StatusConflict, unfollow(id), "anime %d", id)
+		assert.True(t, has(id), "anime %d is kept", id)
+	}
+	var marks int
+	require.NoError(t, pool.QueryRow(bg,
+		`SELECT COUNT(*) FROM episode_watches WHERE user_id = $1 AND anilist_id = 2`, alice).Scan(&marks))
+	assert.Equal(t, 3, marks, "the marks stay with their row")
+	assert.Equal(t, []string{"watching"}, statusEvents(t, pool, alice, 5), "the liked card stays")
+
+	assert.Equal(t, http.StatusOK, unfollow(7), "a deleted reply is not a conversation")
+	assert.False(t, has(7))
+	assert.Equal(t, http.StatusNotFound, unfollow(1), "a second press finds nothing")
+}

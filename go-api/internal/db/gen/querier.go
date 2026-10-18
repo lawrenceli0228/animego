@@ -424,6 +424,18 @@ type Querier interface {
 	// The title's status events go with it (migration 0046): off the list is
 	// off the anime's community tab, with the replies and likes on those cards.
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	// DELETE /api/subscriptions/:anilistId?ifUntouched=1: the seasonal page's ✓
+	// pressed again.  Only a row that still holds nothing but the follow goes —
+	// the quick-add status, no episode marked (the marks and current_episode are
+	// written together; both are checked anyway), no watch time, no score, and no
+	// status card that someone liked or answered.  Anything more and nothing is
+	// deleted: 0 rows, which the handler tells apart from a missing row and
+	// answers 409, so the page can ask before the history goes with it.
+	//
+	// An untouched row takes its status cards with it, as DeleteSubscription's
+	// does.  FOR UPDATE holds the row against a progress write racing this one:
+	// that write updates current_episode, and the re-check after the wait sees it.
+	DeleteSubscriptionIfUntouched(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 	// So LockEntityOverlay has a row to lock even for a first edit.
 	EnsureEntityOverlay(ctx context.Context, kind string, entityID int32) error
 	// POST /api/admin/enrichment/:anilistId/flag — set admin_flag to one of
