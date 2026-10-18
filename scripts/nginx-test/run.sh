@@ -26,6 +26,9 @@ RUN=nginxtest-$$           # names this run's containers and network
 NET=$RUN-net
 NGX=$RUN-nginx
 EXP=$RUN-nginx-expiry
+PRE=$RUN-nginx-presplit    # the variant cache before the zone split, and after it
+POST=$RUN-nginx-postsplit
+VOL=$RUN-cache
 IMG=$RUN-image
 APP=$RUN-app
 ANI=$RUN-anilist
@@ -34,7 +37,8 @@ passed=0
 failed=0
 
 cleanup() {
-  docker rm -f "$NGX" "$EXP" "$IMG" "$APP" "$ANI" >/dev/null 2>&1
+  docker rm -f "$NGX" "$EXP" "$PRE" "$POST" "$IMG" "$APP" "$ANI" >/dev/null 2>&1
+  docker volume rm "$VOL" >/dev/null 2>&1
   docker network rm "$NET" >/dev/null 2>&1
   rm -rf "$T"
 }
@@ -130,8 +134,12 @@ EOF
 # ─── containers ────────────────────────────────────────────────────────
 pull_once() { docker image inspect "$1" >/dev/null 2>&1 || docker pull -q "$1" >/dev/null; }
 
-start_nginx() { # container name, config file
+start_nginx() { # container name, config file[, docker volume for /var/cache/nginx]
+  local cache=()
+  [ -n "${3:-}" ] && cache=(-v "$3:/var/cache/nginx")
+  # ${cache[@]+...}: bash 3.2 (macOS) treats an empty array as unset under set -u.
   docker run -d --name "$1" --network "$NET" -p 127.0.0.1::443 -p 127.0.0.1::8090 \
+    ${cache[@]+"${cache[@]}"} \
     -v "$2:/etc/nginx/conf.d/default.conf:ro" \
     -v "$T/server.crt:/etc/nginx/ssl/selfsigned.crt:ro" \
     -v "$T/server.key:/etc/nginx/ssl/selfsigned.key:ro" \
@@ -264,6 +272,11 @@ before=$(next_hits)
 veryslow=$!
 for i in $(seq 1 50); do [ "$(next_hits)" -gt "$before" ] && break; sleep 0.1; done
 
+# Every key in the variant cache, in both zones (next_image, next_image_misc).
+variant_keys() {
+  docker exec "$NGX" sh -c 'find /var/cache/nginx/next_image /var/cache/nginx/next_image_misc -type f -exec cat {} +' | grep -a '^KEY: '
+}
+
 # ═══ /_next/image: the mirror address shares the AniList address's entry ═
 S4=https%3A%2F%2Fs4.anilist.co%2Ffile%2Fanilistcdn%2F
 MIRROR=https%3A%2F%2Fanimegoclub.com%2Fimg%2Fanilist%2F
@@ -276,7 +289,7 @@ code "/_next/image?url=$S4$P1&w=640&q=85" >/dev/null
 ok "$(( $(next_hits) - n ))" 1 "and a repeat of it is a cache hit, as before"
 ok "$(hdr "$A" "/_next/image?url=$MIRROR$P1&w=640&q=85" x-url)" "$P1_S4" "the mirror address is answered from the AniList address's entry"
 ok "$(( $(next_hits) - n ))" 1 "so the two addresses reach the optimizer once in total"
-keys=$(docker exec "$NGX" find /var/cache/nginx/next_image -type f -exec cat {} + | grep -a '^KEY: ')
+keys=$(variant_keys)
 ok "$(printf '%s\n' "$keys" | grep -c -x -F "KEY: url=$S4$P1&w=640&q=85|avif")" 1 "the entry's key is the pre-change format, url=<AniList address>&w=640&q=85|avif"
 ok "$(printf '%s\n' "$keys" | grep -c -F 'animegoclub.com')" 0 "no entry is keyed by a mirror address"
 P2=media%2Fanime%2Fbanner%2F9002-share.jpg
@@ -308,7 +321,7 @@ ESC=${MIRROR}media%2Fanime%2Fcover%2Flarge%2Fbx9001-share%2Epng
 n=$(next_hits)
 code "/_next/image?url=$ESC&w=640&q=85" >/dev/null
 ok "$(( $(next_hits) - n ))" 1 "a mirror address with any other escape in its path is not served from a shared entry"
-keys=$(docker exec "$NGX" find /var/cache/nginx/next_image -type f -exec cat {} + | grep -a '^KEY: ')
+keys=$(variant_keys)
 ok "$(printf '%s\n' "$keys" | grep -c -x -F "KEY: url=$ESC&w=640&q=85|avif")" 1 "it keeps the key of its own query string"
 
 # ═══ /img/anilist/ and :8090 /warm/: the allowlist ═════════════════════
@@ -484,7 +497,7 @@ ok "$(img "$TLS")" 200 "the right name through two intermediate CAs is accepted"
 # ═══ expiry: a copy of the config with validity cut to 2s ══════════════
 echo "== once a stored original has expired (in a copy of the config with validity cut to 2s)"
 sed 's/proxy_cache_valid 200 30d;/proxy_cache_valid 200 2s;/' "$CONF" > "$T/expiry.conf"
-ok "$(grep -c 'proxy_cache_valid 200 2s;' "$T/expiry.conf")" 3 "the copy cuts it in the variant cache and both mirror locations"
+ok "$(grep -c 'proxy_cache_valid 200 2s;' "$T/expiry.conf")" 4 "the copy cuts it in both variant locations (public, :8090) and both mirror locations"
 start_nginx "$EXP" "$T/expiry.conf"
 PE443=$(port_of "$EXP" 443)
 PE8090=$(port_of "$EXP" 8090)
@@ -525,6 +538,130 @@ ok "$(img "$E")|$(body)" "200|original $E v2" "and /img/anilist/ serves those fr
 echo "== a slow encode is allowed 60s"
 wait "$veryslow"
 ok "$(cat "$T/veryslow.txt")" 200 "a 40s upstream response is still a 200"
+
+# ═══ /_next/image zones: page shapes in next_image, the rest in next_image_misc ═
+# Back on the main config's server (the expiry checks above moved B and W).
+# After the 40s request above has finished, so the in-flight limit is all free.
+B=https://localhost:$P443
+W=http://127.0.0.1:$P8090
+ORIG='accept: */*'
+in_zone() { # container, zone, exact key: how many entries of that zone carry it
+  docker exec "$1" sh -c "find /var/cache/nginx/$2 -type f -exec cat {} + 2>/dev/null" | grep -a -c -x -F "KEY: $3"
+}
+fmt_of() { case "$1" in "$A") echo avif ;; "$WEBP") echo webp ;; *) echo orig ;; esac; }
+echo "== /_next/image: a page shape is stored in next_image, anything else in next_image_misc"
+while IFS='|' read -r path w accept want label; do
+  case "$accept" in avif) h=$A ;; webp) h=$WEBP ;; *) h=$ORIG ;; esac
+  if [ "${path#%2F}" != "$path" ]; then key="url=$path&w=$w&q=85|$(fmt_of "$h")"; arg=$path
+  else key="url=$S4$path&w=$w&q=85|$(fmt_of "$h")"; arg=$MIRROR$path; fi
+  c -o /dev/null -H "$h" "$B/_next/image?url=$arg&w=$w&q=85"
+  other=next_image; [ "$want" = next_image ] && other=next_image_misc
+  ok "$(in_zone "$NGX" "$want" "$key")|$(in_zone "$NGX" "$other" "$key")" "1|0" "$label -> $want"
+done <<'EOF'
+media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png|256|avif|next_image|an anime cover at 256 (detail page 1x, season grid 1x)
+media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png|384|avif|next_image|at 384 (season grid 2x)
+media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png|640|avif|next_image|at 640 (detail page 2x)
+media%2Fanime%2Fcover%2Fmedium%2Fbx9952-zone.png|96|avif|next_image|a medium cover at 96 (season list 2x)
+media%2Fmanga%2Fcover%2Fmedium%2Fbx9953-zone.png|384|avif|next_image|a manga cover at 384 (related works 2x)
+media%2Fanime%2Fbanner%2F9954-zone.jpg|828|avif|next_image|a banner at 828
+media%2Fanime%2Fbanner%2F9954-zone.jpg|1920|avif|next_image|a banner at 1920
+character%2Fmedium%2Fb9955-zone.png|128|avif|next_image|a character portrait at 128
+staff%2Fmedium%2Fn9956-zone.png|96|avif|next_image|a staff portrait at 96
+media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png|1080|avif|next_image_misc|a cover at a width no page asks for
+media%2Fanime%2Fcover%2FextraLarge%2Fbx9957-zone.png|256|avif|next_image_misc|an extraLarge cover
+character%2Flarge%2Fb9958-zone.png|640|avif|next_image_misc|a large portrait
+staff%2Fmedium%2Fn9956-zone.png|640|avif|next_image_misc|a staff portrait at 640
+media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png|256|webp|next_image_misc|a page-shape width in WebP
+media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png|256|orig|next_image_misc|in the original format
+media%2Fanime%2Fbanner%2F9954-zone.jpg|1920|orig|next_image_misc|a banner in the original format
+%2Fsite-9959.png|256|avif|next_image_misc|a site image
+EOF
+n=$(next_hits)
+code "/_next/image?url=${S4}media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png&w=256&q=85" >/dev/null
+ok "$(( $(next_hits) - n ))" 0 "a page shape's AniList address is answered from its mirror address's entry in next_image"
+for u in "url=${MIRROR}media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png&w=256&q=85" "url=%2Fsite-9959.png&w=256&q=85"; do
+  hs=$(c -D - -o /dev/null -H "$A" "$B/_next/image?$u" | tr -d '\r')
+  got=$(printf '%s\n' "$hs" | awk -F': ' 'tolower($1)=="x-frame-options" {f=$2} tolower($1)=="x-content-type-options" {t=$2} tolower($1)=="strict-transport-security" {s="hsts"} END {print f "|" t "|" s}')
+  ok "$got" "DENY|nosniff|hsts" "the site's security headers on a variant from $( [ "${u#*%2Fsite}" != "$u" ] && echo next_image_misc || echo next_image)"
+done
+line=$(docker logs "$NGX" 2>/dev/null | grep -F "GET /_next/image?url=${MIRROR}media%2Fanime%2Fcover%2Flarge%2Fbx9951-zone.png&w=256&q=85 " | tail -1)
+ok "$(printf '%s' "$line" | grep -o 'cache=[A-Z]* zone=[a-z_]*$')" "cache=HIT zone=next_image" "the access log line ends with the cache status and the zone"
+line=$(docker logs "$NGX" 2>/dev/null | grep -F "GET /_next/image?url=%2Fsite-9959.png&w=256&q=85 " | tail -1)
+ok "$(printf '%s' "$line" | grep -o 'zone=[a-z_]*$')" "zone=next_image_misc" "and names next_image_misc for the rest"
+
+echo "== a busy 503 is never stored, in either zone"
+flood_shape() { # how many at once, tag, url prefix for <tag><i>.png; waits for its own requests only
+  local pids="" i
+  rm -f "$T/flood.txt" "$T"/flood/*
+  for i in $(seq 1 "$1"); do
+    ( c -D "$T/flood/h$i" -o /dev/null -w "%{http_code}\n" -H "$A" "$B/_next/image?url=$3$2$i.png&w=256&q=85" >> "$T/flood.txt" ) &
+    pids="$pids $!"
+  done
+  # shellcheck disable=SC2086
+  wait $pids
+}
+for zone in next_image next_image_misc; do
+  if [ "$zone" = next_image ]; then pre="${MIRROR}media%2Fanime%2Fcover%2Flarge%2Fslower-"; else pre="%2Fslower-"; fi
+  flood_shape 300 "busy-$zone-" "$pre"
+  ok "$(grep -c '^503' "$T/flood.txt")" 44 "$zone: 44 over the limit get 503"
+  busy=$(grep -l '^HTTP/[0-9.]* 503' "$T"/flood/h* | head -1); i=${busy##*/h}
+  n=$(next_hits)
+  ok "$(c -o /dev/null -w '%{http_code}' -H "$A" "$B/_next/image?url=${pre}busy-$zone-$i.png&w=256&q=85")|$(( $(next_hits) - n ))" "200|1" \
+    "$zone: asked again, a variant that got 503 reaches the optimizer and is served: the 503 was not stored"
+done
+
+echo "== :8090 /_next/image: the variant warm entry point"
+WP="${MIRROR}media%2Fanime%2Fcover%2Flarge%2Fbx9961-warm.png"
+wstat() { curl -s -I --max-time 90 -H "$A" "$@" | tr -d '\r' | head -1 | awk '{print $2}'; }
+wcache() { curl -s -I --max-time 90 -H "$A" "$@" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-cache-status" {print $2}'; }
+n=$(next_hits)
+ok "$(wstat "$W/_next/image?url=$WP&w=384&q=85")|$(wcache "$W/_next/image?url=$WP&w=384&q=85")" "200|HIT" "a HEAD for a cold page shape is a 200 that stores it (the next HEAD is a HIT)"
+ok "$(( $(next_hits) - n ))" 1 "encoded once"
+ok "$(in_zone "$NGX" next_image "url=${S4}media%2Fanime%2Fcover%2Flarge%2Fbx9961-warm.png&w=384&q=85|avif")" 1 "in next_image, under the public location's key"
+n=$(next_hits)
+ok "$(hdr "$A" "/_next/image?url=$WP&w=384&q=85" x-url)|$(( $(next_hits) - n ))" \
+  "https://animegoclub.com/img/anilist/media/anime/cover/large/bx9961-warm.png|0" "a reader's request then finds it: no encode"
+n=$(next_hits)
+ok "$(wcache -H 'X-Warm-Refresh: 1' "$W/_next/image?url=$WP&w=384&q=85")|$(( $(next_hits) - n ))" "BYPASS|1" "X-Warm-Refresh: 1 on :8090 encodes it again"
+ok "$(wcache "$W/_next/image?url=$WP&w=384&q=85")" HIT "and the new copy is the stored one"
+n=$(next_hits)
+c -o /dev/null -H "$A" -H 'X-Warm-Refresh: 1' "$B/_next/image?url=$WP&w=384&q=85"
+ok "$(( $(next_hits) - n ))" 0 "the public location ignores X-Warm-Refresh"
+n=$(next_hits)
+ok "$(wstat "$W/_next/image?url=$WP&w=1080&q=85")" 403 ":8090 refuses a width that is not a page shape"
+ok "$(wstat "$W/_next/image?url=${S4}media%2Fanime%2Fcover%2Flarge%2Fbx9961-warm.png&w=384&q=85")" 403 "an AniList address (only mirror addresses)"
+ok "$(curl -s -I --max-time 30 -H "$WEBP" -o /dev/null -w '%{http_code}' "$W/_next/image?url=$WP&w=384&q=85")" 403 "a request that does not ask for AVIF"
+ok "$(wstat "$W/_next/image?url=%2Fa.png&w=640&q=85")" 403 "a site image"
+ok "$(wstat "$W/_next/image?URL=$WP&w=384&q=85")" 400 "a query string the pages never produce"
+ok "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$A" --data x "$W/_next/image?url=$WP&w=384&q=85")" 403 "a POST"
+ok "$(( $(next_hits) - n ))" 0 "none of them reached the optimizer"
+
+# ═══ the zone split keeps what next_image already held ═════════════════
+echo "== an entry stored before the zone split is found after it"
+# The config as it was before the split, as far as the variant cache goes:
+# every variant in next_image.  The zone's path, name and key are unchanged
+# by the split; this checks that a request after it finds such an entry.
+sed 's/proxy_cache \$next_image_zone;/proxy_cache next_image;/' "$CONF" > "$T/presplit.conf"
+ok "$(grep -c 'proxy_cache next_image;' "$T/presplit.conf")|$(grep -c 'proxy_cache \$next_image_zone;' "$T/presplit.conf")" "2|0" \
+  "the copy stores every public variant in next_image, as before the split"
+docker volume create "$VOL" >/dev/null || give_up "could not create the cache volume"
+start_nginx "$PRE" "$T/presplit.conf" "$VOL"
+PP443=$(port_of "$PRE" 443); PP8090=$(port_of "$PRE" 8090)
+wait_for "http://127.0.0.1:$PP8090/" || give_up "the pre-split copy of the config did not start"
+CURL_RESOLVE+=(--resolve "localhost:$PP443:127.0.0.1")
+KEPT="${MIRROR}media%2Fanime%2Fcover%2Flarge%2Fbx9971-kept.png"
+n=$(next_hits)
+ok "$(c -o /dev/null -w '%{http_code}' -H "$A" "https://localhost:$PP443/_next/image?url=$KEPT&w=384&q=85")|$(( $(next_hits) - n ))" "200|1" \
+  "stored by the pre-split config"
+docker rm -f "$PRE" >/dev/null
+start_nginx "$POST" "$CONF" "$VOL"
+PQ443=$(port_of "$POST" 443); PQ8090=$(port_of "$POST" 8090)
+wait_for "http://127.0.0.1:$PQ8090/" || give_up "the config did not start on the shared cache volume"
+CURL_RESOLVE+=(--resolve "localhost:$PQ443:127.0.0.1")
+n=$(next_hits)
+ok "$(c -o /dev/null -w '%{http_code}' -H "$A" "https://localhost:$PQ443/_next/image?url=$KEPT&w=384&q=85")|$(( $(next_hits) - n ))" "200|0" \
+  "the same request under the new config is answered from that entry, with no encode"
+ok "$(in_zone "$POST" next_image "url=${S4}media%2Fanime%2Fcover%2Flarge%2Fbx9971-kept.png&w=384&q=85|avif")" 1 "it is still the one entry, in next_image"
 
 echo
 echo "$passed passed, $failed failed"
