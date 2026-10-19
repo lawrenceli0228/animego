@@ -1,0 +1,140 @@
+/* The genre page's grid view: the way back to the hub, the heading and the
+ * empty state's link. The cover grid, its skeleton and "show more" are the
+ * seasonal page's (cards.module.css, states.module.css); nothing here styles
+ * their classes. Values are the approved artboards' (b.css .gb-back,
+ * .gb-gridhead; seasonal.css .pa-h1row).
+ *
+ * Every @media block is at the end of the file. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.back {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  margin-left: -8px;
+  padding: 0 12px 0 6px;
+  border-radius: 8px;
+  color: var(--t4);
+  font-size: 13.5px;
+  font-weight: 600;
+  animation: fadeIn 0.3s ease both;
+  transition:
+    color 0.2s,
+    background-color 0.2s;
+}
+
+.back svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.3s var(--ease);
+}
+
+.back:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.back:hover svg {
+  transform: translateX(-3px);
+}
+
+.back:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.45);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin-top: 10px;
+}
+
+.h1 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--t4);
+}
+
+/* The empty state's "back", a link where the seasonal one is a button. */
+.emptyLink {
+  display: inline-flex;
+  align-items: center;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The next page's skeleton is one row of the grid: as many covers as the
+ * grid has columns at each width (cards.module.css). */
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .skMore > :nth-child(n + 6) {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .skMore > :nth-child(n + 5) {
+    display: none;
+  }
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  .skMore > :nth-child(n + 4) {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .skGrid > :nth-child(n + 16) {
+    display: none;
+  }
+
+  .back {
+    height: 44px;
+    margin-top: 2px;
+  }
+
+  .head {
+    gap: 4px 8px;
+    margin-top: 4px;
+  }
+
+  .h1 {
+    font-size: 22px;
+    line-height: 1.3;
+  }
+
+  .count {
+    font-size: 12px;
+  }
+}

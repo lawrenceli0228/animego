@@ -1,38 +1,72 @@
-// /genre/[slug] — every non-adult title carrying one AniList genre, by
-// popularity. The first of the hub pages: until it existed the genre chips
-// on 18k detail pages were <span>s, and the catalogue had no page that
-// linked to more than one title at a time.
+// /genre/[slug] — one AniList genre, two views on one route.
+//
+//   the hub (no view in the query): the genre's count, a strip of every
+//   genre, rails of what is airing, the most popular, recent and classic
+//   shows, the top ten by score, and tiles for its decades, the genres it
+//   goes with and its studios;
+//
+//   a grid (?list= / ?decade= / ?with=, and the old ?page=N): every title in
+//   one slice, 36 to a page.
+//
+// Both are server-rendered — every title, genre, tile and next page is a real
+// link in the HTML, since search is how readers arrive — and hydrate into the
+// one client tree (components/genre). A grid's canonical is the hub, as the
+// seasonal page's filters canonicalise to the season.
+//
+// No loading.tsx: a streamed response cannot change its status after the
+// first byte, and an unknown genre must answer 404, not a 200 soft 404.
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { HubListing } from "@/components/hubs/HubListing";
-import { fetchHub, parseHubPage } from "@/lib/hubs/fetch";
+import GenreBrowse from "@/components/genre/GenreBrowse";
+import { browseFilter, recentFromYear } from "@/lib/genre/api";
+import { fetchBrowsePage, fetchOverview, fetchStrip } from "@/lib/genre/fetch";
+import { buildGridData, type GenrePageData } from "@/lib/genre/grid";
+import { buildHubData } from "@/lib/genre/hub";
+import { gridMetaTitle } from "@/lib/genre/titles";
+import { parseGenreView, queryFromRecord, type GenreView } from "@/lib/genre/views";
 import { genreHeading } from "@/lib/hubs/headings";
 import { genreFromSlug, genrePath } from "@/lib/hubs/paths";
-import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
+import type { FilterGenre } from "@/lib/contentLabels";
+import { OG_LOCALE, alternateOgLocales, type Lang } from "@/lib/i18n/lang";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
 
-// A literal, not the imported HUB_REVALIDATE: Next reads segment config
-// statically and refuses an identifier here ("Unknown identifier ... at
-// revalidate" at build time -- next dev does not check). Keep in step with
-// lib/hubs/fetch.ts.
+// A literal, not an imported constant: Next reads segment config statically
+// and refuses an identifier here ("Unknown identifier ... at revalidate" at
+// build time -- next dev does not check). Keep in step with GENRE_REVALIDATE
+// in lib/genre/fetch.ts.
 export const revalidate = 300;
 
 type Props = PageProps<"/[lang]/genre/[slug]">;
+
+/**
+ * This request's render time — a helper rather than Date.now() in the
+ * component body, which react-hooks/purity rejects (as on the seasonal page).
+ * The cards' countdowns start from it, and "recent" is counted from its year.
+ */
+function requestTime(): number {
+  return Date.now();
+}
+
+/** What the view shows: the hub from the overview, or the grid's page from browse. */
+async function loadView(genre: FilterGenre, view: GenreView, nowMs: number, lang: Lang): Promise<GenrePageData> {
+  if (view.kind === "hub") return buildHubData(await fetchOverview(genre), lang);
+  const filter = browseFilter(genre, view.view, recentFromYear(nowMs));
+  return buildGridData(view.view, view.page, view.legacy, filter, await fetchBrowsePage(filter, view.page), lang);
+}
 
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { slug } = await params;
   const genre = genreFromSlug(slug);
   if (!genre) return { title: "Genre" };
   const { locale, lang, dict } = await resolveLocale(params);
-  const page = parseHubPage((await searchParams).page);
-  const heading = genreHeading(genre, lang);
-  const title = page > 1 ? `${heading} · ${page}` : heading;
-  const description = `${heading} — ${dict.hub.metaSuffix}`;
-  // Page 1 is the bare path; deeper pages carry ?page= in their canonical
-  // so each is its own indexable URL rather than a duplicate of page 1.
-  const canonical = page > 1 ? `${genrePath(genre)}?page=${page}` : genrePath(genre);
+  const view = parseGenreView(queryFromRecord(await searchParams), genre);
+  const title =
+    view.kind === "hub" ? genreHeading(genre, lang) : gridMetaTitle(genre, view.view, view.page, lang);
+  const description = `${title} — ${dict.genrePage.metaSuffix}`;
+  // Every view of a genre canonicalises to its hub: a grid is a slice of it.
+  const canonical = genrePath(genre);
   return {
     title: { absolute: title },
     description,
@@ -54,19 +88,10 @@ export default async function GenrePage({ params, searchParams }: Props) {
   const { slug } = await params;
   const genre = genreFromSlug(slug);
   if (!genre) notFound();
-  const page = parseHubPage((await searchParams).page);
-  const [{ dict, lang }, { items, pagination }] = await Promise.all([
-    resolveLocale(params),
-    fetchHub("genre", genre, page),
-  ]);
-  return (
-    <HubListing
-      heading={genreHeading(genre, lang)}
-      basePath={genrePath(genre)}
-      items={items}
-      pagination={pagination}
-      lang={lang}
-      dict={dict}
-    />
-  );
+  const view = parseGenreView(queryFromRecord(await searchParams), genre);
+  const nowMs = requestTime();
+  const { lang } = await resolveLocale(params);
+  const [strip, data] = await Promise.all([fetchStrip(), loadView(genre, view, nowMs, lang)]);
+
+  return <GenreBrowse genre={genre} data={data} strip={strip} serverNowMs={nowMs} />;
 }

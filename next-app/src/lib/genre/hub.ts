@@ -60,6 +60,8 @@ export interface GenreHubData {
   airing: number;
   rails: GenreRail[];
   top: GenreItem[];
+  /** Every title the score ranking holds — the count its grid opens with. */
+  topCount: number;
   decades: DecadeTile[];
   related: RelatedTile[];
   studios: StudioTile[];
@@ -72,6 +74,7 @@ export const EMPTY_HUB: GenreHubData = {
   airing: 0,
   rails: [],
   top: [],
+  topCount: 0,
   decades: [],
   related: [],
   studios: [],
@@ -103,6 +106,7 @@ export function buildHubData(overview: GenreOverview | null, lang: Lang): GenreH
     airing: overview.airing,
     rails,
     top: toGenreItems(overview.lists.top.items, lang).slice(0, TOP_SIZE),
+    topCount: overview.lists.top.count,
     decades: decades.map((d, i) => ({ kind: "decade", decade: d.key, count: d.count, ...at(i) })),
     related: related.map((r, i) => ({ kind: "with", genre: r.genre, count: r.count, ...at(decades.length + i) })),
     studios: studios.map((s, i) => ({

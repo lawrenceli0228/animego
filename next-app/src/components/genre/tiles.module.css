@@ -1,0 +1,220 @@
+/* The hub's three tile rows — 年代分布, 常一起出现, 代表制作公司 — as one kind
+ * of tile: a ground in the hue of its first cover, three covers fanned at its
+ * top right that spread under the pointer (or keyboard focus), and the name
+ * and count at its bottom left. No lines, no bars: the approved artboard
+ * (b.css .gb-tile) after two rejected versions that read as a report.
+ *
+ * Seven to a row on a desktop; a track that scrolls sideways below 1024px
+ * (138px tiles on a phone, as the artboard has them).
+ *
+ * Every @media block is at the end of the file. */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The entrance is the item's and the lift is the tile's: one element cannot
+ * have both, because a filled animation's last frame overrides a :hover
+ * transform for as long as it fills. */
+.item {
+  min-width: 0;
+  animation: inSoft 0.3s linear backwards;
+}
+
+.tile {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 136px;
+  overflow: hidden;
+  border-radius: 12px;
+  color: rgba(235, 235, 245, 0.92);
+  transition:
+    transform 0.3s var(--ease),
+    filter 0.25s ease;
+}
+
+.tile:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.45);
+}
+
+.fan {
+  position: absolute;
+  top: 14px;
+  right: 30px;
+  width: 42px;
+  height: 60px;
+}
+
+/* Each cover keeps a layer of its own the whole time: a turned card whose
+ * layer is dropped as its transition settles is drawn afresh in that last
+ * frame and visibly sharpens (the site's measured rule for cover motion). */
+.tc {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  box-shadow:
+    0 6px 16px -4px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+  transform-origin: 50% 100%;
+  transition: transform 0.32s var(--ease);
+  will-change: transform;
+}
+
+.tcImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tc[data-fan="1"] {
+  z-index: 3;
+}
+
+.tc[data-fan="2"] {
+  z-index: 2;
+  transform: translateX(-17px) rotate(-9deg) scale(0.94);
+}
+
+.tc[data-fan="3"] {
+  z-index: 1;
+  transform: translateX(17px) rotate(9deg) scale(0.94);
+}
+
+.ghost {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-family: var(--font-mono);
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: rgba(235, 235, 245, 0.08);
+}
+
+.text {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.name {
+  overflow: hidden;
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-style: normal;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgba(235, 235, 245, 0.58);
+}
+
+/* The fan spreads under the pointer, and for a keyboard. */
+.tile:hover .tc[data-fan="1"],
+.tile:focus-visible .tc[data-fan="1"] {
+  transform: translateY(-4px);
+}
+
+.tile:hover .tc[data-fan="2"],
+.tile:focus-visible .tc[data-fan="2"] {
+  transform: translate(-25px, -2px) rotate(-13deg) scale(0.94);
+}
+
+.tile:hover .tc[data-fan="3"],
+.tile:focus-visible .tc[data-fan="3"] {
+  transform: translate(25px, -2px) rotate(13deg) scale(0.94);
+}
+
+@keyframes inSoft {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ── Under a pointer the tile also lifts and brightens ──────────────────── */
+
+@media (hover: hover) and (pointer: fine) {
+  .tile:hover {
+    transform: translateY(-3px);
+    filter: brightness(1.16);
+  }
+}
+
+/* ── Below the desktop: a track that scrolls sideways ────────────────────── */
+
+@media (max-width: 1023px) {
+  .tiles {
+    display: flex;
+    gap: 12px;
+    margin: 0 calc(-1 * var(--gutter, 16px));
+    padding: 0 var(--gutter, 16px) 4px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: var(--gutter, 16px);
+    scrollbar-width: none;
+  }
+
+  .tiles::-webkit-scrollbar {
+    display: none;
+  }
+
+  .item {
+    flex: none;
+    width: 150px;
+    scroll-snap-align: start;
+  }
+}
+
+@media (max-width: 600px) {
+  .tiles {
+    gap: 10px;
+  }
+
+  .item {
+    width: 138px;
+  }
+
+  .tile {
+    height: 128px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile,
+  .tc {
+    transition: none;
+  }
+
+  .tile:hover {
+    transform: none;
+  }
+}

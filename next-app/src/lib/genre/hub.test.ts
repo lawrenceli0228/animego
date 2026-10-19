@@ -26,9 +26,10 @@ describe("buildHubData", () => {
     expect(hub.rails[0]?.items[0]?.id).toBe(100);
   });
 
-  test("the top ten, as items with their year", () => {
+  test("the top ten, as items with their year, and how many the ranking holds", () => {
     const hub = buildHubData(overview(), "zh");
     expect(hub.top).toHaveLength(10);
+    expect(hub.topCount).toBe(3000);
     expect(hub.top[0]?.title).toBe("测试番 500");
     expect(hub.top[0]?.year).toBe(2019);
   });

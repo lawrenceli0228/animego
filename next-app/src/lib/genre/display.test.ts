@@ -81,7 +81,9 @@ describe("genreAiringText", () => {
   });
 
   test("a seasonal item, which has no year, falls back to how it stands", () => {
-    const { year: _year, season: _season, ...seasonal } = show();
+    const seasonal: Record<string, unknown> = { ...show() };
+    delete seasonal.year;
+    delete seasonal.season;
     expect(genreAiringText(seasonal as never, NOW, ZH, "zh")).toBe("全 25 集");
   });
 });
