@@ -2841,21 +2841,87 @@ UPDATE anime_cache
 -- name: BrowseAnime :many
 -- One hub page of titles: a genre, a main studio, or a release year,
 -- exactly one of which the caller passes (the others NULL).  Same
--- projection as GetSeasonalAnime so the page renders the same card.
+-- projection as GetSeasonalAnime, column for column, so the page renders
+-- the same card and the handler sends both rows through one item type
+-- (see seasonalItemFromBrowseRow, which stops compiling if they drift).
 --
 -- The year is COALESCE(season_year, year of start_date): see migration
 -- 0039 for why, and note the expression must stay byte-identical to the
--- index there or the planner will not use it.
+-- index there or the planner will not use it.  year_from and year_to are
+-- inclusive bounds on the same expression; a title with no year compares
+-- to nothing, so either bound leaves it out.
 --
 -- Adult titles are excluded twice, by the column and by the genre, for
 -- the reason GetSeasonalAnime gives: rows nothing has re-read since the
 -- Express migration carry is_adult = false by default.
 --
+-- with_genre, status and the year bounds narrow a listing and never key
+-- one.  with_genre is a second genre the title must carry as well: a genre
+-- page's "Action × Fantasy" tile opens that listing.  It is an IN where
+-- genre is an EXISTS on purpose.  The two mean the same here (anime_id is
+-- NOT NULL), but a second EXISTS doubled the planner's estimate for the
+-- count, past the point where Postgres compiles the statement with JIT,
+-- and the compiling cost ~50ms a request against the ~13ms the count
+-- itself takes; IN keeps the estimate where the genre count's is.
+--
 -- Popularity first because it is what a visitor arriving at "Action
 -- anime" expects to see at the top; score second so the long tail of
 -- rows the facts sweep has not reached yet still orders sensibly.
+--
+-- by_score turns the listing into a ranking: score first, and only titles
+-- that have a score and at least score_min_popularity AniList users
+-- tracking them.  Below that the average rests on a handful of ratings,
+-- and a handful of 9s would head the ranking above every title people
+-- actually watched.  The order is one CASE rather than a second statement
+-- because sqlc cannot vary ORDER BY, and the genre page's top-ten rail
+-- and the full ranking it opens must be the same statement for the one
+-- to begin where the other does.
+--
+-- The page is chosen first, on the ids and the sort keys alone, and only
+-- its rows are projected.  Projected in one SELECT, every row the sort and
+-- the OFFSET pass over -- thousands, on a deep page of a large genre --
+-- ran the per-row subqueries below and was sorted with its synopsis
+-- attached.  With this projection that cost about 470ms on the catalogue
+-- for a page the hub's old ?page= links reach, JIT compilation included,
+-- because the estimate crossed its threshold; chosen first, about 30ms,
+-- under what the narrower projection before it cost.  The outer ORDER BY
+-- repeats the inner one, which is a total order, so the page comes back in
+-- the order it was chosen in.
+WITH page AS (
+    SELECT anilist_id
+    FROM anime_cache
+    WHERE NOT is_adult
+      AND NOT EXISTS (
+            SELECT 1 FROM anime_genres
+            WHERE anime_genres.anime_id = anime_cache.anilist_id
+              AND anime_genres.genre = 'Hentai'
+          )
+      AND (sqlc.narg(genre)::text IS NULL OR EXISTS (
+            SELECT 1 FROM anime_genres g
+            WHERE g.anime_id = anime_cache.anilist_id AND g.genre = sqlc.narg(genre)::text))
+      AND (sqlc.narg(with_genre)::text IS NULL OR anime_cache.anilist_id IN (
+            SELECT w.anime_id FROM anime_genres w WHERE w.genre = sqlc.narg(with_genre)::text))
+      AND (sqlc.narg(studio)::text IS NULL OR EXISTS (
+            SELECT 1 FROM anime_studios st
+            WHERE st.anime_id = anime_cache.anilist_id AND st.studio = sqlc.narg(studio)::text AND st.is_main))
+      AND (sqlc.narg(release_year)::int IS NULL
+           OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = sqlc.narg(release_year)::int)
+      AND (sqlc.narg(year_from)::int IS NULL
+           OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) >= sqlc.narg(year_from)::int)
+      AND (sqlc.narg(year_to)::int IS NULL
+           OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) <= sqlc.narg(year_to)::int)
+      AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+      AND (NOT sqlc.arg(by_score)::boolean
+           OR (average_score IS NOT NULL AND popularity >= sqlc.arg(score_min_popularity)::int))
+    ORDER BY
+        CASE WHEN sqlc.arg(by_score)::boolean THEN average_score END DESC NULLS LAST,
+        popularity DESC NULLS LAST,
+        average_score DESC NULLS LAST,
+        anilist_id
+    LIMIT sqlc.arg(row_limit)::int OFFSET sqlc.arg(row_offset)::int
+)
 SELECT
-    anilist_id,
+    anime_cache.anilist_id,
     title_romaji,
     title_english,
     title_native,
@@ -2902,27 +2968,41 @@ SELECT
     -- See GetCompletedGems for why trailer_checked_at stays out of list
     -- projections.
     trailer_id,
-    trailer_site
-FROM anime_cache
-WHERE NOT is_adult
-  AND NOT EXISTS (
-        SELECT 1 FROM anime_genres
-        WHERE anime_genres.anime_id = anime_cache.anilist_id
-          AND anime_genres.genre = 'Hentai'
-      )
-  AND (sqlc.narg(genre)::text IS NULL OR EXISTS (
-        SELECT 1 FROM anime_genres g
-        WHERE g.anime_id = anime_cache.anilist_id AND g.genre = sqlc.narg(genre)::text))
-  AND (sqlc.narg(studio)::text IS NULL OR EXISTS (
-        SELECT 1 FROM anime_studios st
-        WHERE st.anime_id = anime_cache.anilist_id AND st.studio = sqlc.narg(studio)::text AND st.is_main))
-  AND (sqlc.narg(release_year)::int IS NULL
-       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = sqlc.narg(release_year)::int)
-ORDER BY popularity DESC NULLS LAST, average_score DESC NULLS LAST, anilist_id
-LIMIT sqlc.arg(row_limit)::int OFFSET sqlc.arg(row_offset)::int;
+    trailer_site,
+    -- From here on, GetSeasonalAnime's columns, which says why each is
+    -- here and why the two child-table ones are shaped as they are.
+    ARRAY(
+        SELECT s.studio
+        FROM anime_studios s
+        WHERE s.anime_id = anime_cache.anilist_id AND s.is_main
+        ORDER BY s.studio
+        LIMIT 1
+    )::text[] AS main_studio,
+    next_airing_at,
+    next_airing_episode,
+    popularity,
+    favourites,
+    source,
+    start_date,
+    duration,
+    EXISTS (
+        SELECT 1 FROM anime_relations r
+        WHERE r.anime_id = anime_cache.anilist_id
+          AND r.relation_type = 'PREQUEL'
+          AND r.format IN ('TV', 'TV_SHORT', 'MOVIE', 'SPECIAL', 'OVA', 'ONA', 'MUSIC')
+    ) AS is_sequel,
+    (detail_fetched_at IS NOT NULL)::boolean AS relations_known
+FROM page
+JOIN anime_cache ON anime_cache.anilist_id = page.anilist_id
+ORDER BY
+    CASE WHEN sqlc.arg(by_score)::boolean THEN average_score END DESC NULLS LAST,
+    popularity DESC NULLS LAST,
+    average_score DESC NULLS LAST,
+    anime_cache.anilist_id;
 
 -- name: CountBrowseAnime :one
--- Total for BrowseAnime's pagination envelope; same WHERE.
+-- Total for BrowseAnime's pagination envelope; same WHERE, by_score's
+-- floor included, so a ranking's total counts only what it ranks.
 SELECT count(*)::bigint AS total
 FROM anime_cache
 WHERE NOT is_adult
@@ -2934,11 +3014,20 @@ WHERE NOT is_adult
   AND (sqlc.narg(genre)::text IS NULL OR EXISTS (
         SELECT 1 FROM anime_genres g
         WHERE g.anime_id = anime_cache.anilist_id AND g.genre = sqlc.narg(genre)::text))
+  AND (sqlc.narg(with_genre)::text IS NULL OR anime_cache.anilist_id IN (
+        SELECT w.anime_id FROM anime_genres w WHERE w.genre = sqlc.narg(with_genre)::text))
   AND (sqlc.narg(studio)::text IS NULL OR EXISTS (
         SELECT 1 FROM anime_studios st
         WHERE st.anime_id = anime_cache.anilist_id AND st.studio = sqlc.narg(studio)::text AND st.is_main))
   AND (sqlc.narg(release_year)::int IS NULL
-       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = sqlc.narg(release_year)::int);
+       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = sqlc.narg(release_year)::int)
+  AND (sqlc.narg(year_from)::int IS NULL
+       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) >= sqlc.narg(year_from)::int)
+  AND (sqlc.narg(year_to)::int IS NULL
+       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) <= sqlc.narg(year_to)::int)
+  AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+  AND (NOT sqlc.arg(by_score)::boolean
+       OR (average_score IS NOT NULL AND popularity >= sqlc.arg(score_min_popularity)::int));
 
 -- name: ListGenreCounts :many
 -- Every genre with how many non-adult titles carry it.  Hentai is not a

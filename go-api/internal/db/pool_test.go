@@ -85,6 +85,24 @@ func TestNewPool_UnreachableHost(t *testing.T) {
 	}
 }
 
+func TestPoolConfig_TurnsJITOff(t *testing.T) {
+	t.Parallel()
+
+	// Set after the URL is parsed, so a URL asking for JIT does not get it.
+	for _, url := range []string{
+		"postgres://u:p@localhost:5432/db?sslmode=disable",
+		"postgres://u:p@localhost:5432/db?sslmode=disable&jit=on",
+	} {
+		cfg, err := poolConfig(url)
+		if err != nil {
+			t.Fatalf("poolConfig(%q): %v", url, err)
+		}
+		if got := cfg.ConnConfig.RuntimeParams["jit"]; got != "off" {
+			t.Errorf("poolConfig(%q): jit = %q, want off", url, got)
+		}
+	}
+}
+
 func TestPoolConstants(t *testing.T) {
 	t.Parallel()
 

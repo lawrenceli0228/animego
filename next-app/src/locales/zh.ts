@@ -626,6 +626,32 @@ const zh = {
     apply: '查看 {{n}} 部',
     closeSheet: '关闭筛选',
   },
+  // The genre page (/genre/{slug}): the hub's rails, ranking and tiles, and the
+  // grid view. Client components read the -spa twin; one key per visible
+  // string, in both sets so the two stay equal. The names of the slices
+  // themselves (正在连载, 1990 年代) are tables in lib/genre/titles.ts, which
+  // the server's <title> and the client's headings both read.
+  genrePage: {
+    metaSuffix: '正在连载、人气最高、评分排行与年代分布，评分、集数、简介一站搞定。',
+    count: '{{n}} 部',
+    countLine: '{{n}} 部 · {{m}} 部连载中',
+    strip: '切换类型',
+    stripUnit: '部',
+    seeAll: '查看全部',
+    seeAllAria: '查看全部{{list}}',
+    topTitle: '评分前 10',
+    topAll: '完整排行',
+    rank: '第 {{n}} 名',
+    decades: '年代分布',
+    related: '常一起出现',
+    studios: '代表制作公司',
+    relatedHint: '（{{genre}}和{{other}}都有）',
+    studioHint: '（{{genre}}番剧）',
+    back: '返回{{heading}}',
+    backShort: '返回',
+    yearSeason: '{{year}} 年 {{season}}',
+    released: '已上映',
+  },
   // Schedule page (/calendar), hue redesign. The server components read the
   // .ts dictionary, the client board the -spa twin; one key per visible string.
   // 全部在追 (/watching): every show the reader is watching, as 继续看 cards.

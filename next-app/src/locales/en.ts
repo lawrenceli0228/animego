@@ -571,6 +571,32 @@ const en = {
     apply: 'Show {{n}} anime',
     closeSheet: 'Close filters',
   },
+  // The genre page (/genre/{slug}): the hub's rails, ranking and tiles, and the
+  // grid view. Client components read the -spa twin; one key per visible
+  // string, in both sets so the two stay equal. The names of the slices
+  // themselves (正在连载, 1990 年代) are tables in lib/genre/titles.ts, which
+  // the server's <title> and the client's headings both read.
+  genrePage: {
+    metaSuffix: 'What is airing, the most popular, the top rated and every decade — with scores, episode counts and synopses.',
+    count: '{{n}} anime',
+    countLine: '{{n}} anime · {{m}} airing',
+    strip: 'Switch genre',
+    stripUnit: 'anime',
+    seeAll: 'See all',
+    seeAllAria: 'See all: {{list}}',
+    topTitle: 'Top 10 by score',
+    topAll: 'Full ranking',
+    rank: 'No. {{n}}',
+    decades: 'By decade',
+    related: 'Often paired with',
+    studios: 'Top studios',
+    relatedHint: '(both {{genre}} and {{other}})',
+    studioHint: '(in {{genre}})',
+    back: 'Back to {{heading}}',
+    backShort: 'Back',
+    yearSeason: '{{season}} {{year}}',
+    released: 'Released',
+  },
   // Schedule page (/calendar), hue redesign. The server components read the
   // .ts dictionary, the client board the -spa twin; one key per visible string.
   // 全部在追 (/watching): every show the reader is watching, as 继续看 cards.

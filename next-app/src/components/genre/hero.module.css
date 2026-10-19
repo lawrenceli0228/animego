@@ -1,0 +1,261 @@
+/* The genre hub's heading and its genre strip.
+ *
+ * Values are the approved artboards' (B-desktop / B-mobile, b.css .gb-hero,
+ * .gb-strip). The page frame (gutter, ground, reduced motion) is the seasonal
+ * page's frame.module.css; nothing here styles another module's classes.
+ *
+ * The strip is eighteen equal cells and a block that slides under the current
+ * one: the block is one cell wide and moves by whole cells (100% of its own
+ * width plus the gap), so its place is pure CSS and correct in the server's
+ * HTML. Where eighteen cells do not fit a line — a phone, a tablet, and every
+ * screen in English, whose genre names are three times as long — the cells
+ * take a fixed width and the strip scrolls; an English desktop instead lays
+ * them out as two rows of nine, which needs no scrolling at all.
+ *
+ * Every @media block is at the end of the file. */
+
+.hero {
+  animation: fadeIn 0.3s ease both;
+}
+
+.h1row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+}
+
+.h1 {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--t4);
+}
+
+/* ── The strip ───────────────────────────────────────────────────────────── */
+
+/* Its own overflow box, bled out to the page's edges so a strip that scrolls
+ * runs under the gutter; one that fits never scrolls. */
+.scroller {
+  margin: 24px calc(-1 * var(--gutter)) 0;
+  padding: 0 var(--gutter) 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.strip {
+  --cell: 62px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(18, var(--cell));
+  gap: 4px;
+  width: max-content;
+  padding: 4px;
+  border-radius: 12px;
+  background: #0e0e10;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.strip[data-wide="true"] {
+  --cell: 108px;
+}
+
+.ind {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: var(--cell);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+  transform: translateX(calc(var(--i, 0) * (100% + 4px)));
+  transition: transform 0.5s var(--ease);
+}
+
+.seg {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  height: 56px;
+  padding: 0;
+  border-radius: 9px;
+  color: rgba(235, 235, 245, 0.55);
+  transition: color 0.3s ease;
+}
+
+.segName {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.segCount {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  /* 0.55, not the artboard's 0.38: 10.5px text needs 4.5:1 on the strip. */
+  color: rgba(235, 235, 245, 0.55);
+  transition: color 0.3s ease;
+}
+
+.seg:hover {
+  color: #fff;
+}
+
+.seg:hover .segCount {
+  color: rgba(235, 235, 245, 0.72);
+}
+
+.seg[data-on="true"] {
+  color: #fff;
+}
+
+.seg[data-on="true"] .segCount {
+  color: rgba(235, 235, 245, 0.72);
+}
+
+.seg[aria-current="page"] {
+  cursor: default;
+}
+
+/* The site's one ring. The strip's 4px of padding holds it, so the strip's
+ * own overflow box never clips it. */
+.seg:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.45);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── Desktop: eighteen to a line (Chinese), two rows of nine (English) ───── */
+
+@media (min-width: 1200px) {
+  .strip[data-wide="false"] {
+    grid-template-columns: repeat(18, minmax(0, 1fr));
+    width: auto;
+  }
+
+  .strip[data-wide="false"] .ind {
+    width: calc((100% - 76px) / 18);
+  }
+
+  .strip[data-wide="true"] {
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+    width: auto;
+  }
+
+  .strip[data-wide="true"] .ind {
+    bottom: auto;
+    width: calc((100% - 40px) / 9);
+    height: 56px;
+    transform: translate(calc(var(--c, 0) * (100% + 4px)), calc(var(--r, 0) * (100% + 4px)));
+  }
+}
+
+/* Where the strip scrolls (below 1200px; above it every language fits) and
+ * the pointer is a mouse — which cannot swipe, and whose wheel scrolls the
+ * page — a thin scrollbar under it says there is more and gives the mouse
+ * something to drag. Touch screens keep none. */
+@media (max-width: 1199px) and (hover: hover) and (pointer: fine) {
+  .scroller {
+    padding-bottom: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  }
+
+  .scroller::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+
+  .scroller::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+
+/* ── Tablet ──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023px) {
+  .h1 {
+    font-size: 34px;
+  }
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .h1row {
+    gap: 4px 8px;
+  }
+
+  .h1 {
+    font-size: 24px;
+    line-height: 1.3;
+  }
+
+  .count {
+    font-size: 12px;
+  }
+
+  .scroller {
+    margin-top: 18px;
+  }
+
+  .seg {
+    height: 52px;
+  }
+
+  .segName {
+    font-size: 13px;
+  }
+
+  .strip[data-wide="true"] {
+    --cell: 100px;
+  }
+}
+
+/* Read, not shown: what a screen reader hears after the visible text. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

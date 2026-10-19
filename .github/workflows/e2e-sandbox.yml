@@ -262,6 +262,13 @@ jobs:
           # call; so do the 社区 tab's write-review and thread pages below it,
           # the person and character pages, and their edit states. The edit
           # review queue is an admin page: 307 to the login, like /admin.
+          #
+          # /genre/action compiles `[lang]/genre/[slug]`, the genre page's
+          # hub and grid, another dynamic segment under [lang]. Like the
+          # seasonal page it answers 200 over an empty catalogue (its fetches
+          # fall back to an empty page). Action and not the genre its spec
+          # seeds: this request fills caches (the overview, the hub counts)
+          # before any spec has written a row, and no spec asserts Action's.
           for probe in /:200 /login:200 /register:200 /forgot-password:200 \
                        /reset-password/warmup:200 /welcome:200 /library:307 \
                        /player:200 /admin:307 /admin/edits:307 /anime/0:404 \
@@ -270,7 +277,7 @@ jobs:
                        /anime/0/social/threads/warmup:404 \
                        /person/0:404 /character/0:404 \
                        /person/0/edit:404 /character/0/edit:404 \
-                       /seasonal/spring/2026:200; do
+                       /seasonal/spring/2026:200 /genre/action:200; do
             # Split on the LAST colon, so a path that ever contains one still
             # pairs correctly with its status.
             route="${probe%:*}"

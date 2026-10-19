@@ -1,0 +1,453 @@
+/* The genre hub's body: the rails beside the top ten, the section heads, the
+ * ranking rows and the hub's skeleton.
+ *
+ * Values are the approved artboards' (b.css .gb-body, .gb-rk; seasonal.css
+ * .pc-sec, .pc-all, .pcm-rk). The covers on the rails are cards.module.css's
+ * (its .row6); the shimmer is states.module.css's .sk. No rule here selects
+ * another module's classes.
+ *
+ * Desktop (≥1200px) is two columns, the ranking beside the rails. Below that
+ * the ranking follows the rails — two columns of five on a tablet, the
+ * artboard's row cards on a phone.
+ *
+ * Every @media block is at the end of the file. */
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 56px;
+  align-items: start;
+}
+
+.rows {
+  min-width: 0;
+}
+
+.side {
+  min-width: 0;
+}
+
+/* ── Section heads ───────────────────────────────────────────────────────── */
+
+.sec {
+  margin-top: 52px;
+  /* backwards, not both: a filled last frame keeps every section a stacking
+   * context for good, and a rail card's popover (z-index inside its section)
+   * then slides under the top ten's column wherever the two meet. */
+  animation: up 0.5s var(--ease) backwards;
+}
+
+.sec:first-child {
+  margin-top: 38px;
+}
+
+.secHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.secTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.06em;
+  color: rgba(235, 235, 245, 0.9);
+}
+
+.secCount {
+  margin-left: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--t4);
+}
+
+.all {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--t4);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    color 0.2s,
+    background-color 0.2s;
+}
+
+.all:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.all:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.45);
+}
+
+.all svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.3s var(--ease);
+}
+
+.all:hover svg {
+  transform: translateX(3px);
+}
+
+/* ── The top ten ─────────────────────────────────────────────────────────── */
+
+.ranks {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rk {
+  display: grid;
+  grid-template-columns: 40px 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  /* backwards, not both: a filled last frame would hold the row's transform
+   * at none, and the phone's press (scale on :active) would never show. */
+  animation: inSoft 0.3s linear backwards;
+}
+
+.rk:last-child {
+  border-bottom: 0;
+}
+
+.rkN {
+  font-family: var(--font-latin);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rk:nth-child(-n + 3) .rkN {
+  font-size: 30px;
+}
+
+.rkCover {
+  display: block;
+  width: 46px;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #1a1a1d;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.rkImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rkMain {
+  min-width: 0;
+}
+
+.rkT {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 19px;
+  color: rgba(235, 235, 245, 0.88);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  transition: color 0.2s;
+}
+
+.rk:hover .rkT {
+  color: inherit;
+}
+
+.rkT:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.rkS {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--t4);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The score with its face, in the site's bands — the cards' own look. */
+.score {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(235, 235, 245, 0.62);
+}
+
+.score[data-band="high"] {
+  color: var(--score-high-fg);
+}
+
+.score[data-band="mid"] {
+  color: var(--score-mid-fg);
+}
+
+.score[data-band="low"] {
+  color: var(--score-low-fg);
+}
+
+.face {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.face [data-face="eye"] {
+  stroke-width: 2.6;
+}
+
+.face [data-face="high"],
+.face [data-face="mid"],
+.face [data-face="low"] {
+  display: none;
+}
+
+.score[data-band="high"] [data-face="high"],
+.score[data-band="mid"] [data-face="mid"],
+.score[data-band="low"] [data-face="low"] {
+  display: inline;
+}
+
+/* Read by a screen reader, not drawn: the rank in words. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── The hub's skeleton: while another genre, or the hub, is on its way ──── */
+
+/* The covers' shimmer and shapes are states.module.css's (the seasonal page's
+ * one skeleton); this lays them out as the hub does and adds the ranking's. */
+.skBody {
+  margin-top: 38px;
+}
+
+.skRows {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.skRank {
+  height: 84px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+}
+
+@keyframes up {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes inSoft {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ── Below the desktop: the ranking follows the rails ──────────────────── */
+
+@media (max-width: 1199px) {
+  .body {
+    display: block;
+  }
+
+  .side .sec:first-child {
+    margin-top: 52px;
+  }
+
+  .ranks {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(5, auto);
+    column-gap: 40px;
+  }
+
+  .rk:nth-child(5) {
+    border-bottom: 0;
+  }
+
+  .skBody .side {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .skRows {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .skRows > :nth-child(n + 9) {
+    display: none;
+  }
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .sec {
+    margin-top: 30px;
+  }
+
+  .sec:first-child {
+    margin-top: 22px;
+  }
+
+  .side .sec:first-child {
+    margin-top: 30px;
+  }
+
+  .secHead {
+    margin-bottom: 12px;
+  }
+
+  .secTitle {
+    font-size: 15.5px;
+    letter-spacing: 0.04em;
+  }
+
+  .all {
+    height: 44px;
+  }
+
+  .ranks {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .rk {
+    position: relative;
+    grid-template-columns: 30px 44px minmax(0, 1fr) auto;
+    gap: 10px;
+    min-height: 76px;
+    padding: 8px 12px 8px 6px;
+    border-bottom: 0;
+    border-radius: 8px;
+    background: #0e0e10;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    transition: transform 0.2s var(--ease);
+  }
+
+  .rk:active {
+    transform: scale(0.985);
+  }
+
+  .rkN,
+  .rk:nth-child(-n + 3) .rkN {
+    font-size: 18px;
+    text-align: center;
+  }
+
+  .rkCover {
+    width: 44px;
+    height: 60px;
+    border-radius: 3px;
+    box-shadow: none;
+  }
+
+  .rkT {
+    display: block;
+    font-size: 13.5px;
+    line-height: 1.35;
+    color: rgba(235, 235, 245, 0.92);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .rkS {
+    margin-top: 5px;
+  }
+
+  .score {
+    font-size: 12.5px;
+  }
+
+  .face {
+    width: 16px;
+    height: 16px;
+  }
+
+  .skBody {
+    margin-top: 18px;
+  }
+
+  .skRows {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px 12px;
+  }
+
+  .skRows > :nth-child(n + 10) {
+    display: none;
+  }
+}

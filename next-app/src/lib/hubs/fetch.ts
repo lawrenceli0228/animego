@@ -29,7 +29,13 @@ export async function fetchHub(
 ): Promise<{ items: SeasonalAnime[]; pagination: HubPagination }> {
   const qs = new URLSearchParams({ [key]: value, page: String(page), perPage: String(HUB_PAGE_SIZE) });
   try {
-    const env = await apiGetEnvelope<BrowseEnvelope>(`/api/anime/browse?${qs}`, { revalidate: HUB_REVALIDATE });
+    // Anonymous: the listing is the same for every reader, and a request
+    // carrying the reader's cookie would be cached once per reader (Next keys
+    // its data cache on the headers too) — see lib/genre/fetch.ts.
+    const env = await apiGetEnvelope<BrowseEnvelope>(`/api/anime/browse?${qs}`, {
+      revalidate: HUB_REVALIDATE,
+      auth: false,
+    });
     const p = env.pagination;
     return {
       items: env.data ?? EMPTY,

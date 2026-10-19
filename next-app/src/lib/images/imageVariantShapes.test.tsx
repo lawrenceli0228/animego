@@ -12,12 +12,19 @@ import {
   POSTER_SRC_W,
   STAFF_AVATAR,
 } from "@/app/[lang]/anime/[id]/_detail/sectionImageSizes";
+import GenreView from "@/components/genre/GenreView";
 import BrowseView from "@/components/seasonal/browse/BrowseView";
 import type { FollowSlotProps } from "@/components/seasonal/browse/types";
 import FadeImage from "@/components/ui/FadeImage";
+import { browseFilter } from "@/lib/genre/api";
+import { buildGridData } from "@/lib/genre/grid";
+import { buildHubData } from "@/lib/genre/hub";
+import { parseOverview } from "@/lib/genre/overview";
+import { stripEntries } from "@/lib/genre/strip";
 import { LanguageProvider } from "@/lib/lang-client";
 import { DEFAULT_STATE, type BrowseState } from "@/lib/seasonal/state";
 import { APP_IMAGE_CONFIG, PRODUCTION_MIRROR_BASE, renderAsNextDev, withMirror } from "@/lib/test-utils/nextImage";
+import { ANILIST_COVER, overviewWire, rows } from "@/lib/test-utils/genreFixtures";
 import { NOW, item } from "@/lib/test-utils/seasonalItems";
 import type { AnimeDetail } from "@/lib/types";
 import zh from "@/locales/zh";
@@ -29,9 +36,9 @@ import zh from "@/locales/zh";
 // in the $next_image_zone map of nginx/default.p9.conf.  A page that starts
 // asking for a width that list does not hold breaks nothing visible: its
 // variants just land in the other zone, are never warmed, and an old show's
-// page is slow again.  So this file renders the images of the detail page
-// and the season page, with the app's own image sizes, and holds every
-// variant they ask for to that list.
+// page is slow again.  So this file renders the images of the detail page,
+// the season page and the genre page, with the app's own image sizes, and
+// holds every variant they ask for to that list.
 
 const ROOT = join(import.meta.dir, "../../../..");
 const ANILIST = "https://s4.anilist.co/file/anilistcdn/";
@@ -148,6 +155,30 @@ function seasonPage(view: BrowseState["view"]): string {
   );
 }
 
+/** The genre page: the hub's rail covers, ranking covers and tile fans, or a grid page. */
+function genrePage(kind: "hub" | "grid"): string {
+  const wire = overviewWire();
+  for (const list of Object.values(wire.lists as Record<string, { items: { anilistId: number; coverImageUrl: string | null }[] }>)) {
+    for (const r of list.items) r.coverImageUrl = ANILIST_COVER(r.anilistId);
+  }
+  const filter = browseFilter("Action", { kind: "list", list: "popular" }, 2020);
+  const data =
+    kind === "hub"
+      ? buildHubData(parseOverview(wire, "Action"), "zh")
+      : buildGridData(
+          { kind: "list", list: "popular" },
+          1,
+          filter,
+          { rows: rows(700, 3).map((r) => ({ ...r, coverImageUrl: ANILIST_COVER(r.anilistId) })), total: 3 },
+          "zh",
+        );
+  return render(
+    <LanguageProvider lang="zh">
+      <GenreView genre="Action" data={data} strip={stripEntries(null)} serverNowMs={NOW} Follow={StubFollow} />
+    </LanguageProvider>,
+  );
+}
+
 const SURFACES: [string, () => string][] = [
   [
     "the detail page's hero (banner, cover)",
@@ -183,9 +214,11 @@ const SURFACES: [string, () => string][] = [
   ["the season page's grid", () => seasonPage("grid")],
   ["the season page's chart cards", () => seasonPage("chart")],
   ["the season page's list", () => seasonPage("table")],
+  ["the genre hub's rails, ranking and tiles", () => genrePage("hub")],
+  ["the genre page's grid", () => genrePage("grid")],
 ];
 
-describe("every AniList variant the detail and season pages ask for is a page shape nginx keeps", () => {
+describe("every AniList variant the detail, season and genre pages ask for is a page shape nginx keeps", () => {
   const shapes = pageShapeRegexes();
 
   test("nginx lists four kinds of page shape", () => {

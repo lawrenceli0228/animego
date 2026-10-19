@@ -585,6 +585,31 @@ const zhHant = {
     apply: '查看 {{n}} 部',
     closeSheet: '關閉篩選',
   },
+  // The genre page (/genre/{slug}): the hub's rails, ranking and tiles, and the
+  // grid view. Client components read the -spa twin; one key per visible
+  // string, in both sets so the two stay equal. The names of the slices
+  // themselves (正在连载, 1990 年代) are tables in lib/genre/titles.ts, which
+  // the server's <title> and the client's headings both read.
+  genrePage: {
+    count: '{{n}} 部',
+    countLine: '{{n}} 部 · {{m}} 部連載中',
+    strip: '切換類型',
+    stripUnit: '部',
+    seeAll: '查看全部',
+    seeAllAria: '查看全部{{list}}',
+    topTitle: '評分前 10',
+    topAll: '完整排行',
+    rank: '第 {{n}} 名',
+    decades: '年代分佈',
+    related: '常一起出現',
+    studios: '代表製作公司',
+    relatedHint: '（{{genre}}和{{other}}都有）',
+    studioHint: '（{{genre}}番劇）',
+    back: '返回{{heading}}',
+    backShort: '返回',
+    yearSeason: '{{year}} 年 {{season}}',
+    released: '已上映',
+  },
   // Login
   login: {
     title: 'AnimeGoClub', subtitle: '歡迎回來，繼續追番之旅',

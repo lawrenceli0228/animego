@@ -47,18 +47,10 @@ const (
 // The supplied ctx bounds the connect + ping attempt; once NewPool returns
 // successfully, the pool uses its own internal context for subsequent work.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	if databaseURL == "" {
-		return nil, fmt.Errorf("database url is empty")
-	}
-
-	cfg, err := pgxpool.ParseConfig(databaseURL)
+	cfg, err := poolConfig(databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse database url: %w", err)
+		return nil, err
 	}
-	cfg.MaxConns = MaxConns
-	cfg.HealthCheckPeriod = HealthCheckPeriod
-	cfg.MaxConnLifetime = MaxConnLifetime
-	cfg.MaxConnIdleTime = MaxConnIdleTime
 
 	connectCtx, cancel := context.WithTimeout(ctx, ConnectTimeout)
 	defer cancel()
@@ -74,4 +66,30 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 	return pool, nil
+}
+
+// poolConfig is NewPool's configuration for databaseURL, apart so a test
+// can read it without a server to connect to.
+func poolConfig(databaseURL string) (*pgxpool.Config, error) {
+	if databaseURL == "" {
+		return nil, fmt.Errorf("database url is empty")
+	}
+
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	cfg.MaxConns = MaxConns
+	cfg.HealthCheckPeriod = HealthCheckPeriod
+	cfg.MaxConnLifetime = MaxConnLifetime
+	cfg.MaxConnIdleTime = MaxConnIdleTime
+	// No JIT on these sessions.  The web tier's queries are reads of a few
+	// tens of milliseconds over small tables, and compiling one costs tens
+	// to hundreds of milliseconds more, so a plan that crosses
+	// jit_above_cost only gets slower.  The browse listing and its count
+	// are planned within about a fifth of that threshold: a little more
+	// catalogue would push them over, and a deep page from about 30ms to
+	// about 100ms.
+	cfg.ConnConfig.RuntimeParams["jit"] = "off"
+	return cfg, nil
 }
