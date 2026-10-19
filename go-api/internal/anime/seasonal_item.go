@@ -137,6 +137,26 @@ func seasonalItemsFromRows(rows []dbgen.GetSeasonalAnimeRow) []seasonalItem {
 	return out
 }
 
+// seasonalItemFromBrowseRow projects one BrowseAnime row onto the same
+// wire shape.  BrowseAnime selects GetSeasonalAnime's projection column
+// for column, so sqlc generates the same struct under two names and the
+// conversion copies it as it is.  The conversion is also the guard on
+// that: a column added to one query and not the other stops this
+// compiling, which is the moment to decide whether /browse carries it too.
+func seasonalItemFromBrowseRow(r dbgen.BrowseAnimeRow) seasonalItem {
+	return seasonalItemFromRow(dbgen.GetSeasonalAnimeRow(r))
+}
+
+// seasonalItemsFromBrowseRows maps a /browse page.  Never nil, so an
+// empty page encodes as [] rather than null, as it always has.
+func seasonalItemsFromBrowseRows(rows []dbgen.BrowseAnimeRow) []seasonalItem {
+	out := make([]seasonalItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, seasonalItemFromBrowseRow(r))
+	}
+	return out
+}
+
 // firstOrNil is the first element, or nil for an empty slice.  The query
 // returns the main studio as an array of at most one; see GetSeasonalAnime
 // for why.

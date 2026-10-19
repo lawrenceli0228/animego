@@ -1,6 +1,7 @@
 // browse.go — the two endpoints behind the hub pages.
 //
 //	GET /api/anime/browse?genre=Action|studio=MAPPA|year=2024&page=&perPage=
+//	                     [&with=Fantasy][&status=RELEASING][&yearFrom=&yearTo=][&sort=score]
 //	GET /api/anime/hubs
 //
 // A hub page is a listing keyed by one thing a title is about -- its
@@ -12,8 +13,11 @@
 // list of pages, for the sitemap and for an index.
 //
 // Both exclude adult titles by column and by genre, like every other
-// listing (see GetSeasonalAnime).  Browse answers with the seasonal row
-// shape so the frontend renders the card it already has.
+// listing (see GetSeasonalAnime).  Browse answers with the seasonal item
+// shape so the frontend renders the card it already has, and its optional
+// filters (browse_params.go) are what a genre page's rails and tiles open:
+// the genre overview (genre_overview.go) reads its rails through the same
+// statement.
 package anime
 
 import (
@@ -22,7 +26,6 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
@@ -50,55 +53,15 @@ const (
 
 // BrowseDB is the sqlc subset Browse uses.
 type BrowseDB interface {
-	BrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32, rowOffset int32, rowLimit int32) ([]dbgen.BrowseAnimeRow, error)
-	CountBrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32) (int64, error)
-}
-
-// browseFilter is the one key a browse request names.
-type browseFilter struct {
-	genre  *string
-	studio *string
-	year   *int32
-}
-
-// parseBrowseFilter reads exactly one of genre / studio / year from the
-// query string.  Zero or more than one is a 400: a page keyed by nothing
-// would be the whole catalogue, and one keyed by two things is a search,
-// which is a different endpoint with a different cache story.
-func parseBrowseFilter(qs map[string][]string) (browseFilter, bool) {
-	get := func(k string) string {
-		if v, ok := qs[k]; ok && len(v) > 0 {
-			return strings.TrimSpace(v[0])
-		}
-		return ""
-	}
-	var f browseFilter
-	n := 0
-	if g := get("genre"); g != "" {
-		f.genre = &g
-		n++
-	}
-	if s := get("studio"); s != "" {
-		f.studio = &s
-		n++
-	}
-	if y := get("year"); y != "" {
-		yr, err := strconv.Atoi(y)
-		if err != nil || yr < 1900 || yr > 2100 {
-			return browseFilter{}, false
-		}
-		y32 := int32(yr)
-		f.year = &y32
-		n++
-	}
-	return f, n == 1
+	BrowseAnime(ctx context.Context, arg dbgen.BrowseAnimeParams) ([]dbgen.BrowseAnimeRow, error)
+	CountBrowseAnime(ctx context.Context, arg dbgen.CountBrowseAnimeParams) (int64, error)
 }
 
 // browseResponse is the envelope: the seasonal one, with the same
 // pagination block, so the frontend's paged fetch helper reads both.
 type browseResponse struct {
-	Data       []dbgen.BrowseAnimeRow `json:"data"`
-	Pagination seasonalPagination     `json:"pagination"`
+	Data       []seasonalItem     `json:"data"`
+	Pagination seasonalPagination `json:"pagination"`
 }
 
 // Browse implements GET /api/anime/browse.
@@ -108,10 +71,9 @@ func Browse(db BrowseDB) http.HandlerFunc {
 		defer cancel()
 
 		qs := req.URL.Query()
-		f, ok := parseBrowseFilter(qs)
-		if !ok {
-			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError,
-				"exactly one of genre, studio or year is required"))
+		q, apiErr := parseBrowseQuery(qs)
+		if apiErr != nil {
+			httpx.Fail(w, apiErr)
 			return
 		}
 
@@ -131,22 +93,14 @@ func Browse(db BrowseDB) http.HandlerFunc {
 		}
 		offset := (page - 1) * perPage
 
-		rows, err := db.BrowseAnime(ctx, f.genre, f.studio, f.year, int32(offset), int32(perPage))
+		items, total, err := browsePage(ctx, db, q, int32(offset), int32(perPage))
 		if err != nil {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
 			return
-		}
-		total, err := db.CountBrowseAnime(ctx, f.genre, f.studio, f.year)
-		if err != nil {
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
-			return
-		}
-		if rows == nil {
-			rows = []dbgen.BrowseAnimeRow{}
 		}
 
 		writeBrowseEnvelope(w, browseResponse{
-			Data: rows,
+			Data: items,
 			Pagination: seasonalPagination{
 				Page:       page,
 				PerPage:    perPage,
@@ -155,6 +109,21 @@ func Browse(db BrowseDB) http.HandlerFunc {
 			},
 		})
 	}
+}
+
+// browsePage is one page of q and q's total.  The /browse handler and the
+// genre overview's rails both read through it, which is what makes a
+// rail the first page of the listing behind its "see all" link.
+func browsePage(ctx context.Context, db BrowseDB, q browseQuery, offset, limit int32) ([]seasonalItem, int64, error) {
+	rows, err := db.BrowseAnime(ctx, q.listParams(offset, limit))
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := db.CountBrowseAnime(ctx, q.countParams())
+	if err != nil {
+		return nil, 0, err
+	}
+	return seasonalItemsFromBrowseRows(rows), total, nil
 }
 
 func writeBrowseEnvelope(w http.ResponseWriter, v browseResponse) {
