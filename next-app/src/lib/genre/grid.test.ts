@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { row } from "@/lib/test-utils/genreFixtures";
 import { browseFilter } from "./api";
-import { AUTO_LOAD_PAGES, IN_PLACE_PAGES, autoLoads, buildGridData, hasPageAfter, loadsInPlace, titlesAfter } from "./grid";
+import { AUTO_LOAD_PAGES, IN_PLACE_PAGES, autoLoads, buildGridData, hasPageAfter, lastGridPage, loadsInPlace, titlesAfter } from "./grid";
 import { MAX_GRID_PAGE } from "./views";
 
 describe("the pages after this one", () => {
@@ -49,5 +49,16 @@ describe("buildGridData", () => {
     expect(data).toMatchObject({ kind: "grid", page: 2, total: 80, filter });
     expect(data).not.toHaveProperty("legacy");
     expect(data.items.map((i) => i.id)).toEqual([9, 8]);
+  });
+});
+
+describe("lastGridPage", () => {
+  test("the slice's last page, 36 to a page, within the ceiling", () => {
+    expect(lastGridPage(0)).toBe(0);
+    expect(lastGridPage(1)).toBe(1);
+    expect(lastGridPage(36)).toBe(1);
+    expect(lastGridPage(37)).toBe(2);
+    expect(lastGridPage(5242)).toBe(146);
+    expect(lastGridPage(100_000)).toBe(200);
   });
 });

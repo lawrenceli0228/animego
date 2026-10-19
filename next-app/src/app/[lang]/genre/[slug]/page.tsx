@@ -24,7 +24,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import GenreBrowse from "@/components/genre/GenreBrowse";
 import { browseFilter, recentFromYear } from "@/lib/genre/api";
 import { fetchBrowsePage, fetchOverview, fetchStrip } from "@/lib/genre/fetch";
-import { buildGridData, type GenrePageData } from "@/lib/genre/grid";
+import { buildGridData, lastGridPage, type GenrePageData } from "@/lib/genre/grid";
 import { buildHubData } from "@/lib/genre/hub";
 import { gridMetaTitle } from "@/lib/genre/titles";
 import { parseGenreView, queryFromRecord, viewPath, type GenreView, type GridView } from "@/lib/genre/views";
@@ -107,10 +107,12 @@ export default async function GenrePage({ params, searchParams }: Props) {
   if (view.kind === "grid" && view.legacy) permanentRedirect(localizePath(viewPath(genre, view), locale));
   const nowMs = requestTime();
   const [strip, data] = await Promise.all([fetchStrip(), loadView(genre, view, nowMs, lang)]);
-  // A page past the end of a slice that has titles does not exist. A slice
-  // with none is the API not answering (or a pairing nobody made): the empty
-  // grid, as ever.
-  if (data.kind === "grid" && data.items.length === 0 && data.total > 0) notFound();
+  // A page past the end of a slice that has titles does not exist. Judged by
+  // the total, not by an empty page: the page and the total are two reads,
+  // and a slice that changed between them must not turn a real page into a
+  // cached 404. A slice with no titles at all is the API not answering (or a
+  // pairing nobody made): the empty grid, as ever.
+  if (data.kind === "grid" && data.total > 0 && data.page > lastGridPage(data.total)) notFound();
 
   return <GenreBrowse genre={genre} data={data} strip={strip} serverNowMs={nowMs} />;
 }

@@ -146,10 +146,17 @@ export function legacyGridPage(n: number): number {
  * ?page=N is sent. The hub is the genre's path; a grid is its view and page
  * as gridSearch writes them, so every other spelling of it — ?page=1,
  * parameters repeated or unknown, a view that lost to another — names this.
+ * A pairing is the same titles from either side (action with fantasy is
+ * fantasy with action), so it is written from the genre the strip lists
+ * first; the other side still opens, and points here.
  */
 export function viewPath(genre: FilterGenre, view: GenreView): string {
   if (view.kind === "hub") return genrePath(genre);
-  return gridHref(genre, view.view, view.legacy ? legacyGridPage(view.page) : view.page);
+  const page = view.legacy ? legacyGridPage(view.page) : view.page;
+  if (view.view.kind === "with" && FILTER_GENRES.indexOf(view.view.with) < FILTER_GENRES.indexOf(genre)) {
+    return gridHref(view.view.with, { kind: "with", with: genre }, page);
+  }
+  return gridHref(genre, view.view, page);
 }
 
 /** The genres the hub's strip offers: every browsable one, in the site's order. */

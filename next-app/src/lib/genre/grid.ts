@@ -61,6 +61,11 @@ export function loadsInPlace(open: number): boolean {
   return open < IN_PLACE_PAGES;
 }
 
+/** The slice's last page: 0 for an empty slice, never past the API's ceiling. */
+export function lastGridPage(total: number): number {
+  return Math.min(Math.ceil(total / GRID_PAGE_SIZE), MAX_GRID_PAGE);
+}
+
 /** Titles after page `lastPage` — "还有 N 部". */
 export function titlesAfter(total: number, lastPage: number): number {
   return Math.max(0, total - lastPage * GRID_PAGE_SIZE);

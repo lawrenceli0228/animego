@@ -166,6 +166,13 @@ describe("viewPath", () => {
     expect(viewPath("Action", view({ list: "top", page: "3" }))).toBe("/genre/action?list=top&page=3");
     expect(viewPath("Action", view({ decade: "old", page: "2" }))).toBe("/genre/action?decade=old&page=2");
     expect(viewPath("Action", view({ with: "Fantasy" }))).toBe("/genre/action?with=fantasy");
+    // a pairing is one slice from either side: the strip's earlier genre writes it
+    expect(viewPath("Fantasy", parseGenreView(queryFromRecord({ with: "action", page: "2" }), "Fantasy"))).toBe(
+      "/genre/action?with=fantasy&page=2",
+    );
+    expect(viewPath("Thriller", parseGenreView(queryFromRecord({ with: "sci-fi" }), "Thriller"))).toBe(
+      "/genre/sci-fi?with=thriller",
+    );
   });
 
   test("every other spelling of a view names the same address", () => {
