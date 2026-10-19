@@ -172,11 +172,18 @@ function MoreLink({
       fired = true;
       onMore();
     };
+    // A wheel or a finger at the foot of the page scrolls nothing — there is
+    // nowhere left to go, so no scroll event follows — and is the plainest
+    // asking for more there is: it counts by itself.
     const onHand = () => {
       byHand = true;
+      maybeLoad();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (SCROLL_KEYS.has(e.key)) byHand = true;
+      // A space typed into the search box scrolls nothing.
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (SCROLL_KEYS.has(e.key)) onHand();
     };
     const observer = new IntersectionObserver(
       (entries) => {
