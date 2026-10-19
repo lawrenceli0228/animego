@@ -19,8 +19,6 @@ export interface GenreGridData {
   view: GridView;
   /** The page the URL named. */
   page: number;
-  /** Arrived by the old ?page=N address. */
-  legacy: boolean;
   /** Every title in the slice. */
   total: number;
   items: GenreItem[];
@@ -33,12 +31,11 @@ export type GenrePageData = GenreHubData | GenreGridData;
 export function buildGridData(
   view: GridView,
   page: number,
-  legacy: boolean,
   filter: BrowseFilter,
   answer: BrowsePage,
   lang: Lang,
 ): GenreGridData {
-  return { kind: "grid", view, page, legacy, total: answer.total, items: toGenreItems(answer.rows, lang), filter };
+  return { kind: "grid", view, page, total: answer.total, items: toGenreItems(answer.rows, lang), filter };
 }
 
 /**

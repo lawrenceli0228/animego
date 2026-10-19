@@ -10,25 +10,29 @@
 //
 // Both are server-rendered — every title, genre, tile and next page is a real
 // link in the HTML, since search is how readers arrive — and hydrate into the
-// one client tree (components/genre). A grid's canonical is the hub, as the
-// seasonal page's filters canonicalise to the season.
+// one client tree (components/genre). Each view's canonical is its own
+// address (viewPath); the old ?page=N is a permanent redirect to the grid page
+// holding its first title.
 //
 // No loading.tsx: a streamed response cannot change its status after the
-// first byte, and an unknown genre must answer 404, not a 200 soft 404.
+// first byte. An unknown genre, and a grid page past the end of its slice,
+// must answer 404, not a 200 soft 404; the old address must answer 308, not a
+// meta refresh.
 
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import GenreBrowse from "@/components/genre/GenreBrowse";
 import { browseFilter, recentFromYear } from "@/lib/genre/api";
 import { fetchBrowsePage, fetchOverview, fetchStrip } from "@/lib/genre/fetch";
 import { buildGridData, type GenrePageData } from "@/lib/genre/grid";
 import { buildHubData } from "@/lib/genre/hub";
 import { gridMetaTitle } from "@/lib/genre/titles";
-import { parseGenreView, queryFromRecord, type GenreView, type GridView } from "@/lib/genre/views";
+import { parseGenreView, queryFromRecord, viewPath, type GenreView, type GridView } from "@/lib/genre/views";
 import { genreHeading } from "@/lib/hubs/headings";
-import { genreFromSlug, genrePath } from "@/lib/hubs/paths";
+import { genreFromSlug } from "@/lib/hubs/paths";
 import type { FilterGenre } from "@/lib/contentLabels";
 import { OG_LOCALE, alternateOgLocales, type Lang } from "@/lib/i18n/lang";
+import { localizePath } from "@/lib/i18n/locale";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
 
@@ -64,7 +68,7 @@ async function recentFromOf(genre: FilterGenre, view: GridView, nowMs: number): 
 async function loadView(genre: FilterGenre, view: GenreView, nowMs: number, lang: Lang): Promise<GenrePageData> {
   if (view.kind === "hub") return buildHubData(await fetchOverview(genre), lang);
   const filter = browseFilter(genre, view.view, await recentFromOf(genre, view.view, nowMs));
-  return buildGridData(view.view, view.page, view.legacy, filter, await fetchBrowsePage(filter, view.page), lang);
+  return buildGridData(view.view, view.page, filter, await fetchBrowsePage(filter, view.page), lang);
 }
 
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
@@ -76,8 +80,7 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   const title =
     view.kind === "hub" ? genreHeading(genre, lang) : gridMetaTitle(genre, view.view, view.page, lang);
   const description = `${title} — ${dict.genrePage.metaSuffix}`;
-  // Every view of a genre canonicalises to its hub: a grid is a slice of it.
-  const canonical = genrePath(genre);
+  const canonical = viewPath(genre, view);
   return {
     title: { absolute: title },
     description,
@@ -100,9 +103,14 @@ export default async function GenrePage({ params, searchParams }: Props) {
   const genre = genreFromSlug(slug);
   if (!genre) notFound();
   const view = parseGenreView(queryFromRecord(await searchParams), genre);
+  const { locale, lang } = await resolveLocale(params);
+  if (view.kind === "grid" && view.legacy) permanentRedirect(localizePath(viewPath(genre, view), locale));
   const nowMs = requestTime();
-  const { lang } = await resolveLocale(params);
   const [strip, data] = await Promise.all([fetchStrip(), loadView(genre, view, nowMs, lang)]);
+  // A page past the end of a slice that has titles does not exist. A slice
+  // with none is the API not answering (or a pairing nobody made): the empty
+  // grid, as ever.
+  if (data.kind === "grid" && data.items.length === 0 && data.total > 0) notFound();
 
   return <GenreBrowse genre={genre} data={data} strip={strip} serverNowMs={nowMs} />;
 }

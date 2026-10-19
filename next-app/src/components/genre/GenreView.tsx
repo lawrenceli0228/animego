@@ -95,7 +95,9 @@ export default function GenreView({ genre, data, strip, serverNowMs, Follow }: G
       <HubBody genre={genre} data={data} onGrid={toGrid} env={env} copy={copy} card={card} />
     );
   } else {
-    header = <GridHeader genre={genre} view={data.view} count={data.total} onBack={() => toHub(genre)} lang={lang} copy={copy} />;
+    // A total of 0 is an API that did not answer as often as an empty slice:
+    // no count, as the hub's heading does (heroCountText).
+    header = <GridHeader genre={genre} view={data.view} count={data.total || null} onBack={() => toHub(genre)} lang={lang} copy={copy} />;
     body = <GridResults genre={genre} data={data} env={env} copy={copy} />;
   }
 

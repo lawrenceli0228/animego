@@ -4,10 +4,12 @@ import {
   MAX_GRID_PAGE,
   gridHref,
   gridSearch,
+  legacyGridPage,
   parseGenreView,
   parseGridPage,
   queryFromRecord,
   sameGridView,
+  viewPath,
   type GenreView,
 } from "./views";
 
@@ -132,5 +134,56 @@ describe("grid URLs", () => {
         expect(parsed.page).toBe(4);
       }
     }
+  });
+});
+
+describe("legacyGridPage", () => {
+  // The old list had 24 to a page, the grid has 36: old page N starts at
+  // title 24(N-1)+1, which the grid holds on page floor(24(N-1)/36)+1.
+  test("opens the grid page holding the old page's first title", () => {
+    expect(legacyGridPage(1)).toBe(1); // titles 1–24
+    expect(legacyGridPage(2)).toBe(1); // 25–48 start on page 1 (1–36)
+    expect(legacyGridPage(3)).toBe(2); // 49–72 → page 2 (37–72)
+    expect(legacyGridPage(4)).toBe(3); // 73 → page 3 (73–108)
+    expect(legacyGridPage(146)).toBe(97);
+  });
+
+  test("stays within the grid's own ceiling", () => {
+    expect(legacyGridPage(MAX_GRID_PAGE)).toBeLessThanOrEqual(MAX_GRID_PAGE);
+    expect(legacyGridPage(MAX_GRID_PAGE)).toBe(133);
+  });
+});
+
+describe("viewPath", () => {
+  test("the hub is the genre's own path", () => {
+    expect(viewPath("Action", view({}))).toBe("/genre/action");
+    expect(viewPath("Slice of Life", parseGenreView(queryFromRecord({}), "Slice of Life"))).toBe("/genre/slice-of-life");
+  });
+
+  test("a grid is its view and page, written one way", () => {
+    expect(viewPath("Action", view({ list: "airing" }))).toBe("/genre/action?list=airing");
+    expect(viewPath("Action", view({ list: "airing", page: "1" }))).toBe("/genre/action?list=airing");
+    expect(viewPath("Action", view({ list: "top", page: "3" }))).toBe("/genre/action?list=top&page=3");
+    expect(viewPath("Action", view({ decade: "old", page: "2" }))).toBe("/genre/action?decade=old&page=2");
+    expect(viewPath("Action", view({ with: "Fantasy" }))).toBe("/genre/action?with=fantasy");
+  });
+
+  test("every other spelling of a view names the same address", () => {
+    expect(viewPath("Action", view({ decade: "1990", list: "airing", with: "comedy" }))).toBe(
+      "/genre/action?list=airing",
+    );
+    expect(viewPath("Action", view({ list: ["recent", "top"] }))).toBe("/genre/action?list=recent");
+    expect(viewPath("Action", view({ list: "popular", page: "2", utm_source: "x" }))).toBe(
+      "/genre/action?list=popular&page=2",
+    );
+    expect(viewPath("Action", view({ list: "classic", page: "100000" }))).toBe(
+      `/genre/action?list=classic&page=${MAX_GRID_PAGE}`,
+    );
+  });
+
+  test("the old ?page=N is the popularity grid's page holding its first title", () => {
+    expect(viewPath("Action", view({ page: "1" }))).toBe("/genre/action?list=popular");
+    expect(viewPath("Action", view({ page: "3" }))).toBe("/genre/action?list=popular&page=2");
+    expect(viewPath("Action", view({ page: "9999" }))).toBe("/genre/action?list=popular&page=133");
   });
 });

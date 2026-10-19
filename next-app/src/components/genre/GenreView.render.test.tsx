@@ -43,9 +43,9 @@ function render(data: GenrePageData, lang: Lang = "zh", genre: (typeof FILTER_GE
 
 const hubData = (lang: Lang = "zh") => buildHubData(parseOverview(overviewWire(), "Action"), lang);
 
-function gridData(view: GridSlice, page: number, total: number, n: number, legacy = false) {
+function gridData(view: GridSlice, page: number, total: number, n: number) {
   const filter = browseFilter("Action", view, 2020);
-  return buildGridData(view, page, legacy, filter, { rows: rows(9000 + (page - 1) * 36, n), total }, "zh");
+  return buildGridData(view, page, filter, { rows: rows(9000 + (page - 1) * 36, n), total }, "zh");
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;");
@@ -66,9 +66,10 @@ describe("the hub's server HTML", () => {
     for (const g of FILTER_GENRES) expect(strip).toContain(`href="/genre/${genreSlug(g)}"`);
     expect(strip).toMatch(/aria-current="page"[^>]*data-genre="action"|href="\/genre\/action"[^>]*aria-current="page"/);
     expect(strip.match(/aria-current="page"/g)).toHaveLength(1);
-    // The count under each name, grouped.
-    expect(strip).toMatch(/aria-label="动作，1,000 部"/);
-    expect(strip).toContain(">1,000</span>");
+    // The count under each name, grouped; the pill's name is its own text,
+    // the unit added for a screen reader (WCAG 2.5.3: no aria-label to drift).
+    expect(strip).toContain("<b>动作</b><span>1,000<span> 部</span></span>");
+    expect(strip).not.toMatch(/<a [^>]*aria-label=/);
   });
 
   test("every rail card is a real link with its title; a rail with fewer than four is left out", () => {
@@ -120,9 +121,11 @@ describe("the hub's server HTML", () => {
     expect(html).toContain('href="/genre/action?with=sci-fi"');
     expect(html).toContain('href="/studio/Toei%20Animation"');
     expect(html).toContain('href="/studio/MAPPA"');
-    expect(html).toMatch(/aria-label="2020 年代，1,200 部"/);
-    expect(html).toMatch(/aria-label="动作和奇幻都有的番剧，900 部"/);
-    expect(html).toMatch(/aria-label="Toei Animation，300 部动作番剧"/);
+    // A tile's name is its visible text, with the words it leaves out read after.
+    expect(html).toMatch(/<b>2020 年代<\/b><em>1,200 部<\/em><\/span><\/a>/);
+    expect(html).toMatch(/<b>奇幻<\/b><em>900 部<\/em><\/span><span>（动作和奇幻都有）<\/span><\/a>/);
+    expect(html).toMatch(/<b>Toei Animation<\/b><em>300 部<\/em><\/span><span>（动作番剧）<\/span><\/a>/);
+    expect(html).not.toMatch(/<a [^>]*aria-label="[^"]*"[^>]*data-tile=/);
     expect(html).toMatch(/<h2[^>]*>年代分布<\/h2>/);
     expect(html).toMatch(/<h2[^>]*>常一起出现<\/h2>/);
     expect(html).toMatch(/<h2[^>]*>代表制作公司<\/h2>/);
@@ -144,8 +147,8 @@ describe("the hub's server HTML", () => {
   test("English renders English", () => {
     const html = render(hubData("en"), "en");
     expect(html).toMatch(/<h1[^>]*>Action Anime<\/h1>/);
-    expect(html).toContain("5,241 titles · 84 airing");
-    expect(html).toMatch(/<h2[^>]*>Airing now<small[^>]*>84 titles<\/small><\/h2>/);
+    expect(html).toContain("5,241 anime · 84 airing");
+    expect(html).toMatch(/<h2[^>]*>Airing now<small[^>]*>84 anime<\/small><\/h2>/);
     expect(html).toContain(">See all<");
     expect(html).toMatch(/<h2[^>]*>Top 10 by score<\/h2>/);
     expect(html).toMatch(/<h2[^>]*>By decade<\/h2>/);
@@ -199,8 +202,8 @@ describe("the grid's server HTML", () => {
     expect(html).not.toContain("data-load-more");
   });
 
-  test("the old ?page=2 is the popular list's second page, with the third after it", () => {
-    const html = render(gridData({ kind: "list", list: "popular" }, 2, 200, 36, true));
+  test("a grid opened at its second page links the third, saying how many are left", () => {
+    const html = render(gridData({ kind: "list", list: "popular" }, 2, 200, 36));
     expect(html).toMatch(/<h1[^>]*>动作 · 人气最高<\/h1>/);
     expect(html).toContain(`href="${esc("/genre/action?list=popular&page=3")}"`);
     // 200 in the list, two pages of 36 behind this one's end.
@@ -217,10 +220,10 @@ describe("the grid's server HTML", () => {
 
   test("the score ranking in English", () => {
     const filter = browseFilter("Action", { kind: "list", list: "top" }, 2020);
-    const data = buildGridData({ kind: "list", list: "top" }, 1, false, filter, { rows: rows(1, 3), total: 3 }, "en");
+    const data = buildGridData({ kind: "list", list: "top" }, 1, filter, { rows: rows(1, 3), total: 3 }, "en");
     const html = render(data, "en");
     expect(html).toMatch(/<h1[^>]*>Action · Top rated<\/h1>/);
-    expect(html).toContain("3 titles");
+    expect(html).toContain("3 anime");
     expect(html).toContain("Back to Action Anime");
   });
 });

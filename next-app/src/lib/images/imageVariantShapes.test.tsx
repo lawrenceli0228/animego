@@ -168,7 +168,6 @@ function genrePage(kind: "hub" | "grid"): string {
       : buildGridData(
           { kind: "list", list: "popular" },
           1,
-          false,
           filter,
           { rows: rows(700, 3).map((r) => ({ ...r, coverImageUrl: ANILIST_COVER(r.anilistId) })), total: 3 },
           "zh",

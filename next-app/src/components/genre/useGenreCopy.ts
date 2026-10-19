@@ -16,7 +16,8 @@ export interface GenreCopy {
   count: string;
   countLine: string;
   strip: string;
-  stripPill: string;
+  /** Read after a strip count, for a screen reader: "5,242" → "5,242 部". */
+  stripUnit: string;
   seeAll: string;
   seeAllAria: string;
   topTitle: string;
@@ -25,9 +26,10 @@ export interface GenreCopy {
   decades: string;
   related: string;
   studios: string;
-  decadeAria: string;
-  relatedAria: string;
-  studioAria: string;
+  /** Read after a related tile's name and count: which two genres the titles carry. */
+  relatedHint: string;
+  /** Read after a studio tile's name and count: whose titles it counted. */
+  studioHint: string;
   back: string;
   backShort: string;
   showMore: string;
@@ -52,7 +54,7 @@ export function useGenreCopy(): GenreCopies {
         count: t("genrePage.count"),
         countLine: t("genrePage.countLine"),
         strip: t("genrePage.strip"),
-        stripPill: t("genrePage.stripPill"),
+        stripUnit: t("genrePage.stripUnit"),
         seeAll: t("genrePage.seeAll"),
         seeAllAria: t("genrePage.seeAllAria"),
         topTitle: t("genrePage.topTitle"),
@@ -61,9 +63,8 @@ export function useGenreCopy(): GenreCopies {
         decades: t("genrePage.decades"),
         related: t("genrePage.related"),
         studios: t("genrePage.studios"),
-        decadeAria: t("genrePage.decadeAria"),
-        relatedAria: t("genrePage.relatedAria"),
-        studioAria: t("genrePage.studioAria"),
+        relatedHint: t("genrePage.relatedHint"),
+        studioHint: t("genrePage.studioHint"),
         back: t("genrePage.back"),
         backShort: t("genrePage.backShort"),
         showMore: t("seasonPage.showMore"),

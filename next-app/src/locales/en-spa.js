@@ -536,10 +536,10 @@ const en = {
   // themselves (正在连载, 1990 年代) are tables in lib/genre/titles.ts, which
   // the server's <title> and the client's headings both read.
   genrePage: {
-    count: '{{n}} titles',
-    countLine: '{{n}} titles · {{m}} airing',
+    count: '{{n}} anime',
+    countLine: '{{n}} anime · {{m}} airing',
     strip: 'Switch genre',
-    stripPill: '{{genre}}, {{n}} titles',
+    stripUnit: 'anime',
     seeAll: 'See all',
     seeAllAria: 'See all: {{list}}',
     topTitle: 'Top 10 by score',
@@ -548,9 +548,8 @@ const en = {
     decades: 'By decade',
     related: 'Often paired with',
     studios: 'Top studios',
-    decadeAria: '{{label}}, {{n}} titles',
-    relatedAria: '{{genre}} and {{other}}, {{n}} titles',
-    studioAria: '{{studio}}, {{n}} {{genre}} titles',
+    relatedHint: '(both {{genre}} and {{other}})',
+    studioHint: '(in {{genre}})',
     back: 'Back to {{heading}}',
     backShort: 'Back',
     yearSeason: '{{season}} {{year}}',

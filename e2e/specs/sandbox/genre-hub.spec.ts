@@ -23,8 +23,8 @@ import { collectConsoleErrors } from "../_helpers";
  * never disagree with this file. What is pinned: the hub's sections and their links in the server
  * HTML; 查看全部 → the grid → back; show more by press and by scrolling; the
  * decade, related-genre and studio tiles; the strip moving before the next
- * genre arrives; the popover; the phone's tracks; the old ?page=2; and the
- * status codes.
+ * genre arrives; the popover; the phone's tracks; the old ?page=N's redirect;
+ * each view's canonical; and the status codes.
  */
 
 test.describe.configure({ mode: "default" });
@@ -387,22 +387,41 @@ test.describe("desktop", () => {
     await expect(pop.getByText("机战", { exact: true })).toBeVisible();
   });
 
-  test("the old ?page=2 is the popular list's second page, canonicalised to the hub", async ({ page, request }) => {
-    const html = await (await request.get(`${HUB}?page=2`, GET)).text();
+  test("the old ?page=N goes, for good, to the popular grid's page holding its first title", async ({ page, request }) => {
+    // The old list had 24 to a page, the grid has 36: old page 2 (titles
+    // 25–48) starts on the grid's page 1, old page 3 (49–72) on its page 2.
+    const target = (res: { headers(): Record<string, string> }) => {
+      const url = new URL(res.headers()["location"] ?? "", "http://localhost");
+      return url.pathname + url.search;
+    };
+    const old2 = await request.get(`${HUB}?page=2`, { ...GET, maxRedirects: 0 });
+    expect(old2.status()).toBe(308);
+    expect(target(old2)).toBe(`${HUB}?list=popular`);
+    const old3 = await request.get(`/en${HUB}?page=3`, { ...GET, maxRedirects: 0 });
+    expect(old3.status()).toBe(308);
+    expect(target(old3)).toBe(`/en${HUB}?list=popular&page=2`);
+
+    // The page it lands on is a page of its own: its canonical is itself.
+    const html = await (await request.get(`${HUB}?list=popular&page=2`, GET)).text();
     expect(html).toMatch(/<h1[^>]*>机战 · 人气最高<\/h1>/);
-    expect(html).toMatch(/<link rel="canonical" href="[^"]*\/genre\/mecha"/);
+    expect(html).toMatch(/<link rel="canonical" href="[^"]*\/genre\/mecha\?list=popular&amp;page=2"/);
     expect(html).toMatch(/<title>机战番剧 · 人气最高 · 2<\/title>/);
     for (const s of SHOWS.slice(36)) expect(html).toContain(`href="/anime/${s.anilistId}">${s.titleChinese}</a>`);
-    await open(page, `${HUB}?page=2`);
+    await open(page, `${HUB}?page=3`);
+    await expect(page).toHaveURL(new RegExp(`${HUB}\\?list=popular&page=2$`));
     await expect(gridCards(page)).toHaveCount(COUNT - 36);
     await expect(page.locator("[data-load-more]")).toHaveCount(0);
   });
 
   test("statuses: an unknown genre is a 404; an unknown view is the hub, never an error", async ({ request }) => {
-    // Eight requests in a row, each a server render.
+    // Ten requests in a row, each a server render.
     test.slow();
     expect((await request.get("/genre/notagenre", GET)).status()).toBe(404);
     expect((await request.get("/genre/hentai", GET)).status()).toBe(404);
+    // A page past the end of a slice is not an empty page: 45 titles are two
+    // pages, seven airing are one.
+    expect((await request.get(`${HUB}?list=popular&page=3`, GET)).status()).toBe(404);
+    expect((await request.get(`${HUB}?list=airing&page=2`, GET)).status()).toBe(404);
     for (const q of ["list=bogus", "list=constructor", "decade=__proto__", "with=mecha", "with=toString", "page=abc"]) {
       const res = await request.get(`${HUB}?${q}`, GET);
       expect(res.status(), q).toBe(200);
@@ -413,7 +432,7 @@ test.describe("desktop", () => {
   test("English and Traditional render their own words", async ({ request }) => {
     const en = await (await request.get(`/en${HUB}`, GET)).text();
     expect(en).toMatch(/<h1[^>]*>Mecha Anime<\/h1>/);
-    expect(en).toContain(`${COUNT} titles · 7 airing`);
+    expect(en).toContain(`${COUNT} anime · 7 airing`);
     expect(en).toContain(">See all<");
     const hant = await (await request.get(`/zh-Hant${HUB}?list=classic`, GET)).text();
     expect(hant).toMatch(/<h1[^>]*>機戰 · 經典老番<\/h1>/);

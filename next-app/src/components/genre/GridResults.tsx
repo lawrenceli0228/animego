@@ -31,6 +31,14 @@ import grid from "./grid.module.css";
 const AUTO_LOAD_MARGIN_PX = 240;
 /** No automatic load before the reader has scrolled at all: a tall screen would otherwise unroll the slice. */
 const AUTO_LOAD_MIN_SCROLL_PX = 40;
+/**
+ * How long a "show more" that has just mounted — a page of cards having just
+ * come in above it — waits before coming near it loads the next page. A
+ * browser that keeps the viewport where it was relative to the link while the
+ * cards came in would otherwise have it load page after page in a row,
+ * carrying the reader down with it; a reader's own scroll after this loads.
+ */
+const AUTO_LOAD_SETTLE_MS = 400;
 /** Per-card entrance delay within a page, ms (AniList's stagger, slower on a phone's bigger cards). */
 const STAGGER_MS = { desktop: 16, phone: 22 } as const;
 
@@ -60,6 +68,10 @@ export default function GridResults({ genre, data, env, copy }: GridResultsProps
     const first = focusAfter.current;
     if (first === null || loading) return;
     focusAfter.current = null;
+    // Only for a reader still waiting on the press: focus that has moved on
+    // while the page loaded — to the search box, to a card — is theirs.
+    const active = document.activeElement;
+    if (active && active !== document.body && !active.matches("[data-load-more]")) return;
     // The first of the new cards' title; or the link again, when the load failed.
     const card = items.length > first ? gridRef.current?.querySelectorAll("[data-anime-card]")[first] : null;
     const target = card
@@ -126,9 +138,11 @@ export default function GridResults({ genre, data, env, copy }: GridResultsProps
  * "显示更多 · 还有 N 部": a link to the next page, which the script turns into
  * an in-place load — pressed, or, for the first few pages, brought within
  * AUTO_LOAD_MARGIN_PX of the viewport once the reader has scrolled. Re-armed
- * on every mount, so a page that came in short with the link still in range
- * loads the next one too. With `followLink` (a failed load, or a grid already
- * holding as much as it should) a press is an ordinary link to the next page.
+ * on every mount, and settled for AUTO_LOAD_SETTLE_MS first: a page that came
+ * in short with the link still in range loads the next one at the reader's
+ * next scroll, not by itself. With `followLink` (a failed load, or a grid
+ * already holding as much as it should) a press is an ordinary link to the
+ * next page.
  */
 function MoreLink({
   href,
@@ -150,10 +164,12 @@ function MoreLink({
   useEffect(() => {
     const el = ref.current;
     if (!el || followLink || !autoLoad || typeof IntersectionObserver === "undefined") return;
+    const armedAt = performance.now();
     let near = false;
     let fired = false;
     const maybeLoad = () => {
       if (fired || !near || window.scrollY < AUTO_LOAD_MIN_SCROLL_PX) return;
+      if (performance.now() - armedAt < AUTO_LOAD_SETTLE_MS) return;
       fired = true;
       onMore();
     };

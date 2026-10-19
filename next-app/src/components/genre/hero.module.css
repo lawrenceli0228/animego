@@ -120,7 +120,8 @@
   font-weight: 500;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  color: rgba(235, 235, 245, 0.38);
+  /* 0.55, not the artboard's 0.38: 10.5px text needs 4.5:1 on the strip. */
+  color: rgba(235, 235, 245, 0.55);
   transition: color 0.3s ease;
 }
 
@@ -129,7 +130,7 @@
 }
 
 .seg:hover .segCount {
-  color: rgba(235, 235, 245, 0.6);
+  color: rgba(235, 235, 245, 0.72);
 }
 
 .seg[data-on="true"] {
@@ -244,4 +245,17 @@
   .strip[data-wide="true"] {
     --cell: 100px;
   }
+}
+
+/* Read, not shown: what a screen reader hears after the visible text. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

@@ -42,12 +42,12 @@ describe("buildGridData", () => {
     const data = buildGridData(
       { kind: "list", list: "airing" },
       2,
-      false,
       filter,
       { rows: [row({ anilistId: 9 }), row({ anilistId: 8 })], total: 80 },
       "zh",
     );
-    expect(data).toMatchObject({ kind: "grid", page: 2, legacy: false, total: 80, filter });
+    expect(data).toMatchObject({ kind: "grid", page: 2, total: 80, filter });
+    expect(data).not.toHaveProperty("legacy");
     expect(data.items.map((i) => i.id)).toEqual([9, 8]);
   });
 });

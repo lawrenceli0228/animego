@@ -3,13 +3,15 @@
 // One of the hub's three tile rows — 年代分布, 常一起出现, 代表制作公司 — and
 // its tiles: each a link (to the grid view of that slice, or to the studio's
 // own page) on a ground in its first cover's hue, with three covers fanned at
-// the top right and the name and count at the bottom left. The visible text
-// is aria-hidden; the link's label says the same in a sentence.
+// the top right and the name and count at the bottom left. The link's name
+// is that text, with a few words more for a screen reader where the tile alone
+// does not say whose titles it counts — so a voice command for the visible
+// words finds it (WCAG 2.5.3).
 
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { genreLabel, type FilterGenre } from "@/lib/contentLabels";
-import { countText, formatCount } from "@/lib/genre/format";
+import { countText } from "@/lib/genre/format";
 import type { GenreTile } from "@/lib/genre/hub";
 import { decadeGhost, decadeTileLabel } from "@/lib/genre/titles";
 import { gridHref, type GridView } from "@/lib/genre/views";
@@ -44,20 +46,19 @@ interface TileRowProps {
 interface TileText {
   href: string;
   label: string;
-  aria: string;
+  /** Read after the name and count; null where they say it all. */
+  hint: string | null;
   ghost: string | null;
   /** The view of this page it opens (whose header and skeleton show while it loads); null for a studio's own page. */
   view: GridView | null;
 }
 
 function textOf(tile: GenreTile, genre: FilterGenre, lang: Lang, copy: GenreCopy): TileText {
-  const n = formatCount(tile.count);
   if (tile.kind === "decade") {
-    const label = decadeTileLabel(tile.decade, lang);
     return {
       href: gridHref(genre, { kind: "decade", decade: tile.decade }),
-      label,
-      aria: fillTemplate(copy.decadeAria, { label, n }),
+      label: decadeTileLabel(tile.decade, lang),
+      hint: null,
       ghost: decadeGhost(tile.decade),
       view: { kind: "decade", decade: tile.decade },
     };
@@ -67,7 +68,7 @@ function textOf(tile: GenreTile, genre: FilterGenre, lang: Lang, copy: GenreCopy
     return {
       href: gridHref(genre, { kind: "with", with: tile.genre }),
       label,
-      aria: fillTemplate(copy.relatedAria, { genre: genreLabel(genre, lang), other: label, n }),
+      hint: fillTemplate(copy.relatedHint, { genre: genreLabel(genre, lang), other: label }),
       ghost: null,
       view: { kind: "with", with: tile.genre },
     };
@@ -75,7 +76,7 @@ function textOf(tile: GenreTile, genre: FilterGenre, lang: Lang, copy: GenreCopy
   return {
     href: studioPath(tile.studio),
     label: tile.studio,
-    aria: fillTemplate(copy.studioAria, { studio: tile.studio, n, genre: genreLabel(genre, lang) }),
+    hint: fillTemplate(copy.studioHint, { genre: genreLabel(genre, lang) }),
     ghost: null,
     view: null,
   };
@@ -86,7 +87,8 @@ export default function TileRow({ genre, title, hook, items, delayMs, tileBaseMs
   return (
     <Section delayMs={delayMs} labelledBy={id} hook={hook}>
       <SectionHead id={id} title={title} />
-      <ul className={tiles.tiles} data-tiles={hook}>
+      {/* role="list": Safari drops a list's semantics with its markers. */}
+      <ul className={tiles.tiles} role="list" data-tiles={hook}>
         {items.map((tile, i) => {
           const text = textOf(tile, genre, lang, copy);
           const { view } = text;
@@ -102,7 +104,6 @@ export default function TileRow({ genre, title, hook, items, delayMs, tileBaseMs
                 prefetch={false}
                 className={tiles.tile}
                 style={{ background: hasCover ? oklchCss(21, 0.045, tile.hue) : NEUTRAL_GROUND }}
-                aria-label={text.aria}
                 onNavigate={view ? () => onGrid(view, tile.count) : undefined}
                 data-tile={tile.kind}
               >
@@ -123,10 +124,11 @@ export default function TileRow({ genre, title, hook, items, delayMs, tileBaseMs
                     {text.ghost}
                   </span>
                 ) : null}
-                <span className={tiles.text} aria-hidden="true">
+                <span className={tiles.text}>
                   <b className={tiles.name}>{text.label}</b>
                   <em className={tiles.num}>{countText(copy.count, tile.count)}</em>
                 </span>
+                {text.hint ? <span className={tiles.srOnly}>{text.hint}</span> : null}
               </Link>
             </li>
           );

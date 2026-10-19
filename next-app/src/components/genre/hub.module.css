@@ -31,7 +31,10 @@
 
 .sec {
   margin-top: 52px;
-  animation: up 0.5s var(--ease) both;
+  /* backwards, not both: a filled last frame keeps every section a stacking
+   * context for good, and a rail card's popover (z-index inside its section)
+   * then slides under the top ten's column wherever the two meet. */
+  animation: up 0.5s var(--ease) backwards;
 }
 
 .sec:first-child {

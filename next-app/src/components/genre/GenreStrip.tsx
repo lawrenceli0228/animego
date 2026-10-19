@@ -14,7 +14,6 @@ import Link from "@/components/ui/LocaleLink";
 import { genreLabel, type FilterGenre } from "@/lib/contentLabels";
 import { formatCount } from "@/lib/genre/format";
 import type { StripEntry } from "@/lib/genre/strip";
-import { fillTemplate } from "@/lib/home/time";
 import { genrePath, genreSlug } from "@/lib/hubs/paths";
 import type { Lang } from "@/lib/i18n/lang";
 import type { GenreCopy } from "./useGenreCopy";
@@ -81,7 +80,6 @@ export default function GenreStrip({ genre, entries, pendingGenre, onPick, lang,
               prefetch={false}
               className={hero.seg}
               aria-current={isCurrent ? "page" : undefined}
-              aria-label={count === null ? label : fillTemplate(copy.stripPill, { genre: label, n: count })}
               data-on={entry.genre === shown ? "true" : "false"}
               data-genre={genreSlug(entry.genre)}
               onClick={isCurrent ? (e) => e.preventDefault() : undefined}
@@ -94,8 +92,16 @@ export default function GenreStrip({ genre, entries, pendingGenre, onPick, lang,
                     }
               }
             >
+              {/* The name a screen reader reads is the pill's own text, the
+                * unit added: "动作 5,242 部" — a voice command for the visible
+                * words finds it (WCAG 2.5.3). */}
               <b className={hero.segName}>{label}</b>
-              {count === null ? null : <span className={hero.segCount}>{count}</span>}
+              {count === null ? null : (
+                <span className={hero.segCount}>
+                  {count}
+                  <span className={hero.srOnly}>{` ${copy.stripUnit}`}</span>
+                </span>
+              )}
             </Link>
           );
         })}

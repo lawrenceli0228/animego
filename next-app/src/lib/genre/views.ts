@@ -16,7 +16,12 @@
 // decade, then with); anything unknown is ignored, so a mistyped link lands on
 // the hub rather than on an error. The page before this one was a paginated
 // popularity list at ?page=N, and search engines have those URLs: a page
-// number with no view is that list, on the grid.
+// number with no view is that list, and the page sends it on, for good, to the
+// popularity grid's page that holds the old page's first title.
+//
+// Each view has one address (viewPath) — its canonical. A grid is a page of
+// its own, not a copy of the hub: 1990s action, action with fantasy, the top
+// rated, each with its own heading and titles.
 //
 // Pure: no React, no DOM.
 
@@ -39,6 +44,12 @@ export const GRID_PAGE_SIZE = 36;
 
 /** The API's own ceiling on `page`; nobody reads page 201 of a genre. */
 export const MAX_GRID_PAGE = 200;
+
+/**
+ * Titles to a page of the list this page replaced (?page=N). Its pages were
+ * shorter than the grid's, so the old page N is not the grid's page N.
+ */
+export const LEGACY_PAGE_SIZE = 24;
 
 export type GridView =
   | { kind: "list"; list: ListKey }
@@ -123,6 +134,22 @@ export function gridSearch(view: GridView, page = 1): string {
 /** A grid view's page. Locale-free, like every href in the tree: LocaleLink adds the prefix. */
 export function gridHref(genre: FilterGenre, view: GridView, page = 1): string {
   return `${genrePath(genre)}${gridSearch(view, page)}`;
+}
+
+/** The grid page that holds the first title of the old list's page `n`. */
+export function legacyGridPage(n: number): number {
+  return Math.min(Math.floor(((n - 1) * LEGACY_PAGE_SIZE) / GRID_PAGE_SIZE) + 1, MAX_GRID_PAGE);
+}
+
+/**
+ * The one address of `view`, locale-free: its canonical, and where the old
+ * ?page=N is sent. The hub is the genre's path; a grid is its view and page
+ * as gridSearch writes them, so every other spelling of it — ?page=1,
+ * parameters repeated or unknown, a view that lost to another — names this.
+ */
+export function viewPath(genre: FilterGenre, view: GenreView): string {
+  if (view.kind === "hub") return genrePath(genre);
+  return gridHref(genre, view.view, view.legacy ? legacyGridPage(view.page) : view.page);
 }
 
 /** The genres the hub's strip offers: every browsable one, in the site's order. */
