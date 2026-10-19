@@ -357,25 +357,25 @@ func TestBrowseAndHubs_PG(t *testing.T) {
 	}
 	genre, studio, committee := "Action", "MAPPA", "Aniplex"
 
-	rows, err := q.BrowseAnime(ctx, &genre, nil, nil, 0, 10)
+	rows, err := q.BrowseAnime(ctx, dbgen.BrowseAnimeParams{Genre: &genre, RowLimit: 10})
 	require.NoError(t, err)
 	assert.Equal(t, []int32{1, 3, 2, 4}, ids(rows), "genre page: by popularity, adult row absent")
-	n, err := q.CountBrowseAnime(ctx, &genre, nil, nil)
+	n, err := q.CountBrowseAnime(ctx, dbgen.CountBrowseAnimeParams{Genre: &genre})
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), n)
 
-	rows, err = q.BrowseAnime(ctx, nil, &studio, nil, 0, 10)
+	rows, err = q.BrowseAnime(ctx, dbgen.BrowseAnimeParams{Studio: &studio, RowLimit: 10})
 	require.NoError(t, err)
 	assert.Equal(t, []int32{1, 2}, ids(rows), "studio page: main studio, adult row absent")
-	rows, err = q.BrowseAnime(ctx, nil, &committee, nil, 0, 10)
+	rows, err = q.BrowseAnime(ctx, dbgen.BrowseAnimeParams{Studio: &committee, RowLimit: 10})
 	require.NoError(t, err)
 	assert.Empty(t, rows, "a committee member is not a studio page")
 
-	rows, err = q.BrowseAnime(ctx, nil, nil, &y2024, 0, 10)
+	rows, err = q.BrowseAnime(ctx, dbgen.BrowseAnimeParams{ReleaseYear: &y2024, RowLimit: 10})
 	require.NoError(t, err)
 	assert.Equal(t, []int32{1, 3, 2}, ids(rows), "year page: the film with no season lands by start date")
 
-	rows, err = q.BrowseAnime(ctx, &genre, nil, nil, 1, 2)
+	rows, err = q.BrowseAnime(ctx, dbgen.BrowseAnimeParams{Genre: &genre, RowOffset: 1, RowLimit: 2})
 	require.NoError(t, err)
 	assert.Equal(t, []int32{3, 2}, ids(rows), "offset and limit")
 

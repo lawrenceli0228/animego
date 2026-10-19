@@ -223,8 +223,41 @@ func (q *Queries) BindBgmIdsFromIdMap(ctx context.Context, lim int32) ([]BindBgm
 }
 
 const browseAnime = `-- name: BrowseAnime :many
+WITH page AS (
+    SELECT anilist_id
+    FROM anime_cache
+    WHERE NOT is_adult
+      AND NOT EXISTS (
+            SELECT 1 FROM anime_genres
+            WHERE anime_genres.anime_id = anime_cache.anilist_id
+              AND anime_genres.genre = 'Hentai'
+          )
+      AND ($2::text IS NULL OR EXISTS (
+            SELECT 1 FROM anime_genres g
+            WHERE g.anime_id = anime_cache.anilist_id AND g.genre = $2::text))
+      AND ($3::text IS NULL OR anime_cache.anilist_id IN (
+            SELECT w.anime_id FROM anime_genres w WHERE w.genre = $3::text))
+      AND ($4::text IS NULL OR EXISTS (
+            SELECT 1 FROM anime_studios st
+            WHERE st.anime_id = anime_cache.anilist_id AND st.studio = $4::text AND st.is_main))
+      AND ($5::int IS NULL
+           OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = $5::int)
+      AND ($6::int IS NULL
+           OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) >= $6::int)
+      AND ($7::int IS NULL
+           OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) <= $7::int)
+      AND ($8::text IS NULL OR status = $8::text)
+      AND (NOT $1::boolean
+           OR (average_score IS NOT NULL AND popularity >= $9::int))
+    ORDER BY
+        CASE WHEN $1::boolean THEN average_score END DESC NULLS LAST,
+        popularity DESC NULLS LAST,
+        average_score DESC NULLS LAST,
+        anilist_id
+    LIMIT $11::int OFFSET $10::int
+)
 SELECT
-    anilist_id,
+    anime_cache.anilist_id,
     title_romaji,
     title_english,
     title_native,
@@ -271,79 +304,155 @@ SELECT
     -- See GetCompletedGems for why trailer_checked_at stays out of list
     -- projections.
     trailer_id,
-    trailer_site
-FROM anime_cache
-WHERE NOT is_adult
-  AND NOT EXISTS (
-        SELECT 1 FROM anime_genres
-        WHERE anime_genres.anime_id = anime_cache.anilist_id
-          AND anime_genres.genre = 'Hentai'
-      )
-  AND ($1::text IS NULL OR EXISTS (
-        SELECT 1 FROM anime_genres g
-        WHERE g.anime_id = anime_cache.anilist_id AND g.genre = $1::text))
-  AND ($2::text IS NULL OR EXISTS (
-        SELECT 1 FROM anime_studios st
-        WHERE st.anime_id = anime_cache.anilist_id AND st.studio = $2::text AND st.is_main))
-  AND ($3::int IS NULL
-       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = $3::int)
-ORDER BY popularity DESC NULLS LAST, average_score DESC NULLS LAST, anilist_id
-LIMIT $5::int OFFSET $4::int
+    trailer_site,
+    -- From here on, GetSeasonalAnime's columns, which says why each is
+    -- here and why the two child-table ones are shaped as they are.
+    ARRAY(
+        SELECT s.studio
+        FROM anime_studios s
+        WHERE s.anime_id = anime_cache.anilist_id AND s.is_main
+        ORDER BY s.studio
+        LIMIT 1
+    )::text[] AS main_studio,
+    next_airing_at,
+    next_airing_episode,
+    popularity,
+    favourites,
+    source,
+    start_date,
+    duration,
+    EXISTS (
+        SELECT 1 FROM anime_relations r
+        WHERE r.anime_id = anime_cache.anilist_id
+          AND r.relation_type = 'PREQUEL'
+          AND r.format IN ('TV', 'TV_SHORT', 'MOVIE', 'SPECIAL', 'OVA', 'ONA', 'MUSIC')
+    ) AS is_sequel,
+    (detail_fetched_at IS NOT NULL)::boolean AS relations_known
+FROM page
+JOIN anime_cache ON anime_cache.anilist_id = page.anilist_id
+ORDER BY
+    CASE WHEN $1::boolean THEN average_score END DESC NULLS LAST,
+    popularity DESC NULLS LAST,
+    average_score DESC NULLS LAST,
+    anime_cache.anilist_id
 `
 
+type BrowseAnimeParams struct {
+	ByScore            bool    `json:"byScore"`
+	Genre              *string `json:"genre"`
+	WithGenre          *string `json:"withGenre"`
+	Studio             *string `json:"studio"`
+	ReleaseYear        *int32  `json:"releaseYear"`
+	YearFrom           *int32  `json:"yearFrom"`
+	YearTo             *int32  `json:"yearTo"`
+	Status             *string `json:"status"`
+	ScoreMinPopularity int32   `json:"scoreMinPopularity"`
+	RowOffset          int32   `json:"rowOffset"`
+	RowLimit           int32   `json:"rowLimit"`
+}
+
 type BrowseAnimeRow struct {
-	AnilistID             int32    `json:"anilistId"`
-	TitleRomaji           *string  `json:"titleRomaji"`
-	TitleEnglish          *string  `json:"titleEnglish"`
-	TitleNative           *string  `json:"titleNative"`
-	TitleChinese          *string  `json:"titleChinese"`
-	TitleHant             *string  `json:"titleHant"`
-	TitleHantSource       *string  `json:"titleHantSource"`
-	TitleHantSeo          *string  `json:"titleHantSeo"`
-	CoverImageUrl         *string  `json:"coverImageUrl"`
-	BannerImageUrl        *string  `json:"bannerImageUrl"`
-	CoverImageColor       *string  `json:"coverImageColor"`
-	PosterAccent          *string  `json:"posterAccent"`
-	AverageScore          *float64 `json:"averageScore"`
-	BangumiScore          *float64 `json:"bangumiScore"`
-	Episodes              *int32   `json:"episodes"`
-	Season                *string  `json:"season"`
-	SeasonYear            *int32   `json:"seasonYear"`
-	Status                *string  `json:"status"`
-	Format                *string  `json:"format"`
-	Description           *string  `json:"description"`
-	DescriptionCn         *string  `json:"descriptionCn"`
-	DescriptionCnSource   *string  `json:"descriptionCnSource"`
-	DescriptionHant       *string  `json:"descriptionHant"`
-	DescriptionHantSource *string  `json:"descriptionHantSource"`
-	Genres                []string `json:"genres"`
-	DiscussionCount       int64    `json:"discussionCount"`
-	TrailerID             *string  `json:"trailerId"`
-	TrailerSite           *string  `json:"trailerSite"`
+	AnilistID             int32              `json:"anilistId"`
+	TitleRomaji           *string            `json:"titleRomaji"`
+	TitleEnglish          *string            `json:"titleEnglish"`
+	TitleNative           *string            `json:"titleNative"`
+	TitleChinese          *string            `json:"titleChinese"`
+	TitleHant             *string            `json:"titleHant"`
+	TitleHantSource       *string            `json:"titleHantSource"`
+	TitleHantSeo          *string            `json:"titleHantSeo"`
+	CoverImageUrl         *string            `json:"coverImageUrl"`
+	BannerImageUrl        *string            `json:"bannerImageUrl"`
+	CoverImageColor       *string            `json:"coverImageColor"`
+	PosterAccent          *string            `json:"posterAccent"`
+	AverageScore          *float64           `json:"averageScore"`
+	BangumiScore          *float64           `json:"bangumiScore"`
+	Episodes              *int32             `json:"episodes"`
+	Season                *string            `json:"season"`
+	SeasonYear            *int32             `json:"seasonYear"`
+	Status                *string            `json:"status"`
+	Format                *string            `json:"format"`
+	Description           *string            `json:"description"`
+	DescriptionCn         *string            `json:"descriptionCn"`
+	DescriptionCnSource   *string            `json:"descriptionCnSource"`
+	DescriptionHant       *string            `json:"descriptionHant"`
+	DescriptionHantSource *string            `json:"descriptionHantSource"`
+	Genres                []string           `json:"genres"`
+	DiscussionCount       int64              `json:"discussionCount"`
+	TrailerID             *string            `json:"trailerId"`
+	TrailerSite           *string            `json:"trailerSite"`
+	MainStudio            []string           `json:"mainStudio"`
+	NextAiringAt          pgtype.Timestamptz `json:"nextAiringAt"`
+	NextAiringEpisode     *int32             `json:"nextAiringEpisode"`
+	Popularity            *int32             `json:"popularity"`
+	Favourites            *int32             `json:"favourites"`
+	Source                *string            `json:"source"`
+	StartDate             pgtype.Date        `json:"startDate"`
+	Duration              *int32             `json:"duration"`
+	IsSequel              bool               `json:"isSequel"`
+	RelationsKnown        bool               `json:"relationsKnown"`
 }
 
 // One hub page of titles: a genre, a main studio, or a release year,
 // exactly one of which the caller passes (the others NULL).  Same
-// projection as GetSeasonalAnime so the page renders the same card.
+// projection as GetSeasonalAnime, column for column, so the page renders
+// the same card and the handler sends both rows through one item type
+// (see seasonalItemFromBrowseRow, which stops compiling if they drift).
 //
 // The year is COALESCE(season_year, year of start_date): see migration
 // 0039 for why, and note the expression must stay byte-identical to the
-// index there or the planner will not use it.
+// index there or the planner will not use it.  year_from and year_to are
+// inclusive bounds on the same expression; a title with no year compares
+// to nothing, so either bound leaves it out.
 //
 // Adult titles are excluded twice, by the column and by the genre, for
 // the reason GetSeasonalAnime gives: rows nothing has re-read since the
 // Express migration carry is_adult = false by default.
 //
+// with_genre, status and the year bounds narrow a listing and never key
+// one.  with_genre is a second genre the title must carry as well: a genre
+// page's "Action × Fantasy" tile opens that listing.  It is an IN where
+// genre is an EXISTS on purpose.  The two mean the same here (anime_id is
+// NOT NULL), but a second EXISTS doubled the planner's estimate for the
+// count, past the point where Postgres compiles the statement with JIT,
+// and the compiling cost ~50ms a request against the ~13ms the count
+// itself takes; IN keeps the estimate where the genre count's is.
+//
 // Popularity first because it is what a visitor arriving at "Action
 // anime" expects to see at the top; score second so the long tail of
 // rows the facts sweep has not reached yet still orders sensibly.
-func (q *Queries) BrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32, rowOffset int32, rowLimit int32) ([]BrowseAnimeRow, error) {
+//
+// by_score turns the listing into a ranking: score first, and only titles
+// that have a score and at least score_min_popularity AniList users
+// tracking them.  Below that the average rests on a handful of ratings,
+// and a handful of 9s would head the ranking above every title people
+// actually watched.  The order is one CASE rather than a second statement
+// because sqlc cannot vary ORDER BY, and the genre page's top-ten rail
+// and the full ranking it opens must be the same statement for the one
+// to begin where the other does.
+//
+// The page is chosen first, on the ids and the sort keys alone, and only
+// its rows are projected.  Projected in one SELECT, every row the sort and
+// the OFFSET pass over -- thousands, on a deep page of a large genre --
+// ran the per-row subqueries below and was sorted with its synopsis
+// attached.  With this projection that cost about 470ms on the catalogue
+// for a page the hub's old ?page= links reach, JIT compilation included,
+// because the estimate crossed its threshold; chosen first, about 30ms,
+// under what the narrower projection before it cost.  The outer ORDER BY
+// repeats the inner one, which is a total order, so the page comes back in
+// the order it was chosen in.
+func (q *Queries) BrowseAnime(ctx context.Context, arg BrowseAnimeParams) ([]BrowseAnimeRow, error) {
 	rows, err := q.db.Query(ctx, browseAnime,
-		genre,
-		studio,
-		releaseYear,
-		rowOffset,
-		rowLimit,
+		arg.ByScore,
+		arg.Genre,
+		arg.WithGenre,
+		arg.Studio,
+		arg.ReleaseYear,
+		arg.YearFrom,
+		arg.YearTo,
+		arg.Status,
+		arg.ScoreMinPopularity,
+		arg.RowOffset,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -381,6 +490,16 @@ func (q *Queries) BrowseAnime(ctx context.Context, genre *string, studio *string
 			&i.DiscussionCount,
 			&i.TrailerID,
 			&i.TrailerSite,
+			&i.MainStudio,
+			&i.NextAiringAt,
+			&i.NextAiringEpisode,
+			&i.Popularity,
+			&i.Favourites,
+			&i.Source,
+			&i.StartDate,
+			&i.Duration,
+			&i.IsSequel,
+			&i.RelationsKnown,
 		); err != nil {
 			return nil, err
 		}
@@ -519,16 +638,48 @@ WHERE NOT is_adult
   AND ($1::text IS NULL OR EXISTS (
         SELECT 1 FROM anime_genres g
         WHERE g.anime_id = anime_cache.anilist_id AND g.genre = $1::text))
-  AND ($2::text IS NULL OR EXISTS (
+  AND ($2::text IS NULL OR anime_cache.anilist_id IN (
+        SELECT w.anime_id FROM anime_genres w WHERE w.genre = $2::text))
+  AND ($3::text IS NULL OR EXISTS (
         SELECT 1 FROM anime_studios st
-        WHERE st.anime_id = anime_cache.anilist_id AND st.studio = $2::text AND st.is_main))
-  AND ($3::int IS NULL
-       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = $3::int)
+        WHERE st.anime_id = anime_cache.anilist_id AND st.studio = $3::text AND st.is_main))
+  AND ($4::int IS NULL
+       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = $4::int)
+  AND ($5::int IS NULL
+       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) >= $5::int)
+  AND ($6::int IS NULL
+       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) <= $6::int)
+  AND ($7::text IS NULL OR status = $7::text)
+  AND (NOT $8::boolean
+       OR (average_score IS NOT NULL AND popularity >= $9::int))
 `
 
-// Total for BrowseAnime's pagination envelope; same WHERE.
-func (q *Queries) CountBrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32) (int64, error) {
-	row := q.db.QueryRow(ctx, countBrowseAnime, genre, studio, releaseYear)
+type CountBrowseAnimeParams struct {
+	Genre              *string `json:"genre"`
+	WithGenre          *string `json:"withGenre"`
+	Studio             *string `json:"studio"`
+	ReleaseYear        *int32  `json:"releaseYear"`
+	YearFrom           *int32  `json:"yearFrom"`
+	YearTo             *int32  `json:"yearTo"`
+	Status             *string `json:"status"`
+	ByScore            bool    `json:"byScore"`
+	ScoreMinPopularity int32   `json:"scoreMinPopularity"`
+}
+
+// Total for BrowseAnime's pagination envelope; same WHERE, by_score's
+// floor included, so a ranking's total counts only what it ranks.
+func (q *Queries) CountBrowseAnime(ctx context.Context, arg CountBrowseAnimeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countBrowseAnime,
+		arg.Genre,
+		arg.WithGenre,
+		arg.Studio,
+		arg.ReleaseYear,
+		arg.YearFrom,
+		arg.YearTo,
+		arg.Status,
+		arg.ByScore,
+		arg.ScoreMinPopularity,
+	)
 	var total int64
 	err := row.Scan(&total)
 	return total, err

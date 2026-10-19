@@ -207,20 +207,53 @@ type Querier interface {
 	BlockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (BlockUserRow, error)
 	// One hub page of titles: a genre, a main studio, or a release year,
 	// exactly one of which the caller passes (the others NULL).  Same
-	// projection as GetSeasonalAnime so the page renders the same card.
+	// projection as GetSeasonalAnime, column for column, so the page renders
+	// the same card and the handler sends both rows through one item type
+	// (see seasonalItemFromBrowseRow, which stops compiling if they drift).
 	//
 	// The year is COALESCE(season_year, year of start_date): see migration
 	// 0039 for why, and note the expression must stay byte-identical to the
-	// index there or the planner will not use it.
+	// index there or the planner will not use it.  year_from and year_to are
+	// inclusive bounds on the same expression; a title with no year compares
+	// to nothing, so either bound leaves it out.
 	//
 	// Adult titles are excluded twice, by the column and by the genre, for
 	// the reason GetSeasonalAnime gives: rows nothing has re-read since the
 	// Express migration carry is_adult = false by default.
 	//
+	// with_genre, status and the year bounds narrow a listing and never key
+	// one.  with_genre is a second genre the title must carry as well: a genre
+	// page's "Action × Fantasy" tile opens that listing.  It is an IN where
+	// genre is an EXISTS on purpose.  The two mean the same here (anime_id is
+	// NOT NULL), but a second EXISTS doubled the planner's estimate for the
+	// count, past the point where Postgres compiles the statement with JIT,
+	// and the compiling cost ~50ms a request against the ~13ms the count
+	// itself takes; IN keeps the estimate where the genre count's is.
+	//
 	// Popularity first because it is what a visitor arriving at "Action
 	// anime" expects to see at the top; score second so the long tail of
 	// rows the facts sweep has not reached yet still orders sensibly.
-	BrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32, rowOffset int32, rowLimit int32) ([]BrowseAnimeRow, error)
+	//
+	// by_score turns the listing into a ranking: score first, and only titles
+	// that have a score and at least score_min_popularity AniList users
+	// tracking them.  Below that the average rests on a handful of ratings,
+	// and a handful of 9s would head the ranking above every title people
+	// actually watched.  The order is one CASE rather than a second statement
+	// because sqlc cannot vary ORDER BY, and the genre page's top-ten rail
+	// and the full ranking it opens must be the same statement for the one
+	// to begin where the other does.
+	//
+	// The page is chosen first, on the ids and the sort keys alone, and only
+	// its rows are projected.  Projected in one SELECT, every row the sort and
+	// the OFFSET pass over -- thousands, on a deep page of a large genre --
+	// ran the per-row subqueries below and was sorted with its synopsis
+	// attached.  With this projection that cost about 470ms on the catalogue
+	// for a page the hub's old ?page= links reach, JIT compilation included,
+	// because the estimate crossed its threshold; chosen first, about 30ms,
+	// under what the narrower projection before it cost.  The outer ORDER BY
+	// repeats the inner one, which is a total order, so the page comes back in
+	// the order it was chosen in.
+	BrowseAnime(ctx context.Context, arg BrowseAnimeParams) ([]BrowseAnimeRow, error)
 	// Half of the snapshot semantics an upsert cannot provide on its own.
 	//
 	// Upserting a fetch writes the episodes the upstream returned and says nothing
@@ -339,8 +372,9 @@ type Querier interface {
 	CountAnimeThreads(ctx context.Context, anilistID int32, viewerID *uuid.UUID) (int64, error)
 	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
 	CountBgmIdMap(ctx context.Context) (int64, error)
-	// Total for BrowseAnime's pagination envelope; same WHERE.
-	CountBrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32) (int64, error)
+	// Total for BrowseAnime's pagination envelope; same WHERE, by_score's
+	// floor included, so a ranking's total counts only what it ranks.
+	CountBrowseAnime(ctx context.Context, arg CountBrowseAnimeParams) (int64, error)
 	CountCommentReactions(ctx context.Context, commentID uuid.UUID) (int64, error)
 	CountEditSubmissionsSince(ctx context.Context, userID uuid.UUID, since pgtype.Timestamptz) (int32, error)
 	// Total for pagination — same filter as ListFeedActivities sans paging.
