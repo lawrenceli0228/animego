@@ -279,11 +279,15 @@ services:
       start_period: 10s
     # Headroom for the in-process caches while they refill after a restart.
     mem_limit: 512m
+    # More log than the other services keep: every API request writes a
+    # line, and at 3 x 10m the night's job summaries (the image variant
+    # warm passes, 01:00–07:00 Asia/Shanghai) had rotated away by the
+    # morning. 5 x 50m holds about a day.
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "50m"
+        max-file: "5"
 
   # ─── Enrichment backfill (one-shot ops tool) ──────────────────────────
   # Re-validates every existing bgm binding against the authoritative id-map
