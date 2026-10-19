@@ -98,7 +98,7 @@
   gap: 5px;
   min-width: 0;
   height: 56px;
-  padding: 0 4px;
+  padding: 0;
   border-radius: 9px;
   color: rgba(235, 235, 245, 0.55);
   transition: color 0.3s ease;

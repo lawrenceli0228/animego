@@ -3,9 +3,11 @@
 // The hub's rails come from /api/anime/genre-overview, and each rail's
 // "see all" opens the grid on the same slice. The two endpoints share their
 // filters, their order and their counts, so the grid opens on the rail's first
-// six — as long as the slice is described the same way on both sides. The two
-// year rules that are this page's own (what "recent" and "classic" mean) live
-// here, next to that description, and match the API's.
+// six — as long as the slice is described the same way on both sides (the
+// table at the top of go-api's genre_overview.go). The two year rules that
+// are this page's own (what "recent" and "classic" mean) match the API's; the
+// page takes "recent"'s first year from the overview's own recentFrom and
+// computes it here only when there is no overview to ask.
 //
 // Pure: no React, no DOM.
 

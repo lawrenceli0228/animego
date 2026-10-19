@@ -24,7 +24,7 @@ import { fetchBrowsePage, fetchOverview, fetchStrip } from "@/lib/genre/fetch";
 import { buildGridData, type GenrePageData } from "@/lib/genre/grid";
 import { buildHubData } from "@/lib/genre/hub";
 import { gridMetaTitle } from "@/lib/genre/titles";
-import { parseGenreView, queryFromRecord, type GenreView } from "@/lib/genre/views";
+import { parseGenreView, queryFromRecord, type GenreView, type GridView } from "@/lib/genre/views";
 import { genreHeading } from "@/lib/hubs/headings";
 import { genreFromSlug, genrePath } from "@/lib/hubs/paths";
 import type { FilterGenre } from "@/lib/contentLabels";
@@ -49,10 +49,21 @@ function requestTime(): number {
   return Date.now();
 }
 
+/**
+ * Where "recent" starts for the grid: the year the overview counted the
+ * rail from, so the grid opens on the rail's titles even across New Year
+ * while the overview is cached; the same rule's own answer if there is no
+ * overview to ask.
+ */
+async function recentFromOf(genre: FilterGenre, view: GridView, nowMs: number): Promise<number> {
+  if (view.kind !== "list" || view.list !== "recent") return recentFromYear(nowMs);
+  return (await fetchOverview(genre))?.recentFrom ?? recentFromYear(nowMs);
+}
+
 /** What the view shows: the hub from the overview, or the grid's page from browse. */
 async function loadView(genre: FilterGenre, view: GenreView, nowMs: number, lang: Lang): Promise<GenrePageData> {
   if (view.kind === "hub") return buildHubData(await fetchOverview(genre), lang);
-  const filter = browseFilter(genre, view.view, recentFromYear(nowMs));
+  const filter = browseFilter(genre, view.view, await recentFromOf(genre, view.view, nowMs));
   return buildGridData(view.view, view.page, view.legacy, filter, await fetchBrowsePage(filter, view.page), lang);
 }
 
