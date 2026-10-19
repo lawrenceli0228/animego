@@ -52,7 +52,8 @@ export default function HubBody({ genre, data, onGrid, env, copy, card }: HubBod
           ))}
         </div>
         {data.top.length > 0 ? (
-          <aside className={hub.side} aria-label={copy.topTitle}>
+          // A plain column: the section inside is the landmark, named by its heading.
+          <div className={hub.side}>
             <TopTen
               genre={genre}
               items={data.top}
@@ -61,7 +62,7 @@ export default function HubBody({ genre, data, onGrid, env, copy, card }: HubBod
               card={card}
               onSeeAll={() => onGrid({ kind: "list", list: "top" }, data.topCount || null)}
             />
-          </aside>
+          </div>
         ) : null}
       </div>
 

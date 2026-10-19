@@ -100,7 +100,11 @@ describe("the hub's server HTML", () => {
     if (data.kind !== "hub") throw new Error("not a hub");
     const ranks = html.slice(html.indexOf("data-ranks"), html.indexOf("</ol>", html.indexOf("data-ranks")));
     expect(ranks.match(/data-rank="\d+"/g)).toHaveLength(10);
-    for (const item of data.top) expect(ranks).toContain(`href="/anime/${item.id}">${item.title}</a>`);
+    // Each title link says its rank in words, for a screen reader.
+    data.top.forEach((item, i) => {
+      expect(ranks).toMatch(new RegExp(`href="/anime/${item.id}"><span[^>]*>第 ${i + 1} 名 </span>${item.title}</a>`));
+    });
+    expect(html).toMatch(/<ol[^>]*role="list"[^>]*data-ranks/);
     expect(ranks).toContain("2019 · TV · 12 集");
     expect(html).toContain('href="/genre/action?list=top"');
     expect(html).toMatch(/>完整排行</);

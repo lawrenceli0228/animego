@@ -4,9 +4,11 @@
 // desktop and after them on a phone, with "完整排行" to the full ranking.
 //
 // Each row is its show's colour (the number, and the title under the
-// pointer); the title is the row's one accessible link, the small cover
-// repeats it for the pointer and is hidden from assistive tech, and the
-// list's own numbering says the rank.
+// pointer); the title is the row's one accessible link and carries the rank
+// in words ("第 1 名") for a screen reader, which the drawn number is hidden
+// from; the small cover repeats the link for the pointer and is hidden too.
+// role="list": a list styled without markers loses its list semantics in
+// Safari.
 
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
@@ -16,6 +18,7 @@ import type { FilterGenre } from "@/lib/contentLabels";
 import { rankSubLine, type GenreCardCopy } from "@/lib/genre/display";
 import type { GenreItem } from "@/lib/genre/items";
 import { gridHref } from "@/lib/genre/views";
+import { fillTemplate } from "@/lib/home/time";
 import { toneLadder } from "@/lib/home/tone";
 import type { Lang } from "@/lib/i18n/lang";
 import { scoreText } from "@/lib/seasonal/display";
@@ -45,7 +48,7 @@ export default function TopTen({ genre, items, lang, copy, card, onSeeAll }: Top
         title={copy.topTitle}
         all={{ href: gridHref(genre, { kind: "list", list: "top" }), label: copy.topAll, onNavigate: onSeeAll, hook: "top" }}
       />
-      <ol className={hub.ranks} data-ranks>
+      <ol className={hub.ranks} role="list" data-ranks>
         {items.map((item, i) => {
           const tone = toneLadder(item.hue);
           const href = `/anime/${item.id}`;
@@ -73,6 +76,7 @@ export default function TopTen({ genre, items, lang, copy, card, onSeeAll }: Top
               </Link>
               <div className={hub.rkMain}>
                 <Link href={href} prefetch={false} className={hub.rkT}>
+                  <span className={hub.srOnly}>{`${fillTemplate(copy.rank, { n: i + 1 })} `}</span>
                   {item.title}
                 </Link>
                 <span className={hub.rkS}>{rankSubLine(item, card, lang)}</span>

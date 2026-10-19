@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { row } from "@/lib/test-utils/genreFixtures";
 import { browseFilter } from "./api";
-import { buildGridData, hasPageAfter, titlesAfter } from "./grid";
+import { AUTO_LOAD_PAGES, IN_PLACE_PAGES, autoLoads, buildGridData, hasPageAfter, loadsInPlace, titlesAfter } from "./grid";
 import { MAX_GRID_PAGE } from "./views";
 
 describe("the pages after this one", () => {
@@ -18,6 +18,21 @@ describe("the pages after this one", () => {
     expect(hasPageAfter(100, 3)).toBe(false);
     expect(hasPageAfter(36, 1)).toBe(false);
     expect(hasPageAfter(1_000_000, MAX_GRID_PAGE)).toBe(false);
+  });
+});
+
+describe("how far the grid grows in place", () => {
+  test("scrolling loads on its own for the first pages only", () => {
+    expect(autoLoads(1)).toBe(true);
+    expect(autoLoads(AUTO_LOAD_PAGES - 1)).toBe(true);
+    expect(autoLoads(AUTO_LOAD_PAGES)).toBe(false);
+  });
+
+  test("past the in-place limit the next page opens as a page of its own", () => {
+    expect(loadsInPlace(1)).toBe(true);
+    expect(loadsInPlace(IN_PLACE_PAGES - 1)).toBe(true);
+    expect(loadsInPlace(IN_PLACE_PAGES)).toBe(false);
+    expect(IN_PLACE_PAGES).toBeGreaterThan(AUTO_LOAD_PAGES);
   });
 });
 

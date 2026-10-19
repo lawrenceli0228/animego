@@ -64,6 +64,8 @@ function restored(data: GenreGridData, lang: Lang, pages: number): Loaded {
 export interface GridPages {
   items: GenreItem[];
   lastPage: number;
+  /** Pages showing, the server's included. */
+  open: number;
   hasMore: boolean;
   loading: boolean;
   /** The last fetch failed: "show more" now follows its link instead. */
@@ -71,12 +73,21 @@ export interface GridPages {
   more: () => void;
 }
 
+/** Whether the browser's address is `own` — and so its history entry is this grid's to read and write. */
+function atOwnAddress(own: string): boolean {
+  return memoryUrl(window.location.pathname, window.location.search) === own;
+}
+
 export function useGridPages(data: GenreGridData, lang: Lang): GridPages {
   const pathname = usePathname();
   const query = useSearchParams();
+  // The grid's own address, from the router — not window.location, which
+  // during a client navigation still holds the page being left (and after a
+  // Back the reader took while this page was loading, the page being gone to).
+  const own = memoryUrl(pathname ?? "", query?.toString() ?? "");
   const [loaded, setLoaded] = useState<Loaded>(() =>
-    hydratedOnce && typeof window !== "undefined"
-      ? restored(data, lang, rememberedPages(window.history.state, memoryUrl(pathname ?? "", query?.toString() ?? "")))
+    hydratedOnce && typeof window !== "undefined" && atOwnAddress(own)
+      ? restored(data, lang, rememberedPages(window.history.state, own))
       : { items: data.items, lastPage: data.page },
   );
   const [loading, setLoading] = useState(false);
@@ -89,14 +100,15 @@ export function useGridPages(data: GenreGridData, lang: Lang): GridPages {
     return () => abort.current?.abort();
   }, []);
 
-  // The history entry remembers how many pages are open, for this address.
-  // Next's own entry state rides along, so this never moves the router.
+  // The history entry remembers how many pages are open, for this address —
+  // and only while the browser is at this address, so a write can never land
+  // on another page's entry. Next's own entry state rides along, so this
+  // never moves the router.
   const pages = loaded.lastPage - data.page + 1;
   useEffect(() => {
-    const url = memoryUrl(window.location.pathname, window.location.search);
-    if (rememberedPages(window.history.state, url) === pages) return;
-    window.history.replaceState({ ...window.history.state, ...batchMemory(url, pages) }, "");
-  }, [pages]);
+    if (!atOwnAddress(own) || rememberedPages(window.history.state, own) === pages) return;
+    window.history.replaceState({ ...window.history.state, ...batchMemory(own, pages) }, "");
+  }, [own, pages]);
 
   const hasMore = hasPageAfter(data.total, loaded.lastPage);
 
@@ -137,5 +149,5 @@ export function useGridPages(data: GenreGridData, lang: Lang): GridPages {
       });
   }, [data.filter, hasMore, lang, loaded.lastPage]);
 
-  return { items: loaded.items, lastPage: loaded.lastPage, hasMore, loading, failed, more };
+  return { items: loaded.items, lastPage: loaded.lastPage, open: pages, hasMore, loading, failed, more };
 }

@@ -175,8 +175,10 @@ test.describe("desktop", () => {
     // The rails' first six, by popularity: the index order.
     for (const s of SHOWS.slice(0, 6)) expect(html).toContain(`href="/anime/${s.anilistId}">${s.titleChinese}</a>`);
     for (const list of ["airing", "popular", "recent", "classic"]) expect(html).toContain(`href="/genre/mecha?list=${list}"`);
-    // The top ten, by score.
-    for (const s of byScore.slice(0, 10)) expect(html).toContain(`href="/anime/${s.anilistId}">${s.titleChinese}</a>`);
+    // The top ten, by score, each link saying its rank in words.
+    byScore.slice(0, 10).forEach((s, i) => {
+      expect(html).toMatch(new RegExp(`href="/anime/${s.anilistId}"><span[^>]*>第 ${i + 1} 名 </span>${s.titleChinese}</a>`));
+    });
     expect(html).toContain('href="/genre/mecha?list=top"');
     // Tiles.
     for (const d of ["2020", "2010", "2000", "1990", "1980", "1970", "old"]) expect(html).toContain(`href="/genre/mecha?decade=${d}"`);
@@ -276,6 +278,19 @@ test.describe("desktop", () => {
     await expect(page).toHaveURL(/\/genre\/mecha\?list=popular$/);
     const ids = await gridCards(page).evaluateAll((els) => els.map((el) => Number(el.getAttribute("data-id"))));
     expect(ids).toEqual(IDS);
+  });
+
+  test("from the keyboard, show more hands focus to the first new title", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 3200 });
+    await open(page, `${HUB}?list=popular`);
+    await waitForHydration(page, "[data-load-more]");
+    const more = page.locator("[data-load-more]");
+    await more.focus();
+    await page.keyboard.press("Enter");
+    await expect(gridCards(page)).toHaveCount(COUNT, { timeout: 15_000 });
+    // The link it was on is gone (that was the last page): focus is on the
+    // first title that came in, not dropped on <body>.
+    await expect(page.locator(":focus")).toHaveAttribute("href", `/anime/${SHOWS[36]?.anilistId}`);
   });
 
   test("scrolling near show more loads the next page on its own", async ({ page }) => {

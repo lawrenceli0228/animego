@@ -8,7 +8,7 @@
 // the reader scrolling near it — fetches that page and appends it instead;
 // if the fetch fails the next press simply follows the link.
 
-import { useEffect, useRef, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, type MouseEvent } from "react";
 import CoverCard from "@/components/seasonal/browse/CoverCard";
 import { ChevronIcon } from "@/components/seasonal/browse/icons";
 import cards from "@/components/seasonal/browse/cards.module.css";
@@ -16,7 +16,7 @@ import states from "@/components/seasonal/browse/states.module.css";
 import Link from "@/components/ui/LocaleLink";
 import type { FilterGenre } from "@/lib/contentLabels";
 import { formatCount } from "@/lib/genre/format";
-import { titlesAfter, type GenreGridData } from "@/lib/genre/grid";
+import { autoLoads, loadsInPlace, titlesAfter, type GenreGridData } from "@/lib/genre/grid";
 import { GRID_PAGE_SIZE, gridHref } from "@/lib/genre/views";
 import { fillTemplate } from "@/lib/home/time";
 import { genrePath } from "@/lib/hubs/paths";
@@ -42,8 +42,31 @@ interface GridResultsProps {
 }
 
 export default function GridResults({ genre, data, env, copy }: GridResultsProps) {
-  const { items, lastPage, hasMore, loading, failed, more } = useGridPages(data, env.lang);
+  const { items, lastPage, open, hasMore, loading, failed, more } = useGridPages(data, env.lang);
   const stagger = STAGGER_MS[env.layout];
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  // Where keyboard focus goes once a pressed "show more" has done its work:
+  // the link it was on is replaced by the skeleton while the page loads, and
+  // is gone for good after the last one.
+  const focusAfter = useRef<number | null>(null);
+
+  const press = useCallback(() => {
+    const active = document.activeElement;
+    focusAfter.current = active instanceof HTMLElement && active.matches("[data-load-more]") ? items.length : null;
+    more();
+  }, [items.length, more]);
+
+  useEffect(() => {
+    const first = focusAfter.current;
+    if (first === null || loading) return;
+    focusAfter.current = null;
+    // The first of the new cards' title; or the link again, when the load failed.
+    const card = items.length > first ? gridRef.current?.querySelectorAll("[data-anime-card]")[first] : null;
+    const target = card
+      ? card.querySelector<HTMLElement>('a:not([tabindex="-1"])')
+      : document.querySelector<HTMLElement>("[data-load-more]");
+    target?.focus({ preventScroll: true });
+  }, [items.length, loading]);
 
   if (items.length === 0) {
     return (
@@ -60,7 +83,7 @@ export default function GridResults({ genre, data, env, copy }: GridResultsProps
 
   return (
     <div className={cards.results} data-results>
-      <div className={cards.grid} data-grid>
+      <div ref={gridRef} className={cards.grid} data-grid>
         {items.map((item, i) => (
           <CoverCard
             key={item.id}
@@ -87,8 +110,9 @@ export default function GridResults({ genre, data, env, copy }: GridResultsProps
             <MoreLink
               href={gridHref(genre, data.view, lastPage + 1)}
               left={titlesAfter(data.total, lastPage)}
-              followLink={failed}
-              onMore={more}
+              followLink={failed || !loadsInPlace(open)}
+              autoLoad={autoLoads(open)}
+              onMore={press}
               copy={copy}
             />
           )}
@@ -100,20 +124,24 @@ export default function GridResults({ genre, data, env, copy }: GridResultsProps
 
 /**
  * "显示更多 · 还有 N 部": a link to the next page, which the script turns into
- * an in-place load — pressed, or brought within AUTO_LOAD_MARGIN_PX of the
- * viewport once the reader has scrolled. Re-armed on every mount, so a page
- * that came in short with the link still in range loads the next one too.
+ * an in-place load — pressed, or, for the first few pages, brought within
+ * AUTO_LOAD_MARGIN_PX of the viewport once the reader has scrolled. Re-armed
+ * on every mount, so a page that came in short with the link still in range
+ * loads the next one too. With `followLink` (a failed load, or a grid already
+ * holding as much as it should) a press is an ordinary link to the next page.
  */
 function MoreLink({
   href,
   left,
   followLink,
+  autoLoad,
   onMore,
   copy,
 }: {
   href: string;
   left: number;
   followLink: boolean;
+  autoLoad: boolean;
   onMore: () => void;
   copy: GenreCopy;
 }) {
@@ -121,7 +149,7 @@ function MoreLink({
 
   useEffect(() => {
     const el = ref.current;
-    if (!el || followLink || typeof IntersectionObserver === "undefined") return;
+    if (!el || followLink || !autoLoad || typeof IntersectionObserver === "undefined") return;
     let near = false;
     let fired = false;
     const maybeLoad = () => {
@@ -144,7 +172,7 @@ function MoreLink({
       observer.disconnect();
       window.removeEventListener("scroll", maybeLoad);
     };
-  }, [followLink, onMore]);
+  }, [followLink, autoLoad, onMore]);
 
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     // A modified click opens the page in a tab, as a link should.

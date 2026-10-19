@@ -254,6 +254,19 @@
   display: inline;
 }
 
+/* Read by a screen reader, not drawn: the rank in words. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── The hub's skeleton: while another genre, or the hub, is on its way ──── */
 
 /* The covers' shimmer and shapes are states.module.css's (the seasonal page's

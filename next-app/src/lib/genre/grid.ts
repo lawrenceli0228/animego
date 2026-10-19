@@ -41,6 +41,29 @@ export function buildGridData(
   return { kind: "grid", view, page, legacy, total: answer.total, items: toGenreItems(answer.rows, lang), filter };
 }
 
+/**
+ * Pages the grid loads on its own as the reader scrolls near "show more"
+ * (the server's page included). Past them a press is needed: a slice can run
+ * to thousands of titles, and scrolling alone should not pile them all up.
+ */
+export const AUTO_LOAD_PAGES = 5;
+
+/**
+ * Pages the grid holds in place. Past them "show more" opens the next page as
+ * a page of its own, which keeps the document to a few hundred cards.
+ */
+export const IN_PLACE_PAGES = 10;
+
+/** Whether the grid, with `open` pages showing, loads the next one as the reader scrolls near it. */
+export function autoLoads(open: number): boolean {
+  return open < AUTO_LOAD_PAGES;
+}
+
+/** Whether, with `open` pages showing, the next one is appended here rather than opened as its own page. */
+export function loadsInPlace(open: number): boolean {
+  return open < IN_PLACE_PAGES;
+}
+
 /** Titles after page `lastPage` — "还有 N 部". */
 export function titlesAfter(total: number, lastPage: number): number {
   return Math.max(0, total - lastPage * GRID_PAGE_SIZE);

@@ -183,6 +183,28 @@
   }
 }
 
+/* Where the strip scrolls (below 1200px; above it every language fits) and
+ * the pointer is a mouse — which cannot swipe, and whose wheel scrolls the
+ * page — a thin scrollbar under it says there is more and gives the mouse
+ * something to drag. Touch screens keep none. */
+@media (max-width: 1199px) and (hover: hover) and (pointer: fine) {
+  .scroller {
+    padding-bottom: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  }
+
+  .scroller::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+
+  .scroller::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+
 /* ── Tablet ──────────────────────────────────────────────────────────────── */
 
 @media (max-width: 1023px) {

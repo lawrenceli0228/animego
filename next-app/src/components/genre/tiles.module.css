@@ -172,11 +172,13 @@
 /* ── Below the desktop: a track that scrolls sideways ────────────────────── */
 
 @media (max-width: 1023px) {
+  /* A track that scrolls clips whatever leaves it, so it keeps 6px above the
+   * tiles for the focus ring and the lift (taken back from the margin). */
   .tiles {
     display: flex;
     gap: 12px;
-    margin: 0 calc(-1 * var(--gutter, 16px));
-    padding: 0 var(--gutter, 16px) 4px;
+    margin: -6px calc(-1 * var(--gutter, 16px)) 0;
+    padding: 6px var(--gutter, 16px) 4px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     scroll-padding-inline: var(--gutter, 16px);
@@ -205,6 +207,25 @@
 
   .tile {
     height: 128px;
+  }
+}
+
+/* A mouse cannot swipe the track: a thin scrollbar under it. */
+@media (max-width: 1023px) and (hover: hover) and (pointer: fine) {
+  .tiles {
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  }
+
+  .tiles::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+
+  .tiles::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.16);
   }
 }
 

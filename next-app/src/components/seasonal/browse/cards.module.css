@@ -816,6 +816,25 @@
   }
 }
 
+/* A mouse cannot swipe a rail's track: a thin scrollbar under it. */
+@media (max-width: 1023px) and (hover: hover) and (pointer: fine) {
+  .row6 {
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  }
+
+  .row6::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+
+  .row6::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+
 @media (max-width: 600px) {
   .row6 {
     gap: 12px;
