@@ -31,14 +31,8 @@ import grid from "./grid.module.css";
 const AUTO_LOAD_MARGIN_PX = 240;
 /** No automatic load before the reader has scrolled at all: a tall screen would otherwise unroll the slice. */
 const AUTO_LOAD_MIN_SCROLL_PX = 40;
-/**
- * How long a "show more" that has just mounted — a page of cards having just
- * come in above it — waits before coming near it loads the next page. A
- * browser that keeps the viewport where it was relative to the link while the
- * cards came in would otherwise have it load page after page in a row,
- * carrying the reader down with it; a reader's own scroll after this loads.
- */
-const AUTO_LOAD_SETTLE_MS = 400;
+/** The keys that scroll a page down: with a wheel and a finger, how a reader scrolls by hand. */
+const SCROLL_KEYS = new Set([" ", "PageDown", "ArrowDown", "End"]);
 /** Per-card entrance delay within a page, ms (AniList's stagger, slower on a phone's bigger cards). */
 const STAGGER_MS = { desktop: 16, phone: 22 } as const;
 
@@ -137,12 +131,13 @@ export default function GridResults({ genre, data, env, copy }: GridResultsProps
 /**
  * "显示更多 · 还有 N 部": a link to the next page, which the script turns into
  * an in-place load — pressed, or, for the first few pages, brought within
- * AUTO_LOAD_MARGIN_PX of the viewport once the reader has scrolled. Re-armed
- * on every mount, and settled for AUTO_LOAD_SETTLE_MS first: a page that came
- * in short with the link still in range loads the next one at the reader's
- * next scroll, not by itself. With `followLink` (a failed load, or a grid
- * already holding as much as it should) a press is an ordinary link to the
- * next page.
+ * AUTO_LOAD_MARGIN_PX of the viewport by the reader's own scrolling (a wheel,
+ * a finger, a scrolling key). Re-armed on every mount, and every mount waits
+ * for the reader's hand again: the viewport moved by the browser itself, Tab
+ * bringing the link into view, or a page that came in short with the link
+ * still in range loads nothing until the reader scrolls. With `followLink` (a
+ * failed load, or a grid already holding as much as it should) a press is an
+ * ordinary link to the next page.
  */
 function MoreLink({
   href,
@@ -164,14 +159,24 @@ function MoreLink({
   useEffect(() => {
     const el = ref.current;
     if (!el || followLink || !autoLoad || typeof IntersectionObserver === "undefined") return;
-    const armedAt = performance.now();
     let near = false;
     let fired = false;
+    // Whether the reader has scrolled by hand since this link mounted. A
+    // browser moves the viewport by itself too — WebKit holds it against this
+    // link while the page of cards above it comes in — and that is no reader
+    // asking for more: loading on it would run page after page in a row,
+    // carrying the reader down with them.
+    let byHand = false;
     const maybeLoad = () => {
-      if (fired || !near || window.scrollY < AUTO_LOAD_MIN_SCROLL_PX) return;
-      if (performance.now() - armedAt < AUTO_LOAD_SETTLE_MS) return;
+      if (fired || !near || !byHand || window.scrollY < AUTO_LOAD_MIN_SCROLL_PX) return;
       fired = true;
       onMore();
+    };
+    const onHand = () => {
+      byHand = true;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key)) byHand = true;
     };
     const observer = new IntersectionObserver(
       (entries) => {
@@ -184,9 +189,15 @@ function MoreLink({
     // The observer reports crossings only; a link already in range when the
     // reader starts scrolling needs the scroll itself to count.
     window.addEventListener("scroll", maybeLoad, { passive: true });
+    window.addEventListener("wheel", onHand, { passive: true });
+    window.addEventListener("touchmove", onHand, { passive: true });
+    window.addEventListener("keydown", onKey);
     return () => {
       observer.disconnect();
       window.removeEventListener("scroll", maybeLoad);
+      window.removeEventListener("wheel", onHand);
+      window.removeEventListener("touchmove", onHand);
+      window.removeEventListener("keydown", onKey);
     };
   }, [followLink, autoLoad, onMore]);
 

@@ -216,10 +216,17 @@ test.describe("desktop", () => {
 
     const decades = page.locator('[data-tiles="decades"] a');
     await expect(decades).toHaveCount(7);
-    await expect(decades.first()).toHaveAccessibleName(`2020 年代，${count((s) => decadeOf(s.year) === "2020")} 部`);
+    // A tile's name is its visible text (the browser spaces its two lines),
+    // with what the tile alone does not say read after it.
+    await expect(decades.first()).toHaveAccessibleName(
+      new RegExp(`^2020 年代\\s*${count((s) => decadeOf(s.year) === "2020")} 部$`),
+    );
     const related = page.locator('[data-tiles="related"] a');
     await expect(related).toHaveCount(7);
-    await expect(related.first()).toHaveAccessibleName(`机战和运动都有的番剧，${count(hasGenre("Sports"))} 部`);
+    await expect(related.first()).toHaveAccessibleName(
+      new RegExp(`^运动\\s*${count(hasGenre("Sports"))} 部\\s*（机战和运动都有）$`),
+    );
+    for (const tile of await page.locator("[data-tile]").all()) expect(await tile.getAttribute("aria-label")).toBeNull();
     const studios = page.locator('[data-tiles="studios"] a');
     await expect(studios).toHaveCount(7);
     await expect(studios.first()).toHaveAttribute("href", `/studio/${encodeURIComponent("E2E 机甲工房")}`);
