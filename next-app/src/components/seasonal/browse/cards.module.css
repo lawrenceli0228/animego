@@ -35,6 +35,25 @@
   display: none;
 }
 
+/* The genre page's rails. From 1024px a rail is one row of six, its last two
+ * covers opening their popover to the left as the grid's last two columns do.
+ * Below that it is a track that scrolls sideways under the finger — on a
+ * phone, AniList's 118px cards — bled out to the page's edges. A track clips
+ * whatever overflows it, so a card on one shows no popover; its title (and on
+ * a phone its airing line) stands on its own. These rules are here rather
+ * than in the genre page's stylesheet because they select this module's own
+ * classes, and only the module that owns a rule may override it. */
+.row6 {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.row6 > .card .title {
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
 .card {
   position: relative;
   display: grid;
@@ -748,6 +767,67 @@
 
   .pillsTwo .pill:nth-child(n + 3) {
     display: none;
+  }
+}
+
+/* ── Rails: the genre page's rows of six (their @media rules are at the end) ─ */
+
+@media (min-width: 1024px) {
+  .row6 > .card:nth-child(n + 5) .pop {
+    left: auto;
+    right: calc(100% + 18px);
+    transform-origin: 100% 36px;
+  }
+
+  .row6 > .card:nth-child(n + 5) .arrow {
+    right: auto;
+    left: 100%;
+    border-right: 0;
+    border-left: 10px solid currentColor;
+  }
+}
+
+@media (max-width: 1023px) {
+  .row6 {
+    display: flex;
+    gap: 14px;
+    margin: 0 calc(-1 * var(--gutter, 16px));
+    padding: 0 var(--gutter, 16px) 4px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: var(--gutter, 16px);
+    scrollbar-width: none;
+  }
+
+  .row6::-webkit-scrollbar {
+    display: none;
+  }
+
+  .row6 > .card {
+    flex: none;
+    width: 150px;
+    scroll-snap-align: start;
+  }
+
+  .row6 > .card .pop,
+  .row6 > .card:hover .pop,
+  .row6 > .card:has(.title:focus-visible) .pop {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .row6 {
+    gap: 12px;
+  }
+
+  .row6 > .card {
+    width: 118px;
+  }
+
+  .row6 > .card .title {
+    font-size: 12px;
+    line-height: 17px;
   }
 }
 

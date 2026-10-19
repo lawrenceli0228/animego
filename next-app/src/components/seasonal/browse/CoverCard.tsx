@@ -21,6 +21,7 @@ import {
   coverBadge,
   genreLabels,
   infoLine,
+  type AiringVariant,
 } from "@/lib/seasonal/display";
 import type { SeasonalItem } from "@/lib/seasonal/model";
 import type { BrowseState } from "@/lib/seasonal/state";
@@ -45,15 +46,37 @@ interface CoverCardProps {
   Follow: FollowSlot;
   /** The first cover is the page's largest paint; load it at once. */
   priority: boolean;
+  /**
+   * The line about when — the popover's first line and the phone card's line
+   * under the title. The season's own airing line when omitted; the genre
+   * page passes one that also says which year a show is from. Pass a stable
+   * function (the card is memoised).
+   */
+  airing?: (item: SeasonalItem, nowMs: number, variant: AiringVariant) => string;
 }
 
-function CoverCard({ item, hidden, delayMs, nowMs, zone, state, mode, lang, copy, Follow, priority }: CoverCardProps) {
+function CoverCard({
+  item,
+  hidden,
+  delayMs,
+  nowMs,
+  zone,
+  state,
+  mode,
+  lang,
+  copy,
+  Follow,
+  priority,
+  airing,
+}: CoverCardProps) {
   const tone = toneLadder(item.hue);
   const pop = oklchCss(21, 0.02, item.hue);
   const href = `/anime/${item.id}`;
   const badge = coverBadge(item, nowMs, state, mode, copy, lang, zone);
   const isNew = badge?.kind === "new";
   const bangumi = bangumiScoreText(item.bangumi);
+  const when = (variant: AiringVariant) =>
+    airing ? airing(item, nowMs, variant) : airingText(item, nowMs, copy, lang, variant);
 
   const rootStyle: CSSProperties = { color: tone.text, animationDelay: `${delayMs}ms` };
 
@@ -87,11 +110,11 @@ function CoverCard({ item, hidden, delayMs, nowMs, zone, state, mode, lang, copy
       <Link href={href} prefetch={false} className={cards.title}>
         {item.title}
       </Link>
-      <span className={cards.air}>{airingText(item, nowMs, copy, lang, "short")}</span>
+      <span className={cards.air}>{when("short")}</span>
       <div className={cards.pop} style={{ background: pop }} aria-hidden="true" data-popover>
         <i className={cards.arrow} style={{ color: pop }} />
         <div className={cards.popHead}>
-          <div className={cards.popAir}>{airingText(item, nowMs, copy, lang)}</div>
+          <div className={cards.popAir}>{when("full")}</div>
           <Score score={item.score} />
         </div>
         {item.studio ? (
