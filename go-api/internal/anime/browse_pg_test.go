@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -294,10 +295,17 @@ func seedIDs(seeds []genreSeed) []int32 {
 
 func seedGenreCatalogue(t *testing.T) (*dbgen.Queries, []genreSeed) {
 	t.Helper()
+	pool, seeds := seedGenreCataloguePool(t)
+	return dbgen.New(pool), seeds
+}
+
+// seedGenreCataloguePool is seedGenreCatalogue for a test that needs the
+// pool itself, to hold one of its connections.
+func seedGenreCataloguePool(t *testing.T) (*pgxpool.Pool, []genreSeed) {
+	t.Helper()
 	ctx := context.Background()
 	pool := testutil.NewWebPool(t, ctx, testutil.SetupPG(t))
-	q := dbgen.New(pool)
-	detail, err := NewDetailService(q, nil)
+	detail, err := NewDetailService(dbgen.New(pool), nil)
 	require.NoError(t, err)
 	t.Cleanup(detail.Close)
 
@@ -308,7 +316,7 @@ func seedGenreCatalogue(t *testing.T) (*dbgen.Queries, []genreSeed) {
 	// Plan against real statistics, as on the catalogue.
 	_, err = pool.Exec(ctx, "ANALYZE anime_cache, anime_genres, anime_studios")
 	require.NoError(t, err)
-	return q, seeds
+	return pool, seeds
 }
 
 // browseListing is a whole /browse listing, read page by page.
@@ -434,4 +442,59 @@ func TestBrowse_PG_Filters(t *testing.T) {
 		assert.NotEqual(t, -1, indexOf(popular, 132))
 		assert.NotEqual(t, -1, indexOf(popular, 133))
 	})
+}
+
+// TestBrowse_PG_PlannedForTheirArguments — under the statement cache pgx
+// uses by default (QueryExecModeCacheStatement, which internal/db/pool.go
+// leaves alone), BrowseAnime and CountBrowseAnime are planned for each
+// request's own arguments, never with a generic plan.
+//
+// Postgres plans a prepared statement for its arguments five times, then
+// switches to a single generic plan if that is estimated to cost less than
+// the custom plans did.  Written "($n IS NULL OR EXISTS ...)", the genre
+// and studio filters keep the generic estimate above the custom ones, so
+// auto mode never switches.  Rewrite either as an IN and the generic
+// estimate falls below them: auto mode switches, to a plan that runs
+// several times slower than the ones it replaces.  This is the test that
+// fails on that rewrite.  A plan cache belongs to one session, so every
+// request goes through one connection.
+func TestBrowse_PG_PlannedForTheirArguments(t *testing.T) {
+	pool, _ := seedGenreCataloguePool(t)
+	ctx := context.Background()
+	conn, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+	h := Browse(dbgen.New(conn))
+
+	// Every kind of filter, both orders, shallow and deep pages: well past
+	// the fifth execution, where auto mode first weighs a generic plan.
+	requests := []string{
+		"genre=Action",
+		"genre=Action&page=2&perPage=7",
+		"genre=Action&sort=score&page=200&perPage=50",
+		"genre=Action&status=RELEASING",
+		"genre=Action&with=Fantasy&sort=score",
+		"genre=Action&with=Mystery&page=3&perPage=5",
+		"genre=Fantasy&yearFrom=1990&yearTo=1999",
+		"genre=Action&yearTo=1969&status=FINISHED",
+		"genre=Comedy&yearFrom=1900&yearTo=2100&sort=score&page=200&perPage=50",
+		"studio=Studio%20Alpha&sort=score",
+		"studio=Studio%20Iota&status=RELEASING",
+		"year=2024&sort=score",
+		"year=1990&yearFrom=1991&page=2",
+	}
+	for _, qs := range requests {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/browse?"+qs, nil))
+		require.Equal(t, http.StatusOK, rec.Code, "%s: %s", qs, rec.Body.String())
+	}
+
+	for _, name := range []string{"BrowseAnime", "CountBrowseAnime"} {
+		var generic, custom int64
+		require.NoError(t, conn.QueryRow(ctx,
+			"SELECT generic_plans, custom_plans FROM pg_prepared_statements WHERE statement LIKE $1",
+			"-- name: "+name+" :%").Scan(&generic, &custom), name)
+		assert.Zero(t, generic, "%s ran on a generic plan", name)
+		assert.Equal(t, int64(len(requests)), custom, "%s: every request is planned for its own arguments", name)
+	}
 }

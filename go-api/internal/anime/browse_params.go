@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
@@ -25,13 +26,19 @@ const (
 	// can name: the year key and the yearFrom / yearTo bounds alike.
 	browseMinYear = 1900
 	browseMaxYear = 2100
+
+	// browseMaxStudioBytes bounds the studio key, well past any studio's
+	// name: a longer key names no studio, and could only answer an empty
+	// listing.
+	browseMaxStudioBytes = 200
 )
 
 // browsableGenres are the genres a hub page exists for: every AniList
 // genre but Hentai, which the listings exclude.  The order is the one the
 // genre page's strip shows (FILTER_GENRES in
 // next-app/src/lib/contentLabels.ts).  It bounds the genre overview's
-// cache to one entry per genre and the genres a related tile may name.
+// cache to one entry per genre, the genres a related tile may name and
+// the genres /browse lists.
 var browsableGenres = []string{
 	"Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
 	"Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological",
@@ -94,15 +101,27 @@ func parseBrowseQuery(qs url.Values) (browseQuery, *httpx.APIError) {
 	return withBrowseFilters(key, get)
 }
 
-// parseBrowseKey reads the one thing the listing is keyed by.
+// parseBrowseKey reads the one thing the listing is keyed by, and refuses
+// a key that cannot name a hub.  A genre must be a browsable one: the
+// genre page asks for nothing else, and any other genre -- Hentai among
+// them -- could only answer an empty listing.  A studio is free text, but
+// it must be text Postgres accepts -- valid UTF-8, no NUL: Postgres
+// answers anything else with an error, which the client would see as a
+// 500.
 func parseBrowseKey(get func(string) string) (browseQuery, *httpx.APIError) {
 	var q browseQuery
 	keys := 0
 	if g := get("genre"); g != "" {
+		if !isBrowsableGenre(g) {
+			return browseQuery{}, browseInvalid("genre must be a browsable genre")
+		}
 		q.genre = &g
 		keys++
 	}
 	if s := get("studio"); s != "" {
+		if len(s) > browseMaxStudioBytes || !utf8.ValidString(s) || strings.ContainsRune(s, 0) {
+			return browseQuery{}, browseInvalid(fmt.Sprintf("studio must be valid UTF-8 without NUL, at most %d bytes", browseMaxStudioBytes))
+		}
 		q.studio = &s
 		keys++
 	}

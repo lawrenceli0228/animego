@@ -1,6 +1,7 @@
 package anime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -62,6 +63,16 @@ func (w genreTileWire) coverIDs() []int32 {
 	for _, c := range w.Covers {
 		out = append(out, c.AnilistID)
 	}
+	return out
+}
+
+// asTileWire is tiles of any kind as a client reads them.
+func asTileWire(t *testing.T, tiles any) []genreTileWire {
+	t.Helper()
+	raw, err := json.Marshal(tiles)
+	require.NoError(t, err)
+	var out []genreTileWire
+	require.NoError(t, json.Unmarshal(raw, &out))
 	return out
 }
 
@@ -190,7 +201,6 @@ func TestGenreOverview_PG(t *testing.T) {
 			assert.NotContains(t, d.coverIDs(), int32(105), "2030 is in no decade")
 		}
 		assert.Contains(t, names, "old")
-		assert.Len(t, names["2020"].Covers, genreTileCovers, "a full decade carries every spare")
 		var sum int64
 		for _, d := range got.Decades {
 			sum += d.Count
@@ -243,6 +253,55 @@ func TestGenreOverview_PG(t *testing.T) {
 		}
 		assert.Equal(t, "Studio Iota", got.Studios[4].Studio, "three titles of its own and six as the second main studio")
 		assert.Equal(t, "Studio Eta", got.Studios[genreMaxTiles-1].Studio, "Eta and Zeta tie for the last tile; the name decides")
+	})
+
+	// The handler asks for more candidates than nearly every tile here has,
+	// so the cap is held to a small per_tile instead: each query returns
+	// exactly that many rows for a tile, fewer only for a tile with fewer
+	// titles, and the tiles keep their places, their counts and the first
+	// of their covers.
+	t.Run("per_tile cuts each tile's candidates and nothing else", func(t *testing.T) {
+		const perTile = 2
+		ctx := context.Background()
+		keys, froms, tos := genreDecadeArgs()
+		decadeRows, err := q.ListGenreDecadeTiles(ctx, perTile, keys, froms, tos, "Action")
+		require.NoError(t, err)
+		relatedRows, err := q.ListGenreRelatedTiles(ctx, genreMaxTiles, "Action", browsableGenres, perTile)
+		require.NoError(t, err)
+		studioRows, err := q.ListGenreStudioTiles(ctx, genreMaxTiles, "Action", perTile)
+		require.NoError(t, err)
+
+		rows := map[string]map[string]int64{"decades": {}, "related": {}, "studios": {}}
+		for _, r := range decadeRows {
+			rows["decades"][r.RangeKey]++
+		}
+		for _, r := range relatedRows {
+			rows["related"][r.Related]++
+		}
+		for _, r := range studioRows {
+			rows["studios"][r.Studio]++
+		}
+
+		for kind, tiles := range map[string]struct{ full, capped []genreTileWire }{
+			"decades": {got.Decades, asTileWire(t, decadeTiles(decadeRows))},
+			"related": {got.Related, asTileWire(t, relatedTiles(relatedRows))},
+			"studios": {got.Studios, asTileWire(t, studioTiles(studioRows))},
+		} {
+			require.Len(t, tiles.capped, len(tiles.full), kind)
+			cut := 0
+			for i, full := range tiles.full {
+				name := full.name()
+				assert.Equal(t, name, tiles.capped[i].name(), "%s: tile %d", kind, i)
+				assert.Equal(t, full.Count, tiles.capped[i].Count, "%s %s", kind, name)
+				assert.Equal(t, min(perTile, full.Count), rows[kind][name], "%s %s: candidate rows", kind, name)
+				want := full.coverIDs()
+				if len(want) > perTile {
+					want, cut = want[:perTile], cut+1
+				}
+				assert.Equal(t, want, tiles.capped[i].coverIDs(), "%s %s", kind, name)
+			}
+			assert.Positive(t, cut, "%s: the seed must overfill a tile to test the cap", kind)
+		}
 	})
 
 	t.Run("covers are titles with a cover, in their listing's order", func(t *testing.T) {

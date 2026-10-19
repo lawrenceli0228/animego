@@ -25,16 +25,22 @@
 //
 // Cached in process per genre for ten minutes.  The genre is validated
 // against the eighteen browsable genres before the cache is consulted, so
-// nothing a request can send grows the key set past eighteen.
+// nothing a request can send grows the key set past eighteen.  Concurrent
+// misses of one genre share a single read.
 package anime
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
@@ -53,9 +59,12 @@ const (
 	// genreTopSize is the length of the top-by-score list.
 	genreTopSize = 10
 	// genreTileCovers is how many cover candidates a tile carries.  It
-	// shows three; the spares let the page skip covers an earlier tile
-	// already showed.
-	genreTileCovers = 6
+	// shows three, and the page fills the tiles in order -- decades,
+	// related genres, studios -- skipping covers an earlier tile showed.
+	// The same popular titles lead tile after tile, in their decade and in
+	// every other genre they carry, so a late tile has to reach well past
+	// its first candidates to find three of its own.
+	genreTileCovers = 24
 	// genreMaxTiles is the length of the related-genre and studio rows.
 	genreMaxTiles = 7
 
@@ -174,7 +183,22 @@ type GenreStudioTile struct {
 // NewGenreOverviewCache builds the per-genre cache GenreOverview reads
 // through.
 func NewGenreOverviewCache() (*cache.Cache[*GenreOverviewPayload], error) {
-	return cache.New[*GenreOverviewPayload](cache.Config{DefaultTTL: genreOverviewTTL})
+	return cache.New[*GenreOverviewPayload](genreOverviewCacheConfig())
+}
+
+// genreOverviewCacheConfig sizes the cache by entry rather than by byte
+// (see cache.Config.IgnoreInternalCost), for the one key per browsable
+// genre the handler lets through.  The default sizing is for millions of
+// keys and allocates its counters up front; MaxCost at twice the genres
+// leaves admission room to spare, so no genre is ever turned away.
+func genreOverviewCacheConfig() cache.Config {
+	n := int64(len(browsableGenres))
+	return cache.Config{
+		NumCounters:        10 * n,
+		MaxCost:            2 * n,
+		IgnoreInternalCost: true,
+		DefaultTTL:         genreOverviewTTL,
+	}
 }
 
 // GenreOverview implements GET /api/anime/genre-overview.
@@ -183,6 +207,20 @@ func GenreOverview(db GenreOverviewDB, c *cache.Cache[*GenreOverviewPayload]) ht
 }
 
 func genreOverviewHandler(db GenreOverviewDB, c *cache.Cache[*GenreOverviewPayload], now func() time.Time) http.HandlerFunc {
+	// loads collapses concurrent misses of one genre into one read.  Every
+	// request for a genre misses until the first read lands in the cache,
+	// and for a moment after: ristretto's writes are asynchronous.
+	var loads singleflight.Group
+	load := func(ctx context.Context, genre string) (*GenreOverviewPayload, error) {
+		payload, err := loadGenreOverview(ctx, db, genre, now())
+		if err != nil {
+			return nil, err
+		}
+		if ok := c.Set(genre, payload); !ok {
+			slog.Warn("genre overview cache set rejected", "genre", genre)
+		}
+		return payload, nil
+	}
 	return func(w http.ResponseWriter, req *http.Request) {
 		genre := strings.TrimSpace(req.URL.Query().Get("genre"))
 		if !isBrowsableGenre(genre) {
@@ -196,22 +234,64 @@ func genreOverviewHandler(db GenreOverviewDB, c *cache.Cache[*GenreOverviewPaylo
 		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
 		defer cancel()
 
-		payload, err := loadGenreOverview(ctx, db, genre, now())
+		payload, err := sharedGenreOverview(ctx, &loads, genre, load)
+		if errors.Is(err, context.Canceled) {
+			// The reader went away; nobody is there to read an answer, and a
+			// 500 for it would be a server error that never happened.  The
+			// read goes on without it (see sharedGenreOverview).
+			return
+		}
 		if err != nil {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
 			return
-		}
-		if ok := c.Set(genre, payload); !ok {
-			slog.Warn("genre overview cache set rejected", "genre", genre)
 		}
 		httpx.Data(w, http.StatusOK, payload)
 	}
 }
 
+// sharedGenreOverview runs load once for every concurrent caller of the
+// same genre; load is also what caches the answer, so it is written once.
+//
+// The load runs on a context detached from any one caller, with its own
+// queryTimeout, so the request that happened to start it going away
+// neither fails the others nor wastes the read, which is cached all the
+// same; each caller still stops waiting at its own deadline.  DoChan runs
+// load on a goroutine of its own, where httpmw.Recoverer cannot reach a
+// panic, hence the recover.
+func sharedGenreOverview(
+	ctx context.Context,
+	loads *singleflight.Group,
+	genre string,
+	load func(context.Context, string) (*GenreOverviewPayload, error),
+) (*GenreOverviewPayload, error) {
+	ch := loads.DoChan(genre, func() (val any, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.ErrorContext(ctx, "anime/genre-overview: load panic",
+					"genre", genre, "panic", rec, "stack", string(debug.Stack()))
+				val, err = nil, fmt.Errorf("genre overview %s: panic: %v", genre, rec)
+			}
+		}()
+		lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), queryTimeout)
+		defer cancel()
+		return load(lctx, genre)
+	})
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*GenreOverviewPayload), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // loadGenreOverview reads one genre's overview.  The queries run one after
-// another on one connection: a miss happens once per genre per TTL, and
-// fanning out would let a burst of cold genres take the pool from every
-// other request.
+// another, so a read holds at most one of the pool's connections at any
+// moment (pgxpool acquires one per query): a miss happens once per genre
+// per TTL, and fanning out would let a burst of cold genres take the pool
+// from every other request.
 func loadGenreOverview(ctx context.Context, db GenreOverviewDB, genre string, now time.Time) (*GenreOverviewPayload, error) {
 	recentFrom := int32(now.In(genreClockZone).Year() - genreRecentYears)
 	lists, err := loadGenreLists(ctx, db, genre, recentFrom)
@@ -222,15 +302,15 @@ func loadGenreOverview(ctx context.Context, db GenreOverviewDB, genre string, no
 	keys, froms, tos := genreDecadeArgs()
 	decadeRows, err := db.ListGenreDecadeTiles(ctx, genreTileCovers, keys, froms, tos, genre)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("genre overview %s: decade tiles: %w", genre, err)
 	}
 	relatedRows, err := db.ListGenreRelatedTiles(ctx, genreMaxTiles, genre, browsableGenres, genreTileCovers)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("genre overview %s: related tiles: %w", genre, err)
 	}
 	studioRows, err := db.ListGenreStudioTiles(ctx, genreMaxTiles, genre, genreTileCovers)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("genre overview %s: studio tiles: %w", genre, err)
 	}
 
 	return &GenreOverviewPayload{
@@ -257,19 +337,19 @@ func loadGenreLists(ctx context.Context, db BrowseDB, genre string, recentFrom i
 		err   error
 	)
 	if lists.Airing, err = genreList(ctx, db, browseQuery{genre: &g, status: &releasing}, genreRailSize); err != nil {
-		return GenreOverviewLists{}, err
+		return GenreOverviewLists{}, fmt.Errorf("genre overview %s: airing rail: %w", genre, err)
 	}
 	if lists.Popular, err = genreList(ctx, db, browseQuery{genre: &g}, genreRailSize); err != nil {
-		return GenreOverviewLists{}, err
+		return GenreOverviewLists{}, fmt.Errorf("genre overview %s: popular rail: %w", genre, err)
 	}
 	if lists.Recent, err = genreList(ctx, db, browseQuery{genre: &g, yearFrom: &recentFrom}, genreRailSize); err != nil {
-		return GenreOverviewLists{}, err
+		return GenreOverviewLists{}, fmt.Errorf("genre overview %s: recent rail: %w", genre, err)
 	}
 	if lists.Classic, err = genreList(ctx, db, browseQuery{genre: &g, yearTo: &classicTo}, genreRailSize); err != nil {
-		return GenreOverviewLists{}, err
+		return GenreOverviewLists{}, fmt.Errorf("genre overview %s: classic rail: %w", genre, err)
 	}
 	if lists.Top, err = genreList(ctx, db, browseQuery{genre: &g, byScore: true}, genreTopSize); err != nil {
-		return GenreOverviewLists{}, err
+		return GenreOverviewLists{}, fmt.Errorf("genre overview %s: top rail: %w", genre, err)
 	}
 	return lists, nil
 }

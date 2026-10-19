@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,16 +23,24 @@ import (
 )
 
 // fakeGenreOverviewDB answers the rails from fakeBrowseDB and the tiles
-// from canned rows, recording what each tile query was asked.  Safe for
-// the concurrent requests the cache test sends.
+// from canned rows, recording what each tile query was asked.  Every
+// record is taken under mu: the handler's read runs on singleflight's
+// goroutine, not the test's.
 type fakeGenreOverviewDB struct {
 	mu sync.Mutex
 	fakeBrowseDB
+
+	// gate, when set, holds every rail statement until it is closed or the
+	// read's context ends; held counts the statements that reached it.
+	gate chan struct{}
+	held int
 
 	decadeRows  []dbgen.ListGenreDecadeTilesRow
 	relatedRows []dbgen.ListGenreRelatedTilesRow
 	studioRows  []dbgen.ListGenreStudioTilesRow
 	tileErr     error
+	// tilePanic, when set, is what the decade query panics with.
+	tilePanic any
 
 	decadeArgs struct {
 		perTile    int32
@@ -51,18 +61,51 @@ type fakeGenreOverviewDB struct {
 }
 
 func (f *fakeGenreOverviewDB) BrowseAnime(ctx context.Context, arg dbgen.BrowseAnimeParams) ([]dbgen.BrowseAnimeRow, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.fakeBrowseDB.BrowseAnime(ctx, arg)
 }
 
 func (f *fakeGenreOverviewDB) CountBrowseAnime(ctx context.Context, arg dbgen.CountBrowseAnimeParams) (int64, error) {
+	if err := f.wait(ctx); err != nil {
+		return 0, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.fakeBrowseDB.CountBrowseAnime(ctx, arg)
 }
 
+// wait holds a statement at the gate, outside mu, so the test can read
+// the counts while a read is held.  A held statement gives up when its
+// context ends, as a real one would.
+func (f *fakeGenreOverviewDB) wait(ctx context.Context) error {
+	if f.gate == nil {
+		return nil
+	}
+	f.mu.Lock()
+	f.held++
+	f.mu.Unlock()
+	select {
+	case <-f.gate:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (f *fakeGenreOverviewDB) heldAtGate() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.held
+}
+
 func (f *fakeGenreOverviewDB) ListGenreDecadeTiles(_ context.Context, perTile int32, keys []string, froms, tos []int32, genre string) ([]dbgen.ListGenreDecadeTilesRow, error) {
+	if f.tilePanic != nil {
+		panic(f.tilePanic)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tileCalls++
@@ -418,6 +461,160 @@ func TestGenreOverview_RailErrorIs500(t *testing.T) {
 	rec := genreOverviewGet(genreOverviewHandler(db, newGenreOverviewCacheT(t), time.Now), "genre=Action")
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Zero(t, db.tileCalls, "the first failure ends the read")
+}
+
+// TestLoadGenreOverview_ErrorsNameTheRead — a failed statement's error
+// names the genre and the read it belonged to, for the log; the client is
+// told "query failed" whichever it was (TestGenreOverview_CachedPerGenre).
+func TestLoadGenreOverview_ErrorsNameTheRead(t *testing.T) {
+	t.Parallel()
+
+	reset := errors.New("connection reset")
+	for _, tc := range []struct {
+		name string
+		db   *fakeGenreOverviewDB
+		want string
+	}{
+		{"a rail", &fakeGenreOverviewDB{fakeBrowseDB: fakeBrowseDB{err: reset}}, "genre overview Drama: airing rail: connection reset"},
+		{"a tile row", &fakeGenreOverviewDB{tileErr: reset}, "genre overview Drama: decade tiles: connection reset"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadGenreOverview(context.Background(), tc.db, "Drama", octoberNoon)
+			require.ErrorIs(t, err, reset)
+			assert.EqualError(t, err, tc.want)
+		})
+	}
+}
+
+// TestGenreOverviewCache_HoldsEveryGenre — the cache is sized in entries
+// for the keys the handler lets through: every browsable genre is kept,
+// and not many more keys than that.  Without IgnoreInternalCost ristretto
+// would add its own overhead to each entry's cost of one, past the whole
+// MaxCost, and keep none of them.
+func TestGenreOverviewCache_HoldsEveryGenre(t *testing.T) {
+	t.Parallel()
+
+	n := len(browsableGenres)
+	assert.Equal(t, cache.Config{
+		NumCounters:        int64(10 * n),
+		MaxCost:            int64(2 * n),
+		IgnoreInternalCost: true,
+		DefaultTTL:         genreOverviewTTL,
+	}, genreOverviewCacheConfig())
+
+	c := newGenreOverviewCacheT(t)
+	for _, g := range browsableGenres {
+		require.True(t, c.Set(g, &GenreOverviewPayload{Genre: g}), g)
+	}
+	c.Wait()
+	for _, g := range browsableGenres {
+		got, ok := c.Get(g)
+		require.True(t, ok, "%s was not kept", g)
+		assert.Equal(t, g, got.Genre)
+	}
+
+	others := make([]string, 10*n)
+	for i := range others {
+		others[i] = strconv.Itoa(i)
+		c.Set(others[i], &GenreOverviewPayload{})
+	}
+	c.Wait()
+	kept := 0
+	for _, k := range append(others, browsableGenres...) {
+		if _, ok := c.Get(k); ok {
+			kept++
+		}
+	}
+	assert.LessOrEqual(t, kept, 2*n, "bounded at MaxCost entries")
+}
+
+// TestGenreOverview_ConcurrentMissesShareOneRead — requests for a genre no
+// one has read yet, all in flight at once, cost one read between them and
+// get the same bytes.  The read is held at the gate until every request
+// is waiting on it -- synctest.Wait returns once every goroutine but the
+// test's is blocked -- so none can arrive after it ends and start another.
+func TestGenreOverview_ConcurrentMissesShareOneRead(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		db := &fakeGenreOverviewDB{gate: make(chan struct{})}
+		db.total = 3
+		h := genreOverviewHandler(db, newGenreOverviewCacheT(t), func() time.Time { return octoberNoon })
+
+		const callers = 8
+		recs := make([]*httptest.ResponseRecorder, callers)
+		var wg sync.WaitGroup
+		for i := range recs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				recs[i] = genreOverviewGet(h, "genre=Action")
+			}()
+		}
+		synctest.Wait()
+		assert.Equal(t, 1, db.heldAtGate(), "one read in flight for all %d requests", callers)
+		close(db.gate)
+		wg.Wait()
+
+		assert.Equal(t, 13, db.queries(), "one read: five rails at two statements each, and three tile rows")
+		for i, rec := range recs {
+			assert.Equal(t, http.StatusOK, rec.Code, "request %d", i)
+			assert.Equal(t, recs[0].Body.String(), rec.Body.String(), "request %d", i)
+		}
+		assert.Contains(t, recs[0].Body.String(), `"genre":"Action","total":3`)
+	})
+}
+
+// TestGenreOverview_ALeavingReaderDoesNotStopTheRead — a request that goes
+// away while it waits is answered with nothing, not a 500.  The read it
+// was waiting on runs to the end without it, and what it read is cached
+// for the next request.
+func TestGenreOverview_ALeavingReaderDoesNotStopTheRead(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		c := newGenreOverviewCacheT(t)
+		db := &fakeGenreOverviewDB{gate: make(chan struct{})}
+		h := genreOverviewHandler(db, c, func() time.Time { return octoberNoon })
+
+		ctx, leave := context.WithCancel(context.Background())
+		gone := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			h.ServeHTTP(gone, httptest.NewRequest(http.MethodGet, "/api/anime/genre-overview?genre=Action", nil).WithContext(ctx))
+		}()
+		synctest.Wait() // waiting on the read, which the gate holds
+		leave()
+		<-done
+		assert.Empty(t, gone.Header(), "no answer at all, not even a status")
+		assert.Zero(t, gone.Body.Len())
+
+		close(db.gate)
+		synctest.Wait() // the read, on its own
+		assert.Equal(t, 13, db.queries(), "the whole read ran")
+		c.Wait()
+		next := genreOverviewGet(h, "genre=Action")
+		assert.Equal(t, http.StatusOK, next.Code)
+		assert.Equal(t, 13, db.queries(), "and was kept: the next request reads nothing")
+	})
+}
+
+// TestGenreOverview_PanicIsA500NotACrash — the read runs on singleflight's
+// goroutine, beyond httpmw.Recoverer: without the recover, a panic there
+// would end the process instead of failing one request.
+func TestGenreOverview_PanicIsA500NotACrash(t *testing.T) {
+	t.Parallel()
+
+	c := newGenreOverviewCacheT(t)
+	db := &fakeGenreOverviewDB{tilePanic: "a row the mapping did not expect"}
+	rec := genreOverviewGet(genreOverviewHandler(db, c, func() time.Time { return octoberNoon }), "genre=Action")
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Equal(t, `{"error":{"code":"SERVER_ERROR","message":"query failed"}}`, rec.Body.String())
+	c.Wait()
+	_, cached := c.Get("Action")
+	assert.False(t, cached)
 }
 
 // TestGenreOverview_RouteDoesNotCollideWithDetail — /genre-overview is a

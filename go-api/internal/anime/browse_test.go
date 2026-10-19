@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,10 @@ func TestParseBrowseQuery(t *testing.T) {
 	action, fantasy, mappa := "Action", "Fantasy", "MAPPA"
 	releasing, hiatus := "RELEASING", "HIATUS"
 	y := func(v int32) *int32 { return &v }
+	const studioErr = "studio must be valid UTF-8 without NUL, at most 200 bytes"
+	studioAtBound := strings.Repeat("a", browseMaxStudioBytes)
+	studioCJK := "スタジオぴえろ"
+	studioPunct := "Studio Cloud & <Sky>"
 
 	for _, tc := range []struct {
 		name string
@@ -103,6 +108,22 @@ func TestParseBrowseQuery(t *testing.T) {
 		{name: "non-numeric year", qs: "year=twenty", err: "year must be a year between 1900 and 2100"},
 		{name: "year below range", qs: "year=1850", err: "year must be a year between 1900 and 2100"},
 		{name: "year above range", qs: "year=2101", err: "year must be a year between 1900 and 2100"},
+
+		// genre: a hub's, spelled as AniList spells it.
+		{name: "a browsable genre of three words", qs: "genre=Slice%20of%20Life", want: browseQuery{genre: sptr("Slice of Life")}},
+		{name: "genre not UTF-8", qs: "genre=%FF", err: "genre must be a browsable genre"},
+		{name: "genre with a NUL", qs: "genre=Action%00", err: "genre must be a browsable genre"},
+		{name: "genre unknown", qs: "genre=Nope", err: "genre must be a browsable genre"},
+		{name: "genre Hentai is no hub", qs: "genre=Hentai", err: "genre must be a browsable genre"},
+		{name: "genre is case-sensitive like the enum", qs: "genre=action", err: "genre must be a browsable genre"},
+
+		// studio: free text, but text Postgres accepts, and of a studio's length.
+		{name: "studio of any script", qs: "studio=" + url.QueryEscape(studioCJK), want: browseQuery{studio: &studioCJK}},
+		{name: "studio with punctuation", qs: "studio=" + url.QueryEscape(studioPunct), want: browseQuery{studio: &studioPunct}},
+		{name: "studio at the bound", qs: "studio=" + studioAtBound, want: browseQuery{studio: &studioAtBound}},
+		{name: "studio past the bound", qs: "studio=" + studioAtBound + "a", err: studioErr},
+		{name: "studio not UTF-8", qs: "studio=%C3%28", err: studioErr},
+		{name: "studio with a NUL", qs: "studio=MAP%00PA", err: studioErr},
 
 		// with: a second genre, on a genre listing only.
 		{name: "with a second genre", qs: "genre=Action&with=Fantasy", want: browseQuery{genre: &action, withGenre: &fantasy}},
@@ -254,8 +275,9 @@ func TestBrowse_FiltersReachBothQueries(t *testing.T) {
 	assert.Equal(t, sameWhere(list), db.countCalls[0])
 }
 
-// TestBrowse_InvalidFilterIsAValidationError — a filter that is present
-// but wrong is refused before any query runs, in the error envelope.
+// TestBrowse_InvalidFilterIsAValidationError — a key or a filter that is
+// present but wrong is refused before any query runs, in the error
+// envelope: bytes Postgres would refuse never reach it to make a 500.
 func TestBrowse_InvalidFilterIsAValidationError(t *testing.T) {
 	t.Parallel()
 
@@ -264,6 +286,11 @@ func TestBrowse_InvalidFilterIsAValidationError(t *testing.T) {
 		"genre=Action&yearFrom=2020&yearTo=2010": "yearFrom must not be after yearTo",
 		"genre=Action&sort=newest":               "sort must be popularity or score",
 		"studio=MAPPA&with=Action":               "with requires genre",
+		"genre=%FF":                              "genre must be a browsable genre",
+		"genre=Action%00":                        "genre must be a browsable genre",
+		"genre=Hentai":                           "genre must be a browsable genre",
+		"studio=%C3%28":                          "studio must be valid UTF-8 without NUL, at most 200 bytes",
+		"studio=%00":                             "studio must be valid UTF-8 without NUL, at most 200 bytes",
 	} {
 		t.Run(qs, func(t *testing.T) {
 			db := &fakeBrowseDB{}
