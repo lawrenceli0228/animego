@@ -471,15 +471,9 @@ type Querier interface {
 	// Unique constraint violations (username/email already taken) surface
 	// as pgx.PgError code 23505 — handler catches + maps to 400 DUPLICATE.
 	CreateUser(ctx context.Context, username string, email string, password string) (User, error)
-	// user_sessions: one refresh session per device (migration 0052).
-	//
-	// Every hash here is the sha256 hex digest of a refresh token
-	// (auth.hashToken); no statement ever sees a raw token.  Every statement that
-	// acts on a presented token is scoped by (id, user_id) from the token's own
-	// claims AND by its hash, so a token can only ever touch the one row it was
-	// issued for.
 	// Login and register: a new row for the new device.  Never touches the
-	// user's other rows — that is the whole fix.
+	// user's other rows — that is the whole fix.  Runs after
+	// LockUserForNewSession, in its transaction.
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) error
 	DecideEditItem(ctx context.Context, status string, rejectNote *string, iD uuid.UUID, submissionID uuid.UUID) (int64, error)
 	// Wipe child tables when Reset clears a row.  Express puts characters /
@@ -1406,10 +1400,14 @@ type Querier interface {
 	// (handler echoes it back).  ErrNoRows → 404 "User not found".
 	GetUserIDByUsername(ctx context.Context, username string) (GetUserIDByUsernameRow, error)
 	// The re-read after a missed rotation: decides grace, reuse or gone.
-	GetUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID) (GetUserSessionRow, error)
+	//
+	// within_grace is judged here, by the clock that stamped rotated_at, rather
+	// than by the application's: a database on another host with a clock 30 s
+	// behind would otherwise turn every lost race into a revoked session.
+	GetUserSession(ctx context.Context, graceSeconds int32, iD uuid.UUID, userID uuid.UUID) (GetUserSessionRow, error)
 	// The same re-read for a pre-0052 token (no sid): the session it was adopted
-	// into, if any.
-	GetUserSessionByLegacyHash(ctx context.Context, userID uuid.UUID, legacyHash *string) (GetUserSessionByLegacyHashRow, error)
+	// into, if any.  Same columns as GetUserSession, so the two rows convert.
+	GetUserSessionByLegacyHash(ctx context.Context, graceSeconds int32, userID uuid.UUID, legacyHash *string) (GetUserSessionByLegacyHashRow, error)
 	// The signed-in viewer's own status for the anime; ErrNoRows when they do
 	// not follow it.
 	GetViewerSubscriptionStatus(ctx context.Context, userID uuid.UUID, anilistID int32) (string, error)
@@ -2436,6 +2434,28 @@ type Querier interface {
 	// Read-modify-write of one overlay: two reviews of the same page accept
 	// one after the other, and neither loses the other's fields.
 	LockEntityOverlay(ctx context.Context, kind string, entityID int32) ([]byte, error)
+	// user_sessions: one refresh session per device (migration 0052).
+	//
+	// Every hash here is the sha256 hex digest of a refresh token
+	// (auth.hashToken); no statement ever sees a raw token.  Every statement that
+	// acts on a presented token is scoped by (id, user_id) from the token's own
+	// claims AND by its hash, so a token can only ever touch the one row it was
+	// issued for.
+	// First half of opening a session (auth.Store.StartUserSession, with
+	// CreateUserSession in the same transaction): holds the users row FOR SHARE,
+	// and only while its password is still the hash the login just verified.
+	//
+	// Without it a login racing a password change slips past the
+	// users_password_ends_sessions trigger: the login reads the old hash and
+	// checks it, the reset commits and its trigger deletes the user's sessions,
+	// and only then does the login insert one — a session opened with a password
+	// that no longer works, which nothing would ever end.  FOR SHARE conflicts
+	// with the reset's row lock (FOR NO KEY UPDATE), so the two serialise: either
+	// the reset waits and its trigger then sees, and deletes, this session, or
+	// this waits, re-reads the row, finds the password changed and returns no
+	// row (the login is refused).  FOR KEY SHARE would not conflict, and the
+	// password predicate without a lock would serialise nothing.
+	LockUserForNewSession(ctx context.Context, iD uuid.UUID, verifiedPassword string) (uuid.UUID, error)
 	// Authoritative AniList->Bangumi binding from the vendored id map
 	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
 	// consults this BEFORE any Bangumi search; a hit binds the subject with

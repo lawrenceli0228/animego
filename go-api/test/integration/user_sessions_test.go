@@ -120,7 +120,7 @@ func TestSessions_RotateMovesCurrentToGraceSlotAndSlidesExpiry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "rotator", row.Username, "RETURNING carries the access token's username")
 
-	got, err := q.GetUserSession(ctx, sid, u.id)
+	got, err := q.GetUserSession(ctx, 30, sid, u.id)
 	require.NoError(t, err)
 	assert.Equal(t, sha(next.Token), got.TokenHash)
 	require.NotNil(t, got.PreviousHash)
@@ -149,7 +149,7 @@ func TestSessions_RotateArgumentSwapMatchesNothing(t *testing.T) {
 	})
 
 	assert.ErrorIs(t, err, pgx.ErrNoRows)
-	got, err := q.GetUserSession(ctx, sid, u.id)
+	got, err := q.GetUserSession(ctx, 30, sid, u.id)
 	require.NoError(t, err)
 	assert.Equal(t, sha(t0), got.TokenHash, "the row must be untouched")
 }
@@ -165,7 +165,7 @@ func TestSessions_RotatingOneSessionLeavesTheOtherAlone(t *testing.T) {
 	_, err := rotate(ctx, q, s, u.id, sidA, a)
 	require.NoError(t, err)
 
-	gotB, err := q.GetUserSession(ctx, sidB, u.id)
+	gotB, err := q.GetUserSession(ctx, 30, sidB, u.id)
 	require.NoError(t, err)
 	assert.Equal(t, sha(b), gotB.TokenHash)
 	assert.Nil(t, gotB.PreviousHash)
@@ -213,13 +213,38 @@ func TestSessions_StoredClaimsRebuildTheCurrentToken(t *testing.T) {
 	t1, err := rotate(ctx, q, s, u.id, sid, t0)
 	require.NoError(t, err)
 
-	got, err := q.GetUserSession(ctx, sid, u.id)
+	got, err := q.GetUserSession(ctx, 30, sid, u.id)
 	require.NoError(t, err)
 	rebuilt, err := s.ResignRefresh(got.UserID, got.ID, got.TokenJti, got.TokenIat.Time, got.TokenExp.Time)
 	require.NoError(t, err)
 
 	assert.Equal(t, t1, rebuilt)
 	assert.Equal(t, got.TokenHash, sha(rebuilt))
+}
+
+// The grace window is judged by the database's clock, the one that stamped
+// rotated_at.
+func TestSessions_GraceIsJudgedByTheDatabaseClock(t *testing.T) {
+	ctx, pool, q := freshSessionDB(t)
+	s := sessionSigner(t)
+	u := seedUser(t, ctx, pool, "graceclock")
+	t0, sid := openSession(t, ctx, q, s, u.id)
+
+	fresh, err := q.GetUserSession(ctx, 30, sid, u.id)
+	require.NoError(t, err)
+	assert.False(t, fresh.WithinGrace, "a session never rotated has no grace window")
+
+	_, err = rotate(ctx, q, s, u.id, sid, t0)
+	require.NoError(t, err)
+	rotated, err := q.GetUserSession(ctx, 30, sid, u.id)
+	require.NoError(t, err)
+	assert.True(t, rotated.WithinGrace, "just rotated")
+
+	_, err = pool.Exec(ctx, `UPDATE user_sessions SET rotated_at = now() - interval '31 seconds' WHERE id = $1`, sid)
+	require.NoError(t, err)
+	stale, err := q.GetUserSession(ctx, 30, sid, u.id)
+	require.NoError(t, err)
+	assert.False(t, stale.WithinGrace, "31 s after the rotation")
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +375,68 @@ func assertCheckViolation(t *testing.T, err error, constraint string) {
 }
 
 // ---------------------------------------------------------------------------
+// Opening a session against a password change
+// ---------------------------------------------------------------------------
+
+func TestSessions_StartRefusesAPasswordThatChanged(t *testing.T) {
+	ctx, pool, _ := freshSessionDB(t)
+	s := sessionSigner(t)
+	store := auth.NewStore(pool)
+	u := seedUser(t, ctx, pool, "changedpw")
+	issued, err := s.SignRefresh(u.id, uuid.New())
+	require.NoError(t, err)
+	arg := dbgen.CreateUserSessionParams{
+		ID: uuid.New(), UserID: u.id, TokenHash: sha(issued.Token),
+		TokenJti: issued.JTI, TokenIat: tsz(issued.IssuedAt), TokenExp: tsz(issued.ExpiresAt),
+	}
+
+	err = store.StartUserSession(ctx, newPassword, arg) // the row holds seedPassword
+
+	assert.ErrorIs(t, err, auth.ErrPasswordChanged)
+	assert.Zero(t, sessionCount(t, ctx, pool, u.id))
+	require.NoError(t, store.StartUserSession(ctx, seedPassword, arg))
+	assert.Equal(t, 1, sessionCount(t, ctx, pool, u.id))
+}
+
+// A login that checked the old password while a reset was committing must
+// not leave a session behind: the reset's trigger has already run, so
+// nothing would ever end it.  The reset is held open by hand and the login
+// is confirmed waiting on the users row before the reset commits, so this is
+// the race every time.
+func TestSessions_LoginRacingAPasswordResetIsRefused(t *testing.T) {
+	ctx, pool, q := freshSessionDB(t)
+	signer := sessionSigner(t)
+	h := auth.NewHandlers(auth.NewStore(pool), signer, nil, "http://localhost:3000", 15*time.Minute, 30*24*time.Hour, false)
+	oldHash, err := jwtx.HashPassword("correct-horse")
+	require.NoError(t, err)
+	user, err := q.CreateUser(ctx, "resetrace2", "resetrace2@example.com", oldHash)
+	require.NoError(t, err)
+
+	reset, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reset.Rollback(context.Background()) })
+	require.NoError(t, dbgen.New(reset).ResetUserPassword(ctx, user.ID, newPassword))
+
+	done := make(chan int, 1)
+	go func() {
+		body := bytes.NewBufferString(`{"email":"resetrace2@example.com","password":"correct-horse"}`)
+		rec := httptest.NewRecorder()
+		h.Login(rec, httptest.NewRequest(http.MethodPost, "/api/auth/login", body))
+		done <- rec.Code
+	}()
+	waitForLockWait(t, ctx, pool)
+	require.NoError(t, reset.Commit(ctx))
+
+	select {
+	case code := <-done:
+		assert.Equal(t, http.StatusUnauthorized, code, "a login with the password the reset just replaced")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the login never returned")
+	}
+	assert.Zero(t, sessionCount(t, ctx, pool, user.ID), "a session outlived the password reset")
+}
+
+// ---------------------------------------------------------------------------
 // Prune
 // ---------------------------------------------------------------------------
 
@@ -382,7 +469,7 @@ func TestSessions_PruneKeepsNewSessionAndMostRecentlyUsed(t *testing.T) {
 	assert.Equal(t, int64(20), remaining)
 	assert.Equal(t, 20, sessionCount(t, ctx, pool, u.id))
 	exists := func(id uuid.UUID) bool {
-		_, err := q.GetUserSession(ctx, id, u.id)
+		_, err := q.GetUserSession(ctx, 30, id, u.id)
 		return err == nil
 	}
 	assert.True(t, exists(keep), "the session just created was pruned")
@@ -470,7 +557,7 @@ func TestSessions_AdoptionMovesTheTokenOffTheUsersRow(t *testing.T) {
 	require.NoError(t, err)
 	assertSessionCleared(t, user, "adoption")
 	h := sha(legacyToken)
-	adopted, err := q.GetUserSessionByLegacyHash(ctx, u.id, &h)
+	adopted, err := q.GetUserSessionByLegacyHash(ctx, 30, u.id, &h)
 	require.NoError(t, err)
 	assert.Equal(t, p.Session.ID, adopted.ID)
 	assert.Equal(t, sha(next), adopted.TokenHash)
@@ -560,7 +647,7 @@ func TestSessions_ConcurrentAdoptionYieldsOneSession(t *testing.T) {
 	}
 	assert.Equal(t, 1, sessionCount(t, ctx, pool, u.id))
 	h := sha(legacyToken)
-	adopted, err := q.GetUserSessionByLegacyHash(ctx, u.id, &h)
+	adopted, err := q.GetUserSessionByLegacyHash(ctx, 30, u.id, &h)
 	require.NoError(t, err)
 	assert.Equal(t, first.Session.ID, adopted.ID, "the session is the first adopter's")
 }
@@ -578,7 +665,7 @@ func waitForLockWait(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("the second adoption never blocked on the users row")
+	t.Fatal("nothing blocked on the users row lock")
 }
 
 // Logout with an old cookie also ends the session a racing refresh adopted

@@ -13,7 +13,6 @@ import (
 )
 
 const createUserSession = `-- name: CreateUserSession :exec
-
 INSERT INTO user_sessions (
     id, user_id, token_hash, token_jti, token_iat, token_exp, expires_at
 ) VALUES (
@@ -31,15 +30,9 @@ type CreateUserSessionParams struct {
 	TokenExp  pgtype.Timestamptz `json:"tokenExp"`
 }
 
-// user_sessions: one refresh session per device (migration 0052).
-//
-// Every hash here is the sha256 hex digest of a refresh token
-// (auth.hashToken); no statement ever sees a raw token.  Every statement that
-// acts on a presented token is scoped by (id, user_id) from the token's own
-// claims AND by its hash, so a token can only ever touch the one row it was
-// issued for.
 // Login and register: a new row for the new device.  Never touches the
-// user's other rows — that is the whole fix.
+// user's other rows — that is the whole fix.  Runs after
+// LockUserForNewSession, in its transaction.
 func (q *Queries) CreateUserSession(ctx context.Context, arg CreateUserSessionParams) error {
 	_, err := q.db.Exec(ctx, createUserSession,
 		arg.ID,
@@ -107,11 +100,12 @@ const getUserSession = `-- name: GetUserSession :one
 SELECT
     s.id, s.user_id, s.token_hash, s.previous_hash, s.rotated_at,
     s.token_jti, s.token_iat, s.token_exp,
-    u.username, u.role
+    u.username, u.role,
+    COALESCE(s.rotated_at > now() - $1::int * interval '1 second', false)::boolean AS within_grace
 FROM user_sessions AS s
 JOIN users AS u ON u.id = s.user_id
-WHERE s.id = $1
-  AND s.user_id = $2
+WHERE s.id = $2
+  AND s.user_id = $3
 `
 
 type GetUserSessionRow struct {
@@ -125,11 +119,16 @@ type GetUserSessionRow struct {
 	TokenExp     pgtype.Timestamptz `json:"tokenExp"`
 	Username     string             `json:"username"`
 	Role         *string            `json:"role"`
+	WithinGrace  bool               `json:"withinGrace"`
 }
 
 // The re-read after a missed rotation: decides grace, reuse or gone.
-func (q *Queries) GetUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID) (GetUserSessionRow, error) {
-	row := q.db.QueryRow(ctx, getUserSession, iD, userID)
+//
+// within_grace is judged here, by the clock that stamped rotated_at, rather
+// than by the application's: a database on another host with a clock 30 s
+// behind would otherwise turn every lost race into a revoked session.
+func (q *Queries) GetUserSession(ctx context.Context, graceSeconds int32, iD uuid.UUID, userID uuid.UUID) (GetUserSessionRow, error) {
+	row := q.db.QueryRow(ctx, getUserSession, graceSeconds, iD, userID)
 	var i GetUserSessionRow
 	err := row.Scan(
 		&i.ID,
@@ -142,6 +141,7 @@ func (q *Queries) GetUserSession(ctx context.Context, iD uuid.UUID, userID uuid.
 		&i.TokenExp,
 		&i.Username,
 		&i.Role,
+		&i.WithinGrace,
 	)
 	return i, err
 }
@@ -150,11 +150,12 @@ const getUserSessionByLegacyHash = `-- name: GetUserSessionByLegacyHash :one
 SELECT
     s.id, s.user_id, s.token_hash, s.previous_hash, s.rotated_at,
     s.token_jti, s.token_iat, s.token_exp,
-    u.username, u.role
+    u.username, u.role,
+    COALESCE(s.rotated_at > now() - $1::int * interval '1 second', false)::boolean AS within_grace
 FROM user_sessions AS s
 JOIN users AS u ON u.id = s.user_id
-WHERE s.user_id = $1
-  AND s.legacy_hash = $2
+WHERE s.user_id = $2
+  AND s.legacy_hash = $3
 `
 
 type GetUserSessionByLegacyHashRow struct {
@@ -168,12 +169,13 @@ type GetUserSessionByLegacyHashRow struct {
 	TokenExp     pgtype.Timestamptz `json:"tokenExp"`
 	Username     string             `json:"username"`
 	Role         *string            `json:"role"`
+	WithinGrace  bool               `json:"withinGrace"`
 }
 
 // The same re-read for a pre-0052 token (no sid): the session it was adopted
-// into, if any.
-func (q *Queries) GetUserSessionByLegacyHash(ctx context.Context, userID uuid.UUID, legacyHash *string) (GetUserSessionByLegacyHashRow, error) {
-	row := q.db.QueryRow(ctx, getUserSessionByLegacyHash, userID, legacyHash)
+// into, if any.  Same columns as GetUserSession, so the two rows convert.
+func (q *Queries) GetUserSessionByLegacyHash(ctx context.Context, graceSeconds int32, userID uuid.UUID, legacyHash *string) (GetUserSessionByLegacyHashRow, error) {
+	row := q.db.QueryRow(ctx, getUserSessionByLegacyHash, graceSeconds, userID, legacyHash)
 	var i GetUserSessionByLegacyHashRow
 	err := row.Scan(
 		&i.ID,
@@ -186,6 +188,7 @@ func (q *Queries) GetUserSessionByLegacyHash(ctx context.Context, userID uuid.UU
 		&i.TokenExp,
 		&i.Username,
 		&i.Role,
+		&i.WithinGrace,
 	)
 	return i, err
 }
@@ -233,6 +236,43 @@ func (q *Queries) InsertAdoptedSession(ctx context.Context, arg InsertAdoptedSes
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const lockUserForNewSession = `-- name: LockUserForNewSession :one
+
+SELECT id
+FROM users
+WHERE id = $1
+  AND password = $2
+FOR SHARE
+`
+
+// user_sessions: one refresh session per device (migration 0052).
+//
+// Every hash here is the sha256 hex digest of a refresh token
+// (auth.hashToken); no statement ever sees a raw token.  Every statement that
+// acts on a presented token is scoped by (id, user_id) from the token's own
+// claims AND by its hash, so a token can only ever touch the one row it was
+// issued for.
+// First half of opening a session (auth.Store.StartUserSession, with
+// CreateUserSession in the same transaction): holds the users row FOR SHARE,
+// and only while its password is still the hash the login just verified.
+//
+// Without it a login racing a password change slips past the
+// users_password_ends_sessions trigger: the login reads the old hash and
+// checks it, the reset commits and its trigger deletes the user's sessions,
+// and only then does the login insert one — a session opened with a password
+// that no longer works, which nothing would ever end.  FOR SHARE conflicts
+// with the reset's row lock (FOR NO KEY UPDATE), so the two serialise: either
+// the reset waits and its trigger then sees, and deletes, this session, or
+// this waits, re-reads the row, finds the password changed and returns no
+// row (the login is refused).  FOR KEY SHARE would not conflict, and the
+// password predicate without a lock would serialise nothing.
+func (q *Queries) LockUserForNewSession(ctx context.Context, iD uuid.UUID, verifiedPassword string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockUserForNewSession, iD, verifiedPassword)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const pruneUserSessions = `-- name: PruneUserSessions :one

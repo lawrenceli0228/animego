@@ -6,9 +6,31 @@
 -- claims AND by its hash, so a token can only ever touch the one row it was
 -- issued for.
 
+-- name: LockUserForNewSession :one
+-- First half of opening a session (auth.Store.StartUserSession, with
+-- CreateUserSession in the same transaction): holds the users row FOR SHARE,
+-- and only while its password is still the hash the login just verified.
+--
+-- Without it a login racing a password change slips past the
+-- users_password_ends_sessions trigger: the login reads the old hash and
+-- checks it, the reset commits and its trigger deletes the user's sessions,
+-- and only then does the login insert one — a session opened with a password
+-- that no longer works, which nothing would ever end.  FOR SHARE conflicts
+-- with the reset's row lock (FOR NO KEY UPDATE), so the two serialise: either
+-- the reset waits and its trigger then sees, and deletes, this session, or
+-- this waits, re-reads the row, finds the password changed and returns no
+-- row (the login is refused).  FOR KEY SHARE would not conflict, and the
+-- password predicate without a lock would serialise nothing.
+SELECT id
+FROM users
+WHERE id = sqlc.arg(id)
+  AND password = sqlc.arg(verified_password)
+FOR SHARE;
+
 -- name: CreateUserSession :exec
 -- Login and register: a new row for the new device.  Never touches the
--- user's other rows — that is the whole fix.
+-- user's other rows — that is the whole fix.  Runs after
+-- LockUserForNewSession, in its transaction.
 INSERT INTO user_sessions (
     id, user_id, token_hash, token_jti, token_iat, token_exp, expires_at
 ) VALUES (
@@ -80,10 +102,15 @@ RETURNING u.username, u.role;
 
 -- name: GetUserSession :one
 -- The re-read after a missed rotation: decides grace, reuse or gone.
+--
+-- within_grace is judged here, by the clock that stamped rotated_at, rather
+-- than by the application's: a database on another host with a clock 30 s
+-- behind would otherwise turn every lost race into a revoked session.
 SELECT
     s.id, s.user_id, s.token_hash, s.previous_hash, s.rotated_at,
     s.token_jti, s.token_iat, s.token_exp,
-    u.username, u.role
+    u.username, u.role,
+    COALESCE(s.rotated_at > now() - sqlc.arg(grace_seconds)::int * interval '1 second', false)::boolean AS within_grace
 FROM user_sessions AS s
 JOIN users AS u ON u.id = s.user_id
 WHERE s.id = sqlc.arg(id)
@@ -91,11 +118,12 @@ WHERE s.id = sqlc.arg(id)
 
 -- name: GetUserSessionByLegacyHash :one
 -- The same re-read for a pre-0052 token (no sid): the session it was adopted
--- into, if any.
+-- into, if any.  Same columns as GetUserSession, so the two rows convert.
 SELECT
     s.id, s.user_id, s.token_hash, s.previous_hash, s.rotated_at,
     s.token_jti, s.token_iat, s.token_exp,
-    u.username, u.role
+    u.username, u.role,
+    COALESCE(s.rotated_at > now() - sqlc.arg(grace_seconds)::int * interval '1 second', false)::boolean AS within_grace
 FROM user_sessions AS s
 JOIN users AS u ON u.id = s.user_id
 WHERE s.user_id = sqlc.arg(user_id)

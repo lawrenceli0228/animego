@@ -202,6 +202,29 @@ func TestLogin_SessionWriteFailure_500(t *testing.T) {
 	logs.assertOutcome(t, eventLogin, outcomeError, "ERROR")
 }
 
+// The password changed between the login checking it and the session being
+// written (a reset landing mid-login): refused like a wrong password, and no
+// session is left behind for a password that no longer works.
+func TestLogin_PasswordChangedMidLoginIsRefused(t *testing.T) {
+	t.Parallel()
+	db, user := loginDB(t)
+	db.model().passwords[user.ID] = "$2a$10$the-hash-after-the-reset"
+	h, _, logs := newSessionHandlers(t, db)
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com","password":"correct-horse"}`)
+	rec := httptest.NewRecorder()
+	h.Login(rec, httptest.NewRequest(http.MethodPost, "/api/auth/login", body))
+
+	assertError(t, rec, http.StatusUnauthorized, codeInvalidCredentials, msgInvalidCredentials)
+	if getSetCookie(rec, RefreshCookieName) != nil {
+		t.Error("refresh cookie set for a refused login")
+	}
+	if n := len(db.model().rows); n != 0 {
+		t.Errorf("%d sessions written for a refused login", n)
+	}
+	logs.assertOutcome(t, eventLogin, outcomePasswordChanged, "INFO")
+}
+
 func TestRegister_LogsSessionStart(t *testing.T) {
 	t.Parallel()
 	user := fixtureUser(t)

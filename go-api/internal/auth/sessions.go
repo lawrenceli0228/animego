@@ -27,7 +27,7 @@ package auth
 //	                  └─► resolveMiss
 //
 //	resolveMiss:
-//	  cookie is previous_hash and rotated < 30 s
+//	  cookie is previous_hash and rotated < 30 s (by the database's clock)
 //	     re-sign current from stored claims; sha256 == token_hash?
 //	        yes ► 200 + cookies ───────────────────────────── grace / legacy_grace
 //	        no  ► 200, access token only (warn) ──────────────────── grace_mismatch
@@ -71,10 +71,20 @@ const (
 	eventLogout   = "logout"
 )
 
+// refreshGraceSeconds is refreshGraceWindow as the database judges it
+// (GetUserSession's within_grace).
+const refreshGraceSeconds = int32(refreshGraceWindow / time.Second)
+
+// ErrPasswordChanged is StartUserSession's answer when the user's password
+// changed between the login checking it and the session being written.  The
+// login is refused as if the password were wrong, which by then it is.
+var ErrPasswordChanged = errors.New("auth: password changed while signing in")
+
 // The `outcome` field of an `auth: session` line.
 const (
 	outcomeStarted         = "started" // login / register opened a session
-	outcomeEnded           = "ended"   // logout; `deleted` says whether a row went
+	outcomePasswordChanged = "password_changed"
+	outcomeEnded           = "ended" // logout; `deleted` says whether a row went
 	outcomeRotated         = "rotated"
 	outcomeGrace           = "grace"
 	outcomeGraceMismatch   = "grace_mismatch"
@@ -106,6 +116,33 @@ type Store struct {
 // NewStore wraps a pool for NewHandlers.
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{Queries: dbgen.New(pool), pool: pool}
+}
+
+// StartUserSession writes a login's session while holding the users row
+// FOR SHARE, and only if the password is still verifiedPassword — the hash
+// the login just checked (LockUserForNewSession explains the race this
+// closes).  ErrPasswordChanged when it no longer is; nothing is written.
+func (s *Store) StartUserSession(ctx context.Context, verifiedPassword string, arg dbgen.CreateUserSessionParams) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("auth: begin session: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := dbgen.New(tx)
+	if _, err := q.LockUserForNewSession(ctx, arg.UserID, verifiedPassword); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrPasswordChanged
+		}
+		return fmt.Errorf("auth: lock user for session: %w", err)
+	}
+	if err := q.CreateUserSession(ctx, arg); err != nil {
+		return fmt.Errorf("auth: insert session: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("auth: commit session: %w", err)
+	}
+	return nil
 }
 
 // AdoptLegacySessionParams is a pre-0052 refresh token to adopt and the
@@ -150,7 +187,8 @@ func (s *Store) AdoptLegacySession(ctx context.Context, p AdoptLegacySessionPara
 // startSession opens a session for a device that has just proved the
 // password (Login, Register): a new row, and nothing else of the user's is
 // touched beyond pruning past maxSessionsPerUser.  Returns the access and
-// refresh tokens to set.
+// refresh tokens to set, or ErrPasswordChanged if user.Password — the hash
+// the caller verified — is no longer the account's.
 func (h *Handlers) startSession(ctx context.Context, user dbgen.User, event string) (string, string, error) {
 	sid := uuid.New()
 	issued, err := h.signer.SignRefresh(user.ID, sid)
@@ -162,14 +200,19 @@ func (h *Handlers) startSession(ctx context.Context, user dbgen.User, event stri
 		return "", "", fmt.Errorf("sign access: %w", err)
 	}
 
-	if err := h.db.CreateUserSession(ctx, dbgen.CreateUserSessionParams{
+	err = h.db.StartUserSession(ctx, user.Password, dbgen.CreateUserSessionParams{
 		ID:        sid,
 		UserID:    user.ID,
 		TokenHash: hashToken(issued.Token),
 		TokenJti:  issued.JTI,
 		TokenIat:  timestamptz(issued.IssuedAt),
 		TokenExp:  timestamptz(issued.ExpiresAt),
-	}); err != nil {
+	})
+	switch {
+	case errors.Is(err, ErrPasswordChanged):
+		h.logSession(ctx, event, outcomePasswordChanged, user.ID, sid)
+		return "", "", err
+	case err != nil:
 		h.logSession(ctx, event, outcomeError, user.ID, sid, "err", err)
 		return "", "", fmt.Errorf("persist session: %w", err)
 	}
@@ -216,7 +259,7 @@ func (h *Handlers) refreshSession(ctx context.Context, w http.ResponseWriter, cl
 
 	// The CAS matched nothing.  Re-read once: a concurrent refresh, a logout,
 	// a password change or expiry each look the same from here.
-	sess, err := h.db.GetUserSession(ctx, sid, uid)
+	sess, err := h.db.GetUserSession(ctx, refreshGraceSeconds, sid, uid)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		h.logSession(ctx, eventRefresh, outcomeNotFound, uid, sid)
@@ -261,7 +304,7 @@ func (h *Handlers) refreshLegacy(ctx context.Context, w http.ResponseWriter, uid
 		return
 	}
 
-	adopted, err := h.db.GetUserSessionByLegacyHash(ctx, uid, &legacyHash)
+	adopted, err := h.db.GetUserSessionByLegacyHash(ctx, refreshGraceSeconds, uid, &legacyHash)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		h.logSession(ctx, eventRefresh, outcomeLegacyUnmatched, uid, uuid.Nil)
@@ -300,12 +343,13 @@ func (h *Handlers) resolveMiss(ctx context.Context, w http.ResponseWriter, sess 
 
 // inGraceWindow: the presented token was this session's current one until a
 // rotation less than refreshGraceWindow ago — the losing side of two
-// near-simultaneous refreshes (RSC prefetch + navigation).
+// near-simultaneous refreshes (RSC prefetch + navigation).  The "less than"
+// is the database's verdict (WithinGrace), measured by the clock that
+// stamped rotated_at.
 func inGraceWindow(sess dbgen.GetUserSessionRow, presented string) bool {
 	return sess.PreviousHash != nil &&
 		*sess.PreviousHash == presented &&
-		sess.RotatedAt.Valid &&
-		time.Since(sess.RotatedAt.Time) < refreshGraceWindow
+		sess.WithinGrace
 }
 
 // serveGrace issues an access token and hands the client the session's

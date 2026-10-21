@@ -45,6 +45,9 @@ type sessionModel struct {
 	rows   map[uuid.UUID]*fakeSessionRow
 	users  map[uuid.UUID]dbgen.User // username/role for RETURNING and joins
 	legacy map[uuid.UUID]string     // users.refresh_token, pre-0052
+	// passwords is users.password where a test sets it; StartUserSession
+	// refuses a verified hash that differs (LockUserForNewSession).
+	passwords map[uuid.UUID]string
 
 	createErr, pruneErr, rotateErr, getErr, deleteErr, adoptErr error
 
@@ -60,9 +63,10 @@ type pruneCall struct {
 func (f *fakeAuthDB) model() *sessionModel {
 	if f.sess == nil {
 		f.sess = &sessionModel{
-			rows:   map[uuid.UUID]*fakeSessionRow{},
-			users:  map[uuid.UUID]dbgen.User{},
-			legacy: map[uuid.UUID]string{},
+			rows:      map[uuid.UUID]*fakeSessionRow{},
+			users:     map[uuid.UUID]dbgen.User{},
+			legacy:    map[uuid.UUID]string{},
+			passwords: map[uuid.UUID]string{},
 		}
 	}
 	return f.sess
@@ -75,13 +79,16 @@ func (m *sessionModel) userFields(uid uuid.UUID) (string, *string) {
 	return "tester", nil
 }
 
-func (f *fakeAuthDB) CreateUserSession(_ context.Context, arg dbgen.CreateUserSessionParams) error {
+func (f *fakeAuthDB) StartUserSession(_ context.Context, verifiedPassword string, arg dbgen.CreateUserSessionParams) error {
 	m := f.model()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.writes++
 	if m.createErr != nil {
 		return m.createErr
+	}
+	if current, ok := m.passwords[arg.UserID]; ok && current != verifiedPassword {
+		return ErrPasswordChanged
 	}
 	username, role := m.userFields(arg.UserID)
 	m.rows[arg.ID] = &fakeSessionRow{
@@ -153,7 +160,15 @@ func (f *fakeAuthDB) RotateUserSession(_ context.Context, arg dbgen.RotateUserSe
 	return dbgen.RotateUserSessionRow{Username: r.Username, Role: r.Role}, nil
 }
 
-func (f *fakeAuthDB) GetUserSession(_ context.Context, id, userID uuid.UUID) (dbgen.GetUserSessionRow, error) {
+// withGrace is the row as GetUserSession returns it: within_grace judged at
+// read time, as the SQL does.
+func (r *fakeSessionRow) withGrace(graceSeconds int32) dbgen.GetUserSessionRow {
+	out := r.GetUserSessionRow
+	out.WithinGrace = r.RotatedAt.Valid && time.Since(r.RotatedAt.Time) < time.Duration(graceSeconds)*time.Second
+	return out
+}
+
+func (f *fakeAuthDB) GetUserSession(_ context.Context, graceSeconds int32, id, userID uuid.UUID) (dbgen.GetUserSessionRow, error) {
 	m := f.model()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -164,10 +179,10 @@ func (f *fakeAuthDB) GetUserSession(_ context.Context, id, userID uuid.UUID) (db
 	if !ok || r.UserID != userID {
 		return dbgen.GetUserSessionRow{}, pgx.ErrNoRows
 	}
-	return r.GetUserSessionRow, nil
+	return r.withGrace(graceSeconds), nil
 }
 
-func (f *fakeAuthDB) GetUserSessionByLegacyHash(_ context.Context, userID uuid.UUID, legacyHash *string) (dbgen.GetUserSessionByLegacyHashRow, error) {
+func (f *fakeAuthDB) GetUserSessionByLegacyHash(_ context.Context, graceSeconds int32, userID uuid.UUID, legacyHash *string) (dbgen.GetUserSessionByLegacyHashRow, error) {
 	m := f.model()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -176,7 +191,7 @@ func (f *fakeAuthDB) GetUserSessionByLegacyHash(_ context.Context, userID uuid.U
 	}
 	for _, r := range m.rows {
 		if r.UserID == userID && r.LegacyHash != nil && legacyHash != nil && *r.LegacyHash == *legacyHash {
-			return dbgen.GetUserSessionByLegacyHashRow(r.GetUserSessionRow), nil
+			return dbgen.GetUserSessionByLegacyHashRow(r.withGrace(graceSeconds)), nil
 		}
 	}
 	return dbgen.GetUserSessionByLegacyHashRow{}, pgx.ErrNoRows
@@ -267,7 +282,7 @@ func seedSession(t *testing.T, db *fakeAuthDB, signer *jwtx.Signer, user dbgen.U
 	if err != nil {
 		t.Fatalf("SignRefresh: %v", err)
 	}
-	if err := db.CreateUserSession(context.Background(), dbgen.CreateUserSessionParams{
+	if err := db.StartUserSession(context.Background(), user.Password, dbgen.CreateUserSessionParams{
 		ID: sid, UserID: user.ID, TokenHash: hashToken(issued.Token),
 		TokenJti: issued.JTI, TokenIat: timestamptz(issued.IssuedAt), TokenExp: timestamptz(issued.ExpiresAt),
 	}); err != nil {

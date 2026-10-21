@@ -134,11 +134,15 @@ type AuthDB interface {
 	// PresentedHash being swapped would compile and make the CAS match
 	// nothing.  It is a params struct, so the names are at the call site, and
 	// test/integration/user_sessions_test.go asserts the row really rotates.
-	CreateUserSession(ctx context.Context, arg dbgen.CreateUserSessionParams) error
+	//
+	// StartUserSession inserts a login's session in a transaction that holds
+	// the users row and re-checks the password (Store implements it);
+	// ErrPasswordChanged when the password changed mid-login.
+	StartUserSession(ctx context.Context, verifiedPassword string, arg dbgen.CreateUserSessionParams) error
 	PruneUserSessions(ctx context.Context, userID uuid.UUID, keepID uuid.UUID, keepOthers int32) (int64, error)
 	RotateUserSession(ctx context.Context, arg dbgen.RotateUserSessionParams) (dbgen.RotateUserSessionRow, error)
-	GetUserSession(ctx context.Context, id uuid.UUID, userID uuid.UUID) (dbgen.GetUserSessionRow, error)
-	GetUserSessionByLegacyHash(ctx context.Context, userID uuid.UUID, legacyHash *string) (dbgen.GetUserSessionByLegacyHashRow, error)
+	GetUserSession(ctx context.Context, graceSeconds int32, id uuid.UUID, userID uuid.UUID) (dbgen.GetUserSessionRow, error)
+	GetUserSessionByLegacyHash(ctx context.Context, graceSeconds int32, userID uuid.UUID, legacyHash *string) (dbgen.GetUserSessionByLegacyHashRow, error)
 	DeleteUserSession(ctx context.Context, id uuid.UUID, userID uuid.UUID) (int64, error)
 	DeleteUserSessionIfHeld(ctx context.Context, id uuid.UUID, userID uuid.UUID, presentedHash string) (int64, error)
 	DeleteUserSessionByLegacyHash(ctx context.Context, userID uuid.UUID, legacyHash *string) (int64, error)
@@ -340,7 +344,7 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 
 	accessToken, refreshToken, err := h.startSession(ctx, user, eventRegister)
 	if err != nil {
-		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "start session failed"))
+		h.failStartSession(w, err)
 		return
 	}
 
@@ -397,7 +401,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 
 	accessToken, refreshToken, err := h.startSession(ctx, user, eventLogin)
 	if err != nil {
-		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "start session failed"))
+		h.failStartSession(w, err)
 		return
 	}
 
@@ -414,6 +418,17 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.Data(w, http.StatusOK, AuthData{AccessToken: accessToken, User: ToSafeUser(user)})
+}
+
+// failStartSession answers a login or register whose session could not be
+// opened.  A password changed mid-login is answered like a wrong password —
+// by the time the session would have been written, it was one.
+func (h *Handlers) failStartSession(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrPasswordChanged) {
+		httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidCredentials, msgInvalidCredentials))
+		return
+	}
+	httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "start session failed"))
 }
 
 // Refresh implements POST /api/auth/refresh.
