@@ -484,6 +484,52 @@ SELECT
 FROM anime_cache
 WHERE anilist_id = ANY($1::int[]);
 
+-- name: ListScheduleFallbackRows :many
+-- The catalogue's own answer to "what airs this week", for /schedule when
+-- AniList cannot be asked.  One row per title with a stated next episode
+-- that is either inside the window or stale by at most a few weeks: the
+-- caller steps a stale airing forward a week at a time, because the row is
+-- only as fresh as its last refresh and a refresh is exactly what an AniList
+-- outage stops.  A finished title has next_airing_at NULL (the upsert writes
+-- it plainly), so it never appears.
+--
+-- Same adult and Hentai exclusions as the seasonal listing; the AniList path
+-- drops isAdult items too.
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
+    cover_image_url,
+    cover_image_color,
+    format,
+    average_score,
+    episodes,
+    next_airing_at::timestamptz AS next_airing_at,
+    next_airing_episode::int AS next_airing_episode,
+    ARRAY(
+        SELECT g.genre
+        FROM anime_genres g
+        WHERE g.anime_id = anime_cache.anilist_id
+        ORDER BY g.genre
+    )::text[] AS genres
+FROM anime_cache
+WHERE
+    next_airing_at IS NOT NULL
+    AND next_airing_at >= sqlc.arg(stale_floor)::timestamptz
+    AND next_airing_at < sqlc.arg(week_end)::timestamptz
+    AND NOT is_adult
+    AND NOT EXISTS (
+        SELECT 1 FROM anime_genres
+        WHERE anime_genres.anime_id = anime_cache.anilist_id
+          AND anime_genres.genre = 'Hentai'
+    )
+ORDER BY next_airing_at, anilist_id;
+
 -- name: ListAnimeForHantBackfill :many
 -- Whole-table read for cmd/hantbackfill.  Every row, every run.
 --

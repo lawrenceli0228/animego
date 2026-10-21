@@ -3792,6 +3792,109 @@ func (q *Queries) ListReleasingEpisodeTitleCandidates(ctx context.Context, stale
 	return items, nil
 }
 
+const listScheduleFallbackRows = `-- name: ListScheduleFallbackRows :many
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
+    cover_image_url,
+    cover_image_color,
+    format,
+    average_score,
+    episodes,
+    next_airing_at::timestamptz AS next_airing_at,
+    next_airing_episode::int AS next_airing_episode,
+    ARRAY(
+        SELECT g.genre
+        FROM anime_genres g
+        WHERE g.anime_id = anime_cache.anilist_id
+        ORDER BY g.genre
+    )::text[] AS genres
+FROM anime_cache
+WHERE
+    next_airing_at IS NOT NULL
+    AND next_airing_at >= $1::timestamptz
+    AND next_airing_at < $2::timestamptz
+    AND NOT is_adult
+    AND NOT EXISTS (
+        SELECT 1 FROM anime_genres
+        WHERE anime_genres.anime_id = anime_cache.anilist_id
+          AND anime_genres.genre = 'Hentai'
+    )
+ORDER BY next_airing_at, anilist_id
+`
+
+type ListScheduleFallbackRowsRow struct {
+	AnilistID         int32              `json:"anilistId"`
+	TitleRomaji       *string            `json:"titleRomaji"`
+	TitleEnglish      *string            `json:"titleEnglish"`
+	TitleNative       *string            `json:"titleNative"`
+	TitleChinese      *string            `json:"titleChinese"`
+	TitleHant         *string            `json:"titleHant"`
+	TitleHantSource   *string            `json:"titleHantSource"`
+	TitleHantSeo      *string            `json:"titleHantSeo"`
+	CoverImageUrl     *string            `json:"coverImageUrl"`
+	CoverImageColor   *string            `json:"coverImageColor"`
+	Format            *string            `json:"format"`
+	AverageScore      *float64           `json:"averageScore"`
+	Episodes          *int32             `json:"episodes"`
+	NextAiringAt      pgtype.Timestamptz `json:"nextAiringAt"`
+	NextAiringEpisode int32              `json:"nextAiringEpisode"`
+	Genres            []string           `json:"genres"`
+}
+
+// The catalogue's own answer to "what airs this week", for /schedule when
+// AniList cannot be asked.  One row per title with a stated next episode
+// that is either inside the window or stale by at most a few weeks: the
+// caller steps a stale airing forward a week at a time, because the row is
+// only as fresh as its last refresh and a refresh is exactly what an AniList
+// outage stops.  A finished title has next_airing_at NULL (the upsert writes
+// it plainly), so it never appears.
+//
+// Same adult and Hentai exclusions as the seasonal listing; the AniList path
+// drops isAdult items too.
+func (q *Queries) ListScheduleFallbackRows(ctx context.Context, staleFloor pgtype.Timestamptz, weekEnd pgtype.Timestamptz) ([]ListScheduleFallbackRowsRow, error) {
+	rows, err := q.db.Query(ctx, listScheduleFallbackRows, staleFloor, weekEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScheduleFallbackRowsRow{}
+	for rows.Next() {
+		var i ListScheduleFallbackRowsRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleRomaji,
+			&i.TitleEnglish,
+			&i.TitleNative,
+			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
+			&i.CoverImageUrl,
+			&i.CoverImageColor,
+			&i.Format,
+			&i.AverageScore,
+			&i.Episodes,
+			&i.NextAiringAt,
+			&i.NextAiringEpisode,
+			&i.Genres,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSeasonCounts = `-- name: ListSeasonCounts :many
 SELECT season, season_year, count(*)::bigint AS n
 FROM anime_cache
