@@ -108,15 +108,98 @@ func TestSignAccess_Role_NonNil_PresentInJSON(t *testing.T) {
 
 func TestSignRefresh_HappyPath(t *testing.T) {
 	s := newTestSigner(t)
-	userID := uuid.New()
+	userID, sid := uuid.New(), uuid.New()
 
-	tok, err := s.SignRefresh(userID)
+	issued, err := s.SignRefresh(userID, sid)
+	require.NoError(t, err)
+
+	claims, err := s.VerifyRefresh(issued.Token)
+	require.NoError(t, err)
+	assert.Equal(t, userID, claims.UserID)
+	assert.Equal(t, sid, claims.SessionID)
+	assert.Equal(t, issued.JTI.String(), claims.ID)
+	require.NotNil(t, claims.ExpiresAt)
+	assert.True(t, issued.ExpiresAt.Equal(claims.ExpiresAt.Time), "IssuedRefresh.ExpiresAt is the token's exp")
+	assert.True(t, issued.IssuedAt.Equal(claims.IssuedAt.Time), "IssuedRefresh.IssuedAt is the token's iat")
+	assert.Zero(t, issued.IssuedAt.Nanosecond(), "stored times carry the token's one-second precision")
+}
+
+// Two logins in the same second used to sign byte-identical refresh tokens
+// (claims were only userId/iat/exp), so per-device rows keyed by token hash
+// could not tell the two devices apart.  The jti makes every token distinct.
+func TestSignRefresh_SameSecondTokensDiffer(t *testing.T) {
+	s := newTestSigner(t)
+	userID, sid := uuid.New(), uuid.New()
+
+	a, err := s.SignRefresh(userID, sid)
+	require.NoError(t, err)
+	b, err := s.SignRefresh(userID, sid)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, a.Token, b.Token)
+	assert.NotEqual(t, a.JTI, b.JTI)
+}
+
+func TestSignRefresh_NilSession_Refused(t *testing.T) {
+	s := newTestSigner(t)
+
+	_, err := s.SignRefresh(uuid.New(), uuid.Nil)
+
+	assert.ErrorIs(t, err, ErrNoSession)
+}
+
+// The grace window re-sends a session's current token without that token
+// being stored: it is rebuilt from the stored claims.  That only works if
+// signing is byte-for-byte reproducible.
+func TestResignRefresh_ReproducesTheToken(t *testing.T) {
+	s := newTestSigner(t)
+	userID, sid := uuid.New(), uuid.New()
+	issued, err := s.SignRefresh(userID, sid)
+	require.NoError(t, err)
+
+	// Round-trip the times the way Postgres would hand them back: same
+	// instant, different location, no monotonic reading.
+	iat := issued.IssuedAt.In(time.FixedZone("UTC+8", 8*3600)).Round(0)
+	exp := issued.ExpiresAt.UTC()
+	again, err := s.ResignRefresh(userID, sid, issued.JTI, iat, exp)
+	require.NoError(t, err)
+
+	assert.Equal(t, issued.Token, again)
+}
+
+func TestResignRefresh_DifferentJTIDiffers(t *testing.T) {
+	s := newTestSigner(t)
+	userID, sid := uuid.New(), uuid.New()
+	issued, err := s.SignRefresh(userID, sid)
+	require.NoError(t, err)
+
+	other, err := s.ResignRefresh(userID, sid, uuid.New(), issued.IssuedAt, issued.ExpiresAt)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, issued.Token, other)
+}
+
+// A refresh token minted before per-device sessions has no sid and no jti.
+// It must still verify, and read as SessionID == uuid.Nil so the handler
+// takes the legacy path.
+func TestVerifyRefresh_LegacyTokenHasNilSession(t *testing.T) {
+	s := newTestSigner(t)
+	userID := uuid.New()
+	now := time.Now()
+	legacy := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"userId": userID.String(),
+		"iat":    now.Unix(),
+		"exp":    now.Add(time.Hour).Unix(),
+	})
+	tok, err := legacy.SignedString([]byte(testRefreshSecret))
 	require.NoError(t, err)
 
 	claims, err := s.VerifyRefresh(tok)
 	require.NoError(t, err)
+
 	assert.Equal(t, userID, claims.UserID)
-	require.NotNil(t, claims.ExpiresAt)
+	assert.Equal(t, uuid.Nil, claims.SessionID)
+	assert.Empty(t, claims.ID)
 }
 
 func TestVerifyAccess_Expired_Returns_ErrTokenExpired(t *testing.T) {
@@ -229,9 +312,9 @@ func TestSignRefresh_CrossSecret_Rejected(t *testing.T) {
 	// A refresh token signed with the refresh secret must NOT verify
 	// against the access secret (distinct secrets is the whole point).
 	s := newTestSigner(t)
-	refreshTok, err := s.SignRefresh(uuid.New())
+	refreshTok, err := s.SignRefresh(uuid.New(), uuid.New())
 	require.NoError(t, err)
 
-	_, err = s.VerifyAccess(refreshTok)
+	_, err = s.VerifyAccess(refreshTok.Token)
 	require.Error(t, err, "refresh token must not verify as access")
 }

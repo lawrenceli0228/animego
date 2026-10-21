@@ -962,3 +962,59 @@
 **Context** — `next.config.ts` 的 `deviceSizes` 是 640/828/1080/1200/1920，横幅是 `sizes="100vw"`，浏览器按屏宽和倍率挑一个。
 
 **Depends on / blocked by** — 第一期上线后，用访问日志统计横幅各宽度的请求占比；828 占比明显再做。
+
+## 多设备会话上线满 14 天后，删掉 users 上的旧会话列和过渡代码
+
+**What** — 删 `users.refresh_token` / `previous_refresh_token` / `refresh_rotated_at` 三列，以及只为它们存在的过渡代码：旧格式 refresh token（不带 `sid`）的认领事务、认领后的宽限与重用判断、旧式登出分支、`user_sessions.legacy_hash` 列、`ClearRefreshTokenIfMatches` 查询、`internal/db/session_columns_test.go` 扫描测试，以及 `test/integration/user_session_columns_test.go` 里剩下的旧列测试。
+
+**Why** — 多设备会话上线前签发的 refresh token 有效期是 14 天，过期后这些代码和列不会再被任何请求走到；留着的话，读代码的人要同时理解两套会话机制，`users` 表里也一直留着旧的 token 原文。
+
+**Pros** — 会话逻辑只剩 `user_sessions` 一套；删掉一个文本扫描测试和一组只守旧列的集成测试。
+
+**Cons** — 一次 drop column 迁移；之后再回滚到多设备会话之前的版本，所有人都要重新登录（上线时已经接受）。
+
+**Context** — 上线前签发的旧 token 不带 `sid`，第一次刷新时会被认领成一条会话，同时清空 `users` 上的三列。
+
+**Depends on / blocked by** — 多设备会话部署满 14 天，留几天余量后再做。
+
+## 设备管理：列出已登录的设备，一键登出其他设备
+
+**What** — 在设置页列出当前账号在哪些设备 / 浏览器上登录着（登录时间、最近使用时间），并提供「登出其他设备」。后端是两条接口：列出自己的会话，和删除除当前会话外的全部会话（`DELETE FROM user_sessions WHERE user_id = $1 AND id <> $2`）。
+
+**Why** — 多设备会话上线后，每次登录都是独立的一行，在一台设备上重新登录不再结束其他设备的会话。用户想结束其他设备上的登录，目前只能走「忘记密码」。
+
+**Pros** — 用户能自己管理登录设备，不用为了退出其他设备去重置密码。
+
+**Cons** — 是界面改动，要先出画布、通过后才写代码；列表里怎么描述设备（是否记录 User-Agent）需要另外定。
+
+**Context** — `user_sessions` 已经有 `created_at` / `last_used_at`；当前会话由 refresh token 里的 `sid` 标识。
+
+**Depends on / blocked by** — 多设备会话上线；画布通过。
+
+## 定时清理过期的会话行
+
+**What** — 加一个定时任务，删除 `user_sessions` 里 `expires_at` 已过的行。
+
+**Why** — 过期行目前只在该用户下次登录时被清掉；再也不回来的用户，过期行会一直留在表里。
+
+**Pros** — 表里只剩有效会话。
+
+**Cons** — 以现在的规模不值得：每个用户最多 20 行，而且除了清理本身没有查询读这些行。
+
+**Context** — 登录时的清理在多设备会话的会话代码里（每人保留最近使用的 20 条并删掉已过期的）。
+
+**Depends on / blocked by** — 用户量大幅增长、`user_sessions` 行数明显变多时再做。
+
+## 会话失效时告诉用户为什么被登出
+
+**What** — 一台设备的会话因为 30 天没用而过期、因 token 重用被吊销、同一账号超过 20 台设备被挤掉、或者改了密码时，下次打开页面给用户一句说明（例如「登录已过期，请重新登录」），而不是悄悄变成未登录。
+
+**Why** — 用户被合理登出时，现在只会看到自己突然变成未登录，很容易以为又是「被顶号」。
+
+**Pros** — 被登出的人知道原因，少一类「又被踢了」的误会。
+
+**Cons** — 是界面改动，要先出画布；后端要把失效原因带给前端（目前 refresh 失败统一返回 401 INVALID_TOKEN）。
+
+**Context** — 多设备会话上线后，go-api 每次刷新都会记一行带结果类型的会话日志（rotated / grace / reuse_revoked / not_found / legacy_unmatched 等），可以据此统计这类登出到底有多常见。
+
+**Depends on / blocked by** — 多设备会话上线；会话日志显示这类结果不罕见时再做；画布通过。

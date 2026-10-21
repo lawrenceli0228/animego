@@ -416,7 +416,9 @@ func main() {
 		}
 	}
 
-	authHandlers := auth.NewHandlers(q, signer, emailSender, cfg.ClientOrigin, cfg.JWTExpiresIn, cfg.JWTRefreshExpiresIn, isProd)
+	// auth.NewStore rather than q: adopting a pre-0052 refresh token into a
+	// per-device session is a two-statement transaction, so it needs the pool.
+	authHandlers := auth.NewHandlers(auth.NewStore(pool), signer, emailSender, cfg.ClientOrigin, cfg.JWTExpiresIn, cfg.JWTRefreshExpiresIn, isProd)
 	avatarDir := os.Getenv("AVATAR_DIR")
 	if avatarDir == "" {
 		avatarDir = "/data/avatars"

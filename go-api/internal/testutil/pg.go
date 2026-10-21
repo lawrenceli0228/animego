@@ -42,6 +42,9 @@ import (
 var allTables = []string{
 	// Application tables (migrations 0001).
 	"users",
+	// Per-device refresh sessions (migration 0052).  CASCADE from users
+	// would reach it anyway; listed to keep the inventory true.
+	"user_sessions",
 	"anime_cache",
 	"anime_genres",
 	"anime_studios",
