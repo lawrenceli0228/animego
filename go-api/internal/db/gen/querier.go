@@ -2249,6 +2249,17 @@ type Querier interface {
 	ListReports(ctx context.Context, reportStatus *string, pageOffset int32, pageLimit int32) ([]ListReportsRow, error)
 	// The reviewed list, newest review first; the same columns as the queue.
 	ListReviewedEditSubmissions(ctx context.Context, kind *string, pageOffset int32, pageLimit int32) ([]ListReviewedEditSubmissionsRow, error)
+	// The catalogue's own answer to "what airs this week", for /schedule when
+	// AniList cannot be asked.  One row per title with a stated next episode
+	// that is either inside the window or stale by at most a few weeks: the
+	// caller steps a stale airing forward a week at a time, because the row is
+	// only as fresh as its last refresh and a refresh is exactly what an AniList
+	// outage stops.  A finished title has next_airing_at NULL (the upsert writes
+	// it plainly), so it never appears.
+	//
+	// Same adult and Hentai exclusions as the seasonal listing; the AniList path
+	// drops isAdult items too.
+	ListScheduleFallbackRows(ctx context.Context, staleFloor pgtype.Timestamptz, weekEnd pgtype.Timestamptz) ([]ListScheduleFallbackRowsRow, error)
 	// Every (season, year) pair with a non-adult title, for the sitemap: the
 	// seasonal route already renders all of them, it just never listed more
 	// than the current quarter.

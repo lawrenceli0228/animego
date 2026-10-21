@@ -65,6 +65,10 @@ type ScheduleService struct {
 	db       dbgen.Querier
 	enqueuer queue.Enqueuer
 
+	// lastGood is today's last AniList answer, kept past the cache TTL for
+	// fallbackSchedule (schedule_fallback.go).
+	lastGood lastGoodSchedule
+
 	// tzOverride is test-only — production uses time.Local.  Tests pin
 	// time.UTC so the local-date grouping logic is deterministic across
 	// CI machines in different timezones.
@@ -155,7 +159,9 @@ func NewScheduleService(client AniListScheduler, db dbgen.Querier, enq queue.Enq
 // queryTimeout used by simple DB-only endpoints because /schedule
 // paginates AniList) and writes the {data: {today, groups}} envelope.
 //
-// Upstream AniList failures map to 502 BAD_GATEWAY via httpx.WrapError.
+// When AniList fails, fetchSchedule answers from fallbackSchedule
+// (schedule_fallback.go); only when that has nothing either does an
+// upstream failure map to 502 BAD_GATEWAY via httpx.WrapError.
 // DB titleChinese failures degrade gracefully — the schedule still
 // returns 200 with titleChinese fields left nil, which the frontend
 // already handles for unenriched cache rows.
@@ -195,9 +201,9 @@ func (s *ScheduleService) Handler() http.HandlerFunc {
 	}
 }
 
-// fetchSchedule runs the cache → AniList pagination → group → DB
-// titleChinese pipeline.  Separated from the HTTP handler so tests can
-// exercise the business logic without spinning up httptest recorders.
+// fetchSchedule runs the cache → AniList → fallback pipeline.  Separated
+// from the HTTP handler so tests can exercise the business logic without
+// spinning up httptest recorders.
 func (s *ScheduleService) fetchSchedule(ctx context.Context) (*ScheduleResponse, error) {
 	tz := s.tz()
 	now := s.now().In(tz)
@@ -213,6 +219,38 @@ func (s *ScheduleService) fetchSchedule(ctx context.Context) (*ScheduleResponse,
 	if cached, ok := s.cache.Get(todayKey); ok {
 		return &cached, nil
 	}
+
+	result, err := s.fetchFromAniList(ctx, today, todayKey)
+	if err == nil {
+		s.cache.Set(todayKey, *result)
+		s.lastGood.set(result)
+		return result, nil
+	}
+
+	// AniList failed: answer from what we already know rather than blank
+	// the page.  The fallback is cached for a few minutes only, so the
+	// real week comes back soon after AniList does.
+	fallback, source, ok, fbErr := s.fallbackSchedule(ctx, today, todayKey)
+	if fbErr != nil {
+		slog.WarnContext(ctx, "anime/schedule: fallback failed", "err", fbErr)
+	}
+	if !ok {
+		return nil, err
+	}
+	slog.WarnContext(ctx, "anime/schedule: AniList unavailable; serving fallback",
+		"source", source,
+		"items", countScheduleItems(fallback.Groups),
+		"err", err,
+	)
+	s.cache.SetWithTTL(todayKey, *fallback, scheduleFallbackTTL)
+	return fallback, nil
+}
+
+// fetchFromAniList is the AniList pagination → group → DB titleChinese
+// pipeline for the week starting at today.  It writes no cache; the caller
+// decides what to keep.
+func (s *ScheduleService) fetchFromAniList(ctx context.Context, today time.Time, todayKey string) (*ScheduleResponse, error) {
+	tz := s.tz()
 
 	// Week window: [today_midnight, today_midnight + 7d) in Unix
 	// seconds.  AniList's airingAt_greater / airingAt_lesser are
@@ -319,9 +357,16 @@ func (s *ScheduleService) fetchSchedule(ctx context.Context) (*ScheduleResponse,
 		groups[key] = items
 	}
 
-	result := ScheduleResponse{Today: todayKey, Groups: groups}
-	s.cache.Set(todayKey, result)
-	return &result, nil
+	return &ScheduleResponse{Today: todayKey, Groups: groups}, nil
+}
+
+// countScheduleItems is the number of airings across all days.
+func countScheduleItems(groups map[string][]ScheduleItem) int {
+	n := 0
+	for _, items := range groups {
+		n += len(items)
+	}
+	return n
 }
 
 // tz returns the effective timezone — tzOverride if set (tests), else

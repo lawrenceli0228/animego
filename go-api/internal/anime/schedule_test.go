@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -53,6 +54,19 @@ type scheduleQuerier struct {
 
 	getTitleChineseFn func(ctx context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error)
 	calls             atomic.Int64
+
+	// fallbackRowsFn backs ListScheduleFallbackRows.  Nil means "the
+	// catalogue has nothing to say", which keeps AniList failures a 502.
+	fallbackRowsFn func(ctx context.Context, staleFloor, weekEnd pgtype.Timestamptz) ([]dbgen.ListScheduleFallbackRowsRow, error)
+	fallbackCalls  atomic.Int64
+}
+
+func (s *scheduleQuerier) ListScheduleFallbackRows(ctx context.Context, staleFloor, weekEnd pgtype.Timestamptz) ([]dbgen.ListScheduleFallbackRowsRow, error) {
+	s.fallbackCalls.Add(1)
+	if s.fallbackRowsFn == nil {
+		return nil, nil
+	}
+	return s.fallbackRowsFn(ctx, staleFloor, weekEnd)
 }
 
 func (s *scheduleQuerier) GetTitleChineseByAnilistIDs(ctx context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
