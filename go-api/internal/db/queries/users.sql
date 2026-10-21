@@ -92,6 +92,25 @@ WHERE id = sqlc.arg(id)
   AND refresh_token = sqlc.arg(presented_token)
 RETURNING username, role;
 
+-- name: ClearLegacyRefreshTokens :execrows
+-- "Sign out other devices" (auth.Store.RevokeOtherSessions), for the one
+-- session per account that can still live on this row: a refresh token
+-- issued before migration 0052 that no refresh has adopted yet.  It has no
+-- user_sessions row, so the device list cannot show it and deleting the
+-- user's other rows does not reach it; without this, a phone left in a
+-- drawer since before the deploy would survive "sign out everywhere else".
+--
+-- Clears all three columns, like every statement that ends a session here.
+-- The device asking cannot be holding this token: a sid in its own refresh
+-- cookie is what identified it.  Remove with the columns.
+UPDATE users
+SET refresh_token          = NULL,
+    previous_refresh_token = NULL,
+    refresh_rotated_at     = NULL,
+    updated_at             = now()
+WHERE id = sqlc.arg(id)
+  AND (refresh_token IS NOT NULL OR previous_refresh_token IS NOT NULL);
+
 -- name: ClearRefreshTokenIfMatches :execrows
 -- Since migration 0052 this ends only a pre-0052 session (a refresh token
 -- with no sid, still held on the users row); sessions issued since live in

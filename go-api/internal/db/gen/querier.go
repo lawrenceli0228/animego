@@ -302,6 +302,17 @@ type Querier interface {
 	// statement would test the pre-UPDATE values and delete rows that still hold
 	// another source's title.
 	ClearEpisodeTitlesBySourceOutside(ctx context.Context, source string, animeID int32, kept []int32) ([]int32, error)
+	// "Sign out other devices" (auth.Store.RevokeOtherSessions), for the one
+	// session per account that can still live on this row: a refresh token
+	// issued before migration 0052 that no refresh has adopted yet.  It has no
+	// user_sessions row, so the device list cannot show it and deleting the
+	// user's other rows does not reach it; without this, a phone left in a
+	// drawer since before the deploy would survive "sign out everywhere else".
+	//
+	// Clears all three columns, like every statement that ends a session here.
+	// The device asking cannot be holding this token: a sid in its own refresh
+	// cookie is what identified it.  Remove with the columns.
+	ClearLegacyRefreshTokens(ctx context.Context, id uuid.UUID) (int64, error)
 	// Since migration 0052 this ends only a pre-0052 session (a refresh token
 	// with no sid, still held on the users row); sessions issued since live in
 	// user_sessions and logout ends them with DeleteUserSessionIfHeld.  Remove it
@@ -536,6 +547,10 @@ type Querier interface {
 	// whether a row was deleted (matches Express's findOneAndDelete which
 	// returned 200 on either match-and-delete or no-match).
 	DeleteFollow(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (int64, error)
+	// "Sign out other devices": every session of the user but keep_id, the one
+	// the request came from.  Runs with ClearLegacyRefreshTokens in one
+	// transaction (auth.Store.RevokeOtherSessions).
+	DeleteOtherUserSessions(ctx context.Context, userID uuid.UUID, keepID uuid.UUID) (int64, error)
 	// DELETE /api/subscriptions/:anilistId.  Returns the affected row count
 	// so the handler can 404 when no row matched (matches Express's
 	// findOneAndDelete returning null → 404 "Subscription not found"); the
@@ -2376,6 +2391,10 @@ type Querier interface {
 	// memory.  Ordered by anilist_id ASC for deterministic batching.
 	ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error)
 	ListUserBlocks(ctx context.Context, blockerID uuid.UUID, limit int32, offset int32) ([]ListUserBlocksRow, error)
+	// The settings page's device list: the user's live sessions, most recently
+	// used first.  Which one is this browser is decided by the caller from the
+	// refresh cookie; the row does not know.
+	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]ListUserSessionsRow, error)
 	// Queries against the subscriptions table (P2.4).
 	//
 	// The subscriptions table has a (user_id, anilist_id) composite PK + FKs
@@ -2924,6 +2943,10 @@ type Querier interface {
 	// nothing (pgx.ErrNoRows) instead of writing a live token back.
 	//
 	// RETURNING username and role saves the access-token signer a read.
+	//
+	// The device columns (migration 0053) follow the latest request, so the
+	// device list shows where a session was last used from; a request that does
+	// not state one (no header, failed validation) keeps what the row has.
 	RotateUserSession(ctx context.Context, arg RotateUserSessionParams) (RotateUserSessionRow, error)
 	SaveEntityOverlay(ctx context.Context, data []byte, updatedBy *uuid.UUID, kind string, entityID int32) error
 	// Queries used by /api/dandanplay/* orchestration (P2.6).
