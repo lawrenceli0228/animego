@@ -12,7 +12,11 @@
 // Token claims:
 //
 //	Access:  { userId, username, role?, exp, iat }
-//	Refresh: { userId, exp, iat }
+//	Refresh: { userId, sid, exp, iat, jti }
+//
+// sid is the user_sessions row the refresh token belongs to (one per device,
+// migration 0052); jti is random per token.  Refresh tokens minted before
+// 0052 carry neither, and parse with SessionID == uuid.Nil.
 //
 // Role is OMITTED from the JSON payload when nil (Express:
 // `if (role) payload.role = role`).  We model it as *string so the
@@ -37,13 +41,36 @@ type AccessClaims struct {
 	jwt.RegisteredClaims
 }
 
-// RefreshClaims is the JWT payload for refresh tokens — userId only.
-// No username/role so a leaked refresh can't be used to forge an
-// access-shaped payload.
+// RefreshClaims is the JWT payload for refresh tokens.  No username/role so
+// a leaked refresh can't be used to forge an access-shaped payload.
+//
+// SessionID is uuid.Nil for a token minted before per-device sessions
+// (migration 0052) — the caller's cue to take the legacy path.  The jti
+// (RegisteredClaims.ID) makes every token distinct: without it, two logins
+// in the same second for the same user signed byte-identical tokens, which
+// per-device rows keyed by token hash cannot tell apart.
 type RefreshClaims struct {
-	UserID uuid.UUID `json:"userId"`
+	UserID    uuid.UUID `json:"userId"`
+	SessionID uuid.UUID `json:"sid"`
 	jwt.RegisteredClaims
 }
+
+// IssuedRefresh is a freshly signed refresh token and the claims it was
+// built from.  The caller stores JTI, IssuedAt and ExpiresAt so that
+// ResignRefresh can rebuild the same token later without the token itself
+// being stored.  Both times are already truncated to the JWT's one-second
+// precision.
+type IssuedRefresh struct {
+	Token     string
+	JTI       uuid.UUID
+	IssuedAt  time.Time
+	ExpiresAt time.Time
+}
+
+// ErrNoSession is returned by SignRefresh for a nil session id: a refresh
+// token without a sid is the pre-0052 shape, and minting new ones would put
+// them on the legacy path forever.
+var ErrNoSession = errors.New("jwtx: refresh token needs a session id")
 
 // Signer holds the two HS256 secrets + TTLs.  Construct once at startup
 // from env vars (or test fixtures) and inject into handlers.
@@ -96,15 +123,40 @@ func (s *Signer) SignAccess(userID uuid.UUID, username string, role *string) (st
 	return signed, nil
 }
 
-// SignRefresh produces a refresh token carrying only the userID.  TTL
-// comes from the Signer (Express default 7d).
-func (s *Signer) SignRefresh(userID uuid.UUID) (string, error) {
+// SignRefresh produces a refresh token for one session, with a fresh random
+// jti.  TTL comes from the Signer (JWT_REFRESH_EXPIRES_IN).
+func (s *Signer) SignRefresh(userID, sessionID uuid.UUID) (IssuedRefresh, error) {
+	if sessionID == uuid.Nil {
+		return IssuedRefresh{}, ErrNoSession
+	}
 	now := time.Now()
+	jti := uuid.New()
+	// NewNumericDate truncates to jwt.TimePrecision (one second); keep the
+	// truncated values so what the caller stores is what the token says.
+	iat := jwt.NewNumericDate(now).Time
+	exp := jwt.NewNumericDate(now.Add(s.refreshTTL)).Time
+	signed, err := s.ResignRefresh(userID, sessionID, jti, iat, exp)
+	if err != nil {
+		return IssuedRefresh{}, err
+	}
+	return IssuedRefresh{Token: signed, JTI: jti, IssuedAt: iat, ExpiresAt: exp}, nil
+}
+
+// ResignRefresh rebuilds a refresh token from its claims.  Signing is
+// deterministic (HS256 over a JSON payload whose field order is the struct's),
+// so the same claims give the same bytes — which is how the grace window
+// hands a client the session's current token without that token being
+// stored.  The caller compares a digest before trusting the result; a library
+// upgrade that changed the encoding would fail that comparison rather than
+// hand out a token the session does not recognise.
+func (s *Signer) ResignRefresh(userID, sessionID, jti uuid.UUID, iat, exp time.Time) (string, error) {
 	claims := RefreshClaims{
-		UserID: userID,
+		UserID:    userID,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(s.refreshTTL)),
+			IssuedAt:  jwt.NewNumericDate(iat),
+			ExpiresAt: jwt.NewNumericDate(exp),
+			ID:        jti.String(),
 		},
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

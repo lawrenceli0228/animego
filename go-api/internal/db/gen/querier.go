@@ -35,8 +35,9 @@ type Querier interface {
 	// if the update went through.  Returns ErrNoRows when no conflict.
 	AdminFindUserByUsernameOrEmailExcluding(ctx context.Context, username *string, email *string, excludeID uuid.UUID) (AdminFindUserByUsernameOrEmailExcludingRow, error)
 	// Admin-initiated password change (POST /api/admin/users/:id/password).
-	// Sets a new bcrypt hash and clears all three refresh-session columns, so
-	// the target user's refresh token stops working — see ResetUserPassword for
+	// Sets a new bcrypt hash and clears all three refresh-session columns; the
+	// password trigger (migration 0052) ends every user_sessions row.  Together
+	// they stop every refresh token the target user holds — see ResetUserPassword for
 	// why all three go together rather than refresh_token alone.  Unlike
 	// ResetUserPassword it leaves the reset-token columns alone; those belong to
 	// the self-serve forgot-password flow.
@@ -254,6 +255,23 @@ type Querier interface {
 	// repeats the inner one, which is a total order, so the page comes back in
 	// the order it was chosen in.
 	BrowseAnime(ctx context.Context, arg BrowseAnimeParams) ([]BrowseAnimeRow, error)
+	// Adoption of a refresh token issued before migration 0052 (no sid): the
+	// first half of the transaction in auth.Store.AdoptLegacySession, which then
+	// inserts the user_sessions row the token becomes.
+	//
+	// Clears all three columns, not just refresh_token, for the reason the
+	// kill-switch statements below do: the old credential is over the moment it
+	// is adopted, and a grace slot left loaded here would be honoured by nothing
+	// (Refresh no longer reads these columns) but would confuse the next reader.
+	//
+	// `AND refresh_token = presented_token` is the whole authority for the
+	// adoption: only the token the row still holds can be adopted, and only once.
+	// A second refresh racing with the same cookie blocks on this row's lock,
+	// re-checks the predicate after the first commits, matches nothing, and is
+	// served from the adopted session's grace slot instead.
+	//
+	// RETURNING username and role for the access token, as RotateUserSession does.
+	ClaimLegacyRefreshToken(ctx context.Context, iD uuid.UUID, presentedToken *string) (ClaimLegacyRefreshTokenRow, error)
 	// Half of the snapshot semantics an upsert cannot provide on its own.
 	//
 	// Upserting a fetch writes the episodes the upstream returned and says nothing
@@ -284,6 +302,11 @@ type Querier interface {
 	// statement would test the pre-UPDATE values and delete rows that still hold
 	// another source's title.
 	ClearEpisodeTitlesBySourceOutside(ctx context.Context, source string, animeID int32, kept []int32) ([]int32, error)
+	// Since migration 0052 this ends only a pre-0052 session (a refresh token
+	// with no sid, still held on the users row); sessions issued since live in
+	// user_sessions and logout ends them with DeleteUserSessionIfHeld.  Remove it
+	// with these three columns once every pre-0052 token has expired.
+	//
 	// Logout's DB write: ends the session the CALLER actually holds, and only
 	// that one.
 	//
@@ -448,6 +471,10 @@ type Querier interface {
 	// Unique constraint violations (username/email already taken) surface
 	// as pgx.PgError code 23505 — handler catches + maps to 400 DUPLICATE.
 	CreateUser(ctx context.Context, username string, email string, password string) (User, error)
+	// Login and register: a new row for the new device.  Never touches the
+	// user's other rows — that is the whole fix.  Runs after
+	// LockUserForNewSession, in its transaction.
+	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) error
 	DecideEditItem(ctx context.Context, status string, rejectNote *string, iD uuid.UUID, submissionID uuid.UUID) (int64, error)
 	// Wipe child tables when Reset clears a row.  Express puts characters /
 	// episode_titles back to `undefined` in the document — Postgres mirrors
@@ -529,6 +556,17 @@ type Querier interface {
 	// does.  FOR UPDATE holds the row against a progress write racing this one:
 	// that write updates current_episode, and the re-check after the wait sees it.
 	DeleteSubscriptionIfUntouched(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	// Reuse revocation: a token that is neither current nor inside the grace
+	// window was presented for this session, so the session is ended.  Only this
+	// one — the user's other devices are not involved.
+	DeleteUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID) (int64, error)
+	// Logout with a pre-0052 cookie: also ends the session that cookie was
+	// adopted into, so a logout racing the adoption cannot leave it alive.
+	DeleteUserSessionByLegacyHash(ctx context.Context, userID uuid.UUID, legacyHash *string) (int64, error)
+	// Logout: ends the session only when the presented token is still its current
+	// or grace-slot token.  A signature alone outlives the token it signs, and an
+	// unconditional delete would let a long-dead token log its former owner out.
+	DeleteUserSessionIfHeld(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (int64, error)
 	// So LockEntityOverlay has a row to lock even for a first edit.
 	EnsureEntityOverlay(ctx context.Context, kind string, entityID int32) error
 	// POST /api/admin/enrichment/:anilistId/flag — set admin_flag to one of
@@ -1361,6 +1399,15 @@ type Querier interface {
 	// takes a username path param.  Returns id + canonical username
 	// (handler echoes it back).  ErrNoRows → 404 "User not found".
 	GetUserIDByUsername(ctx context.Context, username string) (GetUserIDByUsernameRow, error)
+	// The re-read after a missed rotation: decides grace, reuse or gone.
+	//
+	// within_grace is judged here, by the clock that stamped rotated_at, rather
+	// than by the application's: a database on another host with a clock 30 s
+	// behind would otherwise turn every lost race into a revoked session.
+	GetUserSession(ctx context.Context, graceSeconds int32, iD uuid.UUID, userID uuid.UUID) (GetUserSessionRow, error)
+	// The same re-read for a pre-0052 token (no sid): the session it was adopted
+	// into, if any.  Same columns as GetUserSession, so the two rows convert.
+	GetUserSessionByLegacyHash(ctx context.Context, graceSeconds int32, userID uuid.UUID, legacyHash *string) (GetUserSessionByLegacyHashRow, error)
 	// The signed-in viewer's own status for the anime; ErrNoRows when they do
 	// not follow it.
 	GetViewerSubscriptionStatus(ctx context.Context, userID uuid.UUID, anilistID int32) (string, error)
@@ -1389,6 +1436,15 @@ type Querier interface {
 	// anything else a pass does, so a throttle window stops every pass that
 	// starts inside it, not just the one that met the 429.
 	ImageWarmBlocked(ctx context.Context) (bool, error)
+	// Adoption of a pre-0052 token, inside the transaction that cleared it from
+	// the users row.  previous_hash = legacy_hash with rotated_at = now() puts
+	// the old token in the grace slot, so a request racing the adoption with the
+	// same old cookie is answered with the new token instead of a 401.
+	//
+	// ON CONFLICT DO NOTHING: legacy_hash is UNIQUE, so a second adoption of the
+	// same token inserts nothing (0 rows) and the caller rolls back and reads the
+	// winner instead.
+	InsertAdoptedSession(ctx context.Context, arg InsertAdoptedSessionParams) (int64, error)
 	// Bulk-load via pgx CopyFrom; updated_at takes its column DEFAULT now().
 	InsertAnidbIdMapCopy(ctx context.Context, arg []InsertAnidbIdMapCopyParams) (int64, error)
 	InsertAnimeExternalLink(ctx context.Context, animeID int32, site string, url string, type_ *string) error
@@ -2378,6 +2434,28 @@ type Querier interface {
 	// Read-modify-write of one overlay: two reviews of the same page accept
 	// one after the other, and neither loses the other's fields.
 	LockEntityOverlay(ctx context.Context, kind string, entityID int32) ([]byte, error)
+	// user_sessions: one refresh session per device (migration 0052).
+	//
+	// Every hash here is the sha256 hex digest of a refresh token
+	// (auth.hashToken); no statement ever sees a raw token.  Every statement that
+	// acts on a presented token is scoped by (id, user_id) from the token's own
+	// claims AND by its hash, so a token can only ever touch the one row it was
+	// issued for.
+	// First half of opening a session (auth.Store.StartUserSession, with
+	// CreateUserSession in the same transaction): holds the users row FOR SHARE,
+	// and only while its password is still the hash the login just verified.
+	//
+	// Without it a login racing a password change slips past the
+	// users_password_ends_sessions trigger: the login reads the old hash and
+	// checks it, the reset commits and its trigger deletes the user's sessions,
+	// and only then does the login insert one — a session opened with a password
+	// that no longer works, which nothing would ever end.  FOR SHARE conflicts
+	// with the reset's row lock (FOR NO KEY UPDATE), so the two serialise: either
+	// the reset waits and its trigger then sees, and deletes, this session, or
+	// this waits, re-reads the row, finds the password changed and returns no
+	// row (the login is refused).  FOR KEY SHARE would not conflict, and the
+	// password predicate without a lock would serialise nothing.
+	LockUserForNewSession(ctx context.Context, iD uuid.UUID, verifiedPassword string) (uuid.UUID, error)
 	// Authoritative AniList->Bangumi binding from the vendored id map
 	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
 	// consults this BEFORE any Bangumi search; a hit binds the subject with
@@ -2682,6 +2760,17 @@ type Querier interface {
 	PruneAnimeCharacters(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error
 	// PruneAnimeCharacters for staff.
 	PruneAnimeStaff(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error
+	// Run after CreateUserSession: drops the user's expired rows and keeps at
+	// most keep_others live rows besides keep_id (the session just created),
+	// most recently used first.  Returns how many rows the user has left.
+	//
+	// keep_id is excluded explicitly rather than trusted to sort first: its
+	// last_used_at is the insert's now(), and a session rotated in the same
+	// instant on another device must not be able to push it out.
+	//
+	// The remaining count is computed from the statement's snapshot, which still
+	// sees the rows being deleted, hence the subtraction.
+	PruneUserSessions(ctx context.Context, userID uuid.UUID, keepID uuid.UUID, keepOthers int32) (int64, error)
 	// ==================== Activity ====================
 	// The tab's 最近动态: one anime's status events, newest first, with their
 	// like and reply counts.  event_id narrows it to one event (a notification
@@ -2791,6 +2880,10 @@ type Querier interface {
 	// reset-password write: sets the new bcrypt hash, clears both reset-token
 	// columns, and clears ALL THREE refresh-session columns.
 	//
+	// The per-device sessions in user_sessions end through the
+	// users_password_ends_sessions trigger (migration 0052), in this statement's
+	// transaction.  The columns below hold only pre-0052 sessions.
+	//
 	// ── WHY previous_refresh_token AND refresh_rotated_at, NOT JUST refresh_token ──
 	// The three columns are one piece of state, not one column plus two
 	// bookkeeping fields.  The Refresh handler falls back to
@@ -2821,42 +2914,17 @@ type Querier interface {
 	// column, no denylist.  Any comment or UI copy promising that a password
 	// change "ends all sessions" is overpromising by up to 15 minutes.
 	ResetUserPassword(ctx context.Context, iD uuid.UUID, password string) error
-	// Compare-and-swap rotation: moves current refresh_token →
-	// previous_refresh_token and writes the new token, but ONLY if the current
-	// token is still the one the caller verified.  refresh_rotated_at is set to
-	// now() so the Refresh handler can enforce the 30 s grace window.
+	// Refresh: compare-and-swap on the presented token's hash.  Moves the current
+	// hash to previous_hash (honoured for the grace window, stamped by
+	// rotated_at), writes the new token's hash and claims, and slides expiry.
 	//
-	// ── WHY `AND refresh_token = @expected_token` ──
-	// The handler reads the user, compares the cookie against refresh_token,
-	// then writes — three steps, no transaction, a JWT signing in between.
-	// Without the predicate that read-check-write loses two ways:
+	// `AND token_hash = presented_hash` is what makes a concurrent refresh, a
+	// logout, a reuse revocation or a password change win against an in-flight
+	// rotation: any of them changes or deletes the row first, and this matches
+	// nothing (pgx.ErrNoRows) instead of writing a live token back.
 	//
-	//   1. Two concurrent refreshes both holding T0 both pass the check.  The
-	//      first writes previous=T0, current=T1.  The second then reads
-	//      `previous_refresh_token = refresh_token` as T1 and produces
-	//      previous=T1, current=T2 — T0 is gone from BOTH slots and the next
-	//      request carrying it gets a 401.  The 30 s grace window exists for
-	//      exactly this case and was being erased by it.
-	//
-	//   2. A logout landing between the read and the write nulls all three
-	//      columns, and the in-flight rotation writes a live token straight
-	//      back — the user pressed logout and stayed signed in, with a 7-day
-	//      cookie.  The predicate turns that into zero rows.
-	//
-	// `:one` + RETURNING rather than `:execrows`: SignAccess needs username and
-	// role (jwtx.SignAccess), so returning them collapses the happy path from
-	// SELECT → sign → UPDATE into a single statement — no pre-read at all.
-	// Zero rows surfaces as pgx.ErrNoRows, which the handler treats as "lost the
-	// race / already logged out / password just changed" and routes into the
-	// existing grace branch after re-reading the row.
-	//
-	// Named parameters are deliberate: new_token and expected_token are both
-	// *string, and with sqlc's query_parameter_limit they stay positional in the
-	// generated signature.  Swapping them would compile, pass every stub test
-	// (the fakes do not model the WHERE clause), and make the CAS match nothing
-	// — every refresh would fall to grace and the whole site would 401 thirty
-	// seconds later.  RETURNING removes the temptation to hand-roll a row count.
-	RotateRefreshToken(ctx context.Context, newToken *string, iD uuid.UUID, expectedToken *string) (RotateRefreshTokenRow, error)
+	// RETURNING username and role saves the access-token signer a read.
+	RotateUserSession(ctx context.Context, arg RotateUserSessionParams) (RotateUserSessionRow, error)
 	SaveEntityOverlay(ctx context.Context, data []byte, updatedBy *uuid.UUID, kind string, entityID int32) error
 	// Queries used by /api/dandanplay/* orchestration (P2.6).
 	//
@@ -3349,20 +3417,14 @@ type Querier interface {
 	// UpdateUserPassword behaves like its two siblings above.  Being wrong in
 	// the same direction as the others is the cheaper failure.
 	//
-	// NOTE FOR WHOEVER WIRES THIS UP: clearing refresh_token logs out the acting
-	// session too, since that is the cookie the caller is holding.  A
+	// NOTE FOR WHOEVER WIRES THIS UP: the password trigger (migration 0052) ends
+	// every user_sessions row, the acting device's included, since that is the
+	// session the caller is holding.  A
 	// change-password handler must issue a fresh token pair and re-set the
 	// cookies before responding, or the user changes their password and is
 	// immediately bounced to the login screen.  Access tokens are unaffected
 	// either way (stateless JWT, valid until accessTTL expires).
 	UpdateUserPassword(ctx context.Context, iD uuid.UUID, password string) error
-	// Called after login (set new token) and logout (set NULL for all three
-	// token columns — clears both current and grace-window state so a stolen
-	// REFRESH cookie is fully invalidated).  The noun matters: access tokens are
-	// stateless JWTs and no column write reaches them, so "fully invalidated"
-	// scopes to the refresh credential only.  See ResetUserPassword.
-	// updated_at bumps to now() so callers can audit last-session activity.
-	UpdateUserRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error
 	// PATCH /api/auth/me — self-serve rename. Unique violation (23505) on the
 	// username index → handler maps to 400 DUPLICATE. Returns the full row so
 	// the handler echoes the updated SafeUser.

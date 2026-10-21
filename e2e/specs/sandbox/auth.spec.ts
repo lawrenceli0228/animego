@@ -1,6 +1,6 @@
 // Sandbox — auth journey end-to-end.
 //
-// Three flows against the sandbox stack (next-app + go-api + Postgres).
+// Four flows against the sandbox stack (next-app + go-api + Postgres).
 // Every spec uses a fresh user; no shared state between tests so order
 // doesn't matter.
 //
@@ -8,7 +8,7 @@
 // chromium-prod project explicitly ignores sandbox/** so these writes
 // never hit the live VPS. See e2e/playwright.config.ts.
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import {
   collectConsoleErrors,
   expectSignedIn,
@@ -132,6 +132,51 @@ test.describe("auth journey", () => {
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });
 
+  // Signing in on a second browser used to sign the first one out: the
+  // account had one refresh slot, the second login overwrote it, and the
+  // first browser's next refresh (once its 15-minute access cookie ran out)
+  // got a 401. Each login now has its own session (go-api migration 0052).
+  //
+  // Two contexts are two browsers: separate cookie jars, same account.
+  // Deleting the `session` cookie stands in for the access token expiring —
+  // proxy.ts then refreshes with the refresh cookie on the next navigation,
+  // which is exactly the request that used to fail.
+  test("signing in on a second browser does not sign the first one out", async ({ browser }) => {
+    const user = makeUser();
+    await insertPgUser({
+      username: user.username,
+      email: user.email,
+      passwordHash: user.passwordHash,
+    });
+    const blank = { storageState: { cookies: [], origins: [] } };
+    const contextA = await browser.newContext(blank);
+    const contextB = await browser.newContext(blank);
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+    const errors = collectConsoleErrors(pageA);
+
+    await loginThroughForm(pageA, user.email, user.password);
+    await expectSignedIn(pageA, user.username);
+    await loginThroughForm(pageB, user.email, user.password);
+    await expectSignedIn(pageB, user.username);
+
+    // A's access token runs out after B signed in.
+    await contextA.clearCookies({ name: "session" });
+    await pageA.goto("/");
+    await expectSignedIn(pageA, user.username);
+
+    // B signs out; that ends B's session only.
+    await logoutViaNavbar(pageB);
+    await expectSignedOut(pageB);
+    await contextA.clearCookies({ name: "session" });
+    await pageA.goto("/");
+    await expectSignedIn(pageA, user.username);
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+    await contextA.close();
+    await contextB.close();
+  });
+
   test("forgot-password → reset-password → login with new password", async ({
     page,
   }) => {
@@ -203,3 +248,12 @@ test.describe("auth journey", () => {
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });
 });
+
+async function loginThroughForm(page: Page, email: string, password: string): Promise<void> {
+  await page.goto("/login");
+  await waitForHydration(page, "#login-email");
+  await page.locator("#login-email").fill(email);
+  await page.locator("#login-password").fill(password);
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(/\/$/);
+}

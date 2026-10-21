@@ -3,6 +3,11 @@
 // user_session_columns_test.go — the refresh-session column writes on `users`,
 // against a real Postgres.
 //
+// Since migration 0052 these columns hold only sessions opened before it;
+// each login now gets its own user_sessions row (user_sessions_test.go).  The
+// statements below still clear the columns, so a pre-0052 token stays revoked
+// by a password change or a logout until the columns are dropped.
+//
 // The three columns only mean anything together:
 //
 //	refresh_token           the currently-valid token
@@ -30,18 +35,11 @@
 //     password change the grace branch accepted the row and then dereferenced
 //     a nil *refresh_token, panicking into a 500.  An availability bug, not a
 //     credential leak — the signed token never reached the response writer.
-//  2. RotateRefreshToken had no CAS predicate, so a rotation already in
-//     flight would write a live token back over a logout or a password reset
-//     that landed between the handler's read and its write.  That one DID
-//     hand out credentials: the user pressed logout and stayed signed in,
-//     with a fresh 7-day cookie.
-//
-// The CAS in particular is why the swap case below exists.  new_token and
-// expected_token are both *string, so passing them in the wrong order
-// compiles, type-checks, and passes every fake-based test — while matching
-// zero rows, sending every refresh to the grace path, and 401-ing the whole
-// site 30 seconds later.  Only asserting that the row actually changed
-// catches it.
+//  2. The rotation had no CAS predicate, so a rotation already in flight
+//     would write a live token back over a logout or a password reset that
+//     landed between the handler's read and its write.  The rotation now
+//     lives on user_sessions (RotateUserSession), and its CAS — including the
+//     argument-swap case — is pinned in user_sessions_test.go.
 //
 // Run with the command CI uses (.github/workflows/unit-tests.yml), so a
 // failure here reproduces exactly:
@@ -53,12 +51,10 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,10 +70,7 @@ import (
 type seededUser struct {
 	id        uuid.UUID
 	updatedAt time.Time
-	// rotatedAt is captured so the rotation test can assert the clock MOVED.
-	// Comparing against a slack window instead ("after seed time minus a
-	// minute") passes even when RotateRefreshToken stops writing the column
-	// at all, because the seed already set it to now().
+	// rotatedAt is the seeded grace clock.
 	rotatedAt time.Time
 }
 
@@ -296,176 +289,6 @@ func TestPasswordWrites_DoNotTouchOtherUsers(t *testing.T) {
 	}
 	assert.True(t, got.RefreshRotatedAt.Valid, "bystander's grace clock was cleared")
 	assert.Equal(t, seedPassword, got.Password, "bystander's password was overwritten")
-}
-
-// TestRotateRefreshToken_CASMatchesAndRotates is the happy path, and the one
-// that catches an argument swap.  Asserting the ROW CHANGED is the point: a
-// swapped call matches zero rows, which surfaces as ErrNoRows here but as a
-// silent fall-to-grace in production.
-func TestRotateRefreshToken_CASMatchesAndRotates(t *testing.T) {
-	ctx := testCtx(t)
-	pool := newPGPool(t, ctx)
-	testutil.TruncateAll(t, ctx, pool)
-	q := dbgen.New(pool)
-
-	seeded := seedUser(t, ctx, pool, "rotateuser")
-
-	// Promote to admin purely so the RETURNING assertion below has a non-NULL
-	// role to prove.  Ordinary accounts carry NULL, and "nil came back" is
-	// equally consistent with the column never being read.
-	_, err := pool.Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, seeded.id)
-	require.NoError(t, err, "promote seed user")
-
-	newTok := "T_new"
-	expected := seedCurrentToken
-	row, err := q.RotateRefreshToken(ctx, &newTok, seeded.id, &expected)
-	require.NoError(t, err, "CAS must match when the expected token is current")
-
-	// RETURNING feeds SignAccess directly, so wrong values here mint a token
-	// carrying the wrong identity or the wrong privilege rather than failing.
-	assert.Equal(t, "rotateuser", row.Username)
-	if assert.NotNil(t, row.Role, "role must survive RETURNING — SignAccess puts it in the JWT") {
-		assert.Equal(t, "admin", *row.Role)
-	}
-
-	got, err := q.GetUserByID(ctx, seeded.id)
-	require.NoError(t, err)
-
-	if assert.NotNil(t, got.RefreshToken) {
-		assert.Equal(t, newTok, *got.RefreshToken, "current slot must hold the new token")
-	}
-	if assert.NotNil(t, got.PreviousRefreshToken) {
-		assert.Equal(t, seedCurrentToken, *got.PreviousRefreshToken,
-			"the old current token must move into the grace slot, not the caller's new one")
-	}
-	assert.True(t, got.RefreshRotatedAt.Valid, "the grace window needs a clock")
-	assert.True(t, got.RefreshRotatedAt.Time.After(seeded.rotatedAt),
-		"refresh_rotated_at must be re-stamped BY THIS ROTATION (%v must be after the seeded %v); "+
-			"a stale clock means the 30s window is measured from someone else's rotation",
-		got.RefreshRotatedAt.Time, seeded.rotatedAt)
-}
-
-// TestRotateRefreshToken_ArgumentSwapMatchesNothing states the failure mode
-// explicitly instead of leaving it implied.  Both parameters are *string, so
-// this call is indistinguishable from the correct one to the compiler and to
-// every fake in the tree.
-func TestRotateRefreshToken_ArgumentSwapMatchesNothing(t *testing.T) {
-	ctx := testCtx(t)
-	pool := newPGPool(t, ctx)
-	testutil.TruncateAll(t, ctx, pool)
-	q := dbgen.New(pool)
-
-	seeded := seedUser(t, ctx, pool, "swapuser")
-
-	newTok := "T_new"
-	expected := seedCurrentToken
-
-	// Deliberately reversed: expected passed as new_token, new passed as
-	// expected_token.
-	_, err := q.RotateRefreshToken(ctx, &expected, seeded.id, &newTok)
-	assert.True(t, errors.Is(err, pgx.ErrNoRows),
-		"a swapped CAS must match nothing; got err=%v — if this ever returns a row, "+
-			"the predicate is not doing its job and every refresh silently falls to grace", err)
-
-	// A missed CAS must write NOTHING — all four columns the statement would
-	// otherwise touch. Checking only refresh_token would pass a predicate that
-	// blocks the token swap but still stamps the clock.
-	got, err := q.GetUserByID(ctx, seeded.id)
-	require.NoError(t, err)
-	if assert.NotNil(t, got.RefreshToken) {
-		assert.Equal(t, seedCurrentToken, *got.RefreshToken, "a missed CAS must not write refresh_token")
-	}
-	if assert.NotNil(t, got.PreviousRefreshToken) {
-		assert.Equal(t, seedPreviousToken, *got.PreviousRefreshToken, "a missed CAS must not write the grace slot")
-	}
-	assert.Equal(t, seeded.rotatedAt, got.RefreshRotatedAt.Time, "a missed CAS must not re-stamp the clock")
-	assert.Equal(t, seeded.updatedAt, got.UpdatedAt.Time, "a missed CAS must not bump updated_at")
-}
-
-// TestRotateRefreshToken_LosesRaceAgainstLogout is the reason the predicate
-// exists.  Without it the UPDATE is unconditional and writes a live 7-day
-// token back over a logout that landed first — the user presses logout and
-// stays signed in.
-func TestRotateRefreshToken_LosesRaceAgainstLogout(t *testing.T) {
-	ctx := testCtx(t)
-	pool := newPGPool(t, ctx)
-	testutil.TruncateAll(t, ctx, pool)
-	q := dbgen.New(pool)
-
-	seeded := seedUser(t, ctx, pool, "raceuser")
-
-	// The logout lands between the in-flight handler's read and its write.
-	require.NoError(t, q.UpdateUserRefreshToken(ctx, seeded.id, nil))
-
-	// The in-flight rotation still believes the pre-logout token is current.
-	newTok := "T_new"
-	expected := seedCurrentToken
-	_, err := q.RotateRefreshToken(ctx, &newTok, seeded.id, &expected)
-	assert.True(t, errors.Is(err, pgx.ErrNoRows),
-		"a rotation racing a logout must match nothing; got err=%v", err)
-
-	got, err := q.GetUserByID(ctx, seeded.id)
-	require.NoError(t, err)
-	assert.Nil(t, got.RefreshToken,
-		"the logout must stick — a resurrected token here is a 7-day session the user asked to end")
-	assert.Nil(t, got.PreviousRefreshToken, "logout must clear the grace slot too")
-	assert.False(t, got.RefreshRotatedAt.Valid, "logout must clear the grace clock too")
-}
-
-// TestRotateRefreshToken_LosesRaceAgainstPasswordReset is the same race with
-// the password reset in the middle, which is the version that matters: the
-// user is resetting precisely because they believe someone else has their
-// credential.  It also pins the interaction between the two fixes — the CAS
-// blocks the write, and the reset having cleared all three columns means
-// there is no grace slot for the loser to fall back onto.
-func TestRotateRefreshToken_LosesRaceAgainstPasswordReset(t *testing.T) {
-	ctx := testCtx(t)
-	pool := newPGPool(t, ctx)
-	testutil.TruncateAll(t, ctx, pool)
-	q := dbgen.New(pool)
-
-	seeded := seedUser(t, ctx, pool, "resetraceuser")
-
-	require.NoError(t, q.ResetUserPassword(ctx, seeded.id, newPassword))
-
-	newTok := "T_new"
-	expected := seedCurrentToken
-	_, err := q.RotateRefreshToken(ctx, &newTok, seeded.id, &expected)
-	assert.True(t, errors.Is(err, pgx.ErrNoRows),
-		"a rotation racing a password reset must match nothing; got err=%v", err)
-
-	got, err := q.GetUserByID(ctx, seeded.id)
-	require.NoError(t, err)
-	assertSessionCleared(t, got, "reset then losing rotation")
-}
-
-// TestRotateRefreshToken_DeletedUserMatchesNothing covers the id half of the
-// predicate against a row that really existed and really was deleted, which is
-// the situation the handler meets when an admin removes an account while one
-// of its tabs has a refresh in flight.
-//
-// Seeding and deleting rather than rotating a random uuid against an empty
-// table: the random-uuid version would pass against `WHERE id = $1` with no
-// CAS at all, and against essentially any schema, so it asserted nothing about
-// this statement.
-func TestRotateRefreshToken_DeletedUserMatchesNothing(t *testing.T) {
-	ctx := testCtx(t)
-	pool := newPGPool(t, ctx)
-	testutil.TruncateAll(t, ctx, pool)
-	q := dbgen.New(pool)
-
-	seeded := seedUser(t, ctx, pool, "deleteduser")
-	_, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, seeded.id)
-	require.NoError(t, err, "delete seed user")
-
-	newTok := "T_new"
-	expected := seedCurrentToken
-	_, err = q.RotateRefreshToken(ctx, &newTok, seeded.id, &expected)
-	assert.True(t, errors.Is(err, pgx.ErrNoRows),
-		"rotating a deleted user must match nothing; got err=%v", err)
-
-	_, err = q.GetUserByID(ctx, seeded.id)
-	assert.True(t, errors.Is(err, pgx.ErrNoRows), "the row must stay deleted, got err=%v", err)
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,12 @@ package db
 // Invariant scan over the hand-written .sql sources in queries/.
 //
 // ── WHY THIS TEST EXISTS AND WHY IT READS TEXT INSTEAD OF RUNNING SQL ──
+// Since migration 0052 these columns hold only sessions opened before it:
+// each login now gets its own user_sessions row, whose invariants live in
+// that table's CHECK constraints and the password trigger, pinned by
+// test/integration/user_sessions_test.go.  This scan guards the users
+// columns until they are dropped with the transition code.
+//
 // The refresh-session state on `users` is THREE columns that only mean
 // anything together:
 //
@@ -35,19 +41,18 @@ package db
 //
 // It parses rather than greps because substring matching is wrong here:
 // "previous_refresh_token = NULL" contains "refresh_token = NULL", and
-// RotateRefreshToken legitimately mentions refresh_token in its WHERE clause.
+// ClaimLegacyRefreshToken legitimately mentions refresh_token in its WHERE
+// clause.
 // Both would produce confident, incorrect results.
 //
 // ── WHAT THIS SCAN DOES NOT COVER, SO NOBODY ASSUMES OTHERWISE ──
 // It reads SET clauses only. The WHERE clause is deliberately truncated away,
 // which means it says NOTHING about:
 //
-//   - RotateRefreshToken's compare-and-swap predicate. Deleting
-//     `AND refresh_token = @expected_token` — the change that let a logout be
-//     overwritten by an in-flight rotation, handing back a live 7-day token —
-//     passes every rule here. That predicate is pinned by behaviour instead:
-//     TestRotateRefreshToken_ArgumentSwapMatchesNothing and the two race tests
-//     in test/integration/user_session_columns_test.go.
+//   - ClaimLegacyRefreshToken's `AND refresh_token = @presented_token`, the
+//     whole authority for adopting a pre-0052 token. Deleting it would let any
+//     signed old token adopt itself, and passes every rule here. It is pinned
+//     by behaviour instead, in test/integration/user_sessions_test.go.
 //   - Row scoping generally. A kill switch narrowed to `AND is_public = true`
 //     would clear all three columns for some users and silently skip the rest,
 //     and this file would be satisfied.
@@ -83,8 +88,8 @@ var mustKillSession = map[string]string{
 	"ResetUserPassword":    "self-serve forgot-password: the user is asking us to lock out whoever has the old credential",
 	"AdminSetUserPassword": "admin lockout: the operator is usually responding to a suspected compromise",
 	"UpdateUserPassword":   "dormant self-serve change-password: ships in the shape its first caller will trust",
-	"UpdateUserRefreshToken": "login sets a fresh token and logout NULLs it; either way the old grace slot " +
-		"must not survive into the new session",
+	"ClaimLegacyRefreshToken": "adoption of a pre-0052 token: the old credential is over the moment it " +
+		"becomes a user_sessions row, grace slot included",
 	"ClearRefreshTokenIfMatches": "logout: ends the presented session, so it must not leave a grace slot " +
 		"the Refresh handler would still honour",
 }
@@ -224,8 +229,9 @@ func isLiteralNull(expr string) bool {
 // NULL, it is to force a human to say so. Two shapes were each independently
 // enough to defeat an earlier, cleverer version of this check —
 //
-//   - `refresh_token = $2`, which UpdateUserRefreshToken uses for BOTH login
-//     (live token) and logout (nil). No reading of the text separates them.
+//   - `refresh_token = $2`, which the pre-0052 UpdateUserRefreshToken used for
+//     BOTH login (live token) and logout (nil). No reading of the text
+//     separates them.
 //   - `refresh_token = CASE WHEN … THEN NULL ELSE refresh_token END`, already
 //     the house idiom for conditional clears in admin.sql and anime_cache.sql,
 //     so it is a shape a future author would reach for naturally.
@@ -466,7 +472,8 @@ func assertReadable(t *testing.T, stmt sqlStatement, p setParse) bool {
 //
 // It checks the VALUE, not merely that the column appears. Requiring only
 // presence let `previous_refresh_token = refresh_token, refresh_rotated_at =
-// NULL` through — which is RotateRefreshToken's own documented bug regressing.
+// NULL` through — which is the pre-0052 RotateRefreshToken's own documented bug
+// regressing.
 // That one fails closed rather than open (the grace branch requires
 // RefreshRotatedAt.Valid, so it 401s instead of over-honouring), but 401-ing
 // the loser of a concurrent refresh is precisely the outcome the grace window
@@ -513,17 +520,16 @@ func TestSessionColumns_GraceSlotHasAClock(t *testing.T) {
 // SQL. It is to invert the burden: every write this scan cannot prove is a
 // live token must be listed by a human, with the reason.
 //
-// Two statements are listed. Both are safe for the same structural reason —
-// they write the other two columns unconditionally in the same statement — so
-// whatever the parameter holds at runtime, the three columns cannot disagree.
-// That is the bar a third entry has to clear.
+// None is listed since migration 0052: the two statements that wrote a
+// non-literal value (login's UpdateUserRefreshToken and the rotation) went
+// away with the per-device sessions, and nothing writes a live token to
+// users.refresh_token any more.  A new entry has to clear the bar those two
+// did — write the other two columns unconditionally in the same statement,
+// so the three cannot disagree whatever the parameter holds.
 func TestSessionColumns_IndeterminateWritesAreDeclared(t *testing.T) {
 	t.Parallel()
 
-	declared := map[string]string{
-		"UpdateUserRefreshToken": "login passes a token, logout passes nil; both paths NULL the grace slot in the same statement",
-		"RotateRefreshToken":     "rotation always writes a live token and re-stamps the clock; the CAS predicate is pinned in test/integration",
-	}
+	declared := map[string]string{}
 
 	for _, stmt := range loadStatements(t) {
 		p := stmt.setAssignments()
@@ -623,31 +629,54 @@ func TestSessionColumns_ParserSeesTheRealFile(t *testing.T) {
 			"the rules above are running against almost nothing", readable)
 	}
 
-	// RotateRefreshToken is the sharpest case in the tree: it mentions
-	// refresh_token in both the SET clause and the WHERE clause, with
-	// different meanings.  If the parser ever conflates them, this fails.
-	var rotate *sqlStatement
+	// ClaimLegacyRefreshToken mentions refresh_token in both the SET clause
+	// (= NULL) and the WHERE clause (= the presented token).  If the parser
+	// ever conflates them, the SET value it reports is the WHERE's.
+	var claim *sqlStatement
 	for i := range stmts {
-		if stmts[i].name == "RotateRefreshToken" {
-			rotate = &stmts[i]
+		if stmts[i].name == "ClaimLegacyRefreshToken" {
+			claim = &stmts[i]
 			break
 		}
 	}
-	if rotate == nil {
-		t.Fatal("RotateRefreshToken not found; the parser self-check has nothing to verify against")
+	if claim == nil {
+		t.Fatal("ClaimLegacyRefreshToken not found; the parser self-check has nothing to verify against")
+	}
+	cp := claim.setAssignments()
+	if cp.status != parseOK {
+		t.Fatalf("ClaimLegacyRefreshToken did not parse (%s); the self-check has nothing to verify", cp.reason)
+	}
+	if got := cp.sets[colRefreshToken]; !strings.EqualFold(got, "NULL") {
+		t.Errorf("ClaimLegacyRefreshToken SET %s = %q, want NULL — parser is probably reading the WHERE clause",
+			colRefreshToken, got)
+	}
+	if _, leaked := cp.sets["id"]; leaked {
+		t.Error("parser pulled `id` out of the WHERE clause into the SET map; the truncation is broken")
 	}
 
+	// The same question for a non-NULL assignment, which no statement in the
+	// corpus makes since 0052: the shape of the old rotation, kept synthetic
+	// so the parser's handling of it stays checked.
+	rotate := sqlStatement{name: "synthetic-rotate", file: "synthetic", body: `
+UPDATE users
+SET previous_refresh_token = refresh_token,
+    refresh_token          = sqlc.arg(new_token),
+    refresh_rotated_at     = now(),
+    updated_at             = now()
+WHERE id = sqlc.arg(id)
+  AND refresh_token = sqlc.arg(expected_token)
+RETURNING username, role;`}
 	p := rotate.setAssignments()
 	if p.status != parseOK {
-		t.Fatalf("RotateRefreshToken did not parse (%s); the self-check has nothing to verify", p.reason)
+		t.Fatalf("the rotation shape did not parse (%s)", p.reason)
 	}
 	if got := p.sets[colPreviousRefresh]; got != colRefreshToken {
-		t.Errorf("RotateRefreshToken SET %s = %q, want %q — parser is misreading the SET clause",
+		t.Errorf("rotation SET %s = %q, want %q — parser is misreading the SET clause",
 			colPreviousRefresh, got, colRefreshToken)
 	}
-	if got, ok := p.sets[colRefreshToken]; !ok || strings.EqualFold(got, "NULL") {
-		t.Errorf("RotateRefreshToken SET %s = %q; a rotation writes a new token, never NULL — "+
-			"parser is probably reading the WHERE clause", colRefreshToken, got)
+	if got := p.sets[colRefreshToken]; got != "sqlc.arg(new_token)" {
+		t.Errorf("rotation SET %s = %q, want sqlc.arg(new_token) — parser is probably reading the WHERE clause",
+			colRefreshToken, got)
 	}
 	if _, leaked := p.sets["id"]; leaked {
 		t.Error("parser pulled `id` out of the WHERE clause into the SET map; the truncation is broken")

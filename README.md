@@ -101,7 +101,7 @@ A full-stack anime discovery, tracking, and local playback platform. Browse seas
 | Backend | Go 1.26 · chi router · pgx v5 · sqlc · river queue · ristretto cache |
 | Database | PostgreSQL 16 · pg_cron · pg_trgm |
 | Realtime | ws-server — standalone Node + socket.io process |
-| Auth | JWT (access 15m + refresh 14d) · bcrypt · httpOnly cookies |
+| Auth | JWT (access 15m + refresh 30d, one session per device) · bcrypt · httpOnly cookies |
 | Player | Artplayer · libass-wasm (ASS subtitles) · Web Workers (MD5 hash, MKV parsing) |
 | External APIs | AniList GraphQL · Bangumi API · dandanplay API · ACG.rip RSS |
 | Deployment | Docker Compose · Nginx reverse proxy · Cloudflare · SSL |
@@ -182,7 +182,7 @@ docker compose --env-file .env.production up -d --build
 JWT_SECRET=fill-with-32-byte-random-hex
 JWT_REFRESH_SECRET=fill-with-another-32-byte-random-hex
 JWT_EXPIRES_IN=15m
-JWT_REFRESH_EXPIRES_IN=14d
+JWT_REFRESH_EXPIRES_IN=30d
 DANDANPLAY_APP_ID=fill-with-your-app-id
 DANDANPLAY_APP_SECRET=fill-with-your-secret
 

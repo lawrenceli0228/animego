@@ -23,8 +23,9 @@ WHERE id = $1
 `
 
 // Admin-initiated password change (POST /api/admin/users/:id/password).
-// Sets a new bcrypt hash and clears all three refresh-session columns, so
-// the target user's refresh token stops working — see ResetUserPassword for
+// Sets a new bcrypt hash and clears all three refresh-session columns; the
+// password trigger (migration 0052) ends every user_sessions row.  Together
+// they stop every refresh token the target user holds — see ResetUserPassword for
 // why all three go together rather than refresh_token alone.  Unlike
 // ResetUserPassword it leaves the reset-token columns alone; those belong to
 // the self-serve forgot-password flow.
@@ -39,6 +40,45 @@ func (q *Queries) AdminSetUserPassword(ctx context.Context, iD uuid.UUID, passwo
 	return err
 }
 
+const claimLegacyRefreshToken = `-- name: ClaimLegacyRefreshToken :one
+UPDATE users
+SET refresh_token          = NULL,
+    previous_refresh_token = NULL,
+    refresh_rotated_at     = NULL,
+    updated_at             = now()
+WHERE id = $1
+  AND refresh_token = $2
+RETURNING username, role
+`
+
+type ClaimLegacyRefreshTokenRow struct {
+	Username string  `json:"username"`
+	Role     *string `json:"role"`
+}
+
+// Adoption of a refresh token issued before migration 0052 (no sid): the
+// first half of the transaction in auth.Store.AdoptLegacySession, which then
+// inserts the user_sessions row the token becomes.
+//
+// Clears all three columns, not just refresh_token, for the reason the
+// kill-switch statements below do: the old credential is over the moment it
+// is adopted, and a grace slot left loaded here would be honoured by nothing
+// (Refresh no longer reads these columns) but would confuse the next reader.
+//
+// `AND refresh_token = presented_token` is the whole authority for the
+// adoption: only the token the row still holds can be adopted, and only once.
+// A second refresh racing with the same cookie blocks on this row's lock,
+// re-checks the predicate after the first commits, matches nothing, and is
+// served from the adopted session's grace slot instead.
+//
+// RETURNING username and role for the access token, as RotateUserSession does.
+func (q *Queries) ClaimLegacyRefreshToken(ctx context.Context, iD uuid.UUID, presentedToken *string) (ClaimLegacyRefreshTokenRow, error) {
+	row := q.db.QueryRow(ctx, claimLegacyRefreshToken, iD, presentedToken)
+	var i ClaimLegacyRefreshTokenRow
+	err := row.Scan(&i.Username, &i.Role)
+	return i, err
+}
+
 const clearRefreshTokenIfMatches = `-- name: ClearRefreshTokenIfMatches :execrows
 UPDATE users
 SET refresh_token          = NULL,
@@ -50,6 +90,11 @@ WHERE id = $1
        OR previous_refresh_token = $2)
 `
 
+// Since migration 0052 this ends only a pre-0052 session (a refresh token
+// with no sid, still held on the users row); sessions issued since live in
+// user_sessions and logout ends them with DeleteUserSessionIfHeld.  Remove it
+// with these three columns once every pre-0052 token has expired.
+//
 // Logout's DB write: ends the session the CALLER actually holds, and only
 // that one.
 //
@@ -327,6 +372,10 @@ WHERE id = $1
 // reset-password write: sets the new bcrypt hash, clears both reset-token
 // columns, and clears ALL THREE refresh-session columns.
 //
+// The per-device sessions in user_sessions end through the
+// users_password_ends_sessions trigger (migration 0052), in this statement's
+// transaction.  The columns below hold only pre-0052 sessions.
+//
 // ── WHY previous_refresh_token AND refresh_rotated_at, NOT JUST refresh_token ──
 // The three columns are one piece of state, not one column plus two
 // bookkeeping fields.  The Refresh handler falls back to
@@ -359,64 +408,6 @@ WHERE id = $1
 func (q *Queries) ResetUserPassword(ctx context.Context, iD uuid.UUID, password string) error {
 	_, err := q.db.Exec(ctx, resetUserPassword, iD, password)
 	return err
-}
-
-const rotateRefreshToken = `-- name: RotateRefreshToken :one
-UPDATE users
-SET previous_refresh_token = refresh_token,
-    refresh_token          = $1,
-    refresh_rotated_at     = now(),
-    updated_at             = now()
-WHERE id = $2
-  AND refresh_token = $3
-RETURNING username, role
-`
-
-type RotateRefreshTokenRow struct {
-	Username string  `json:"username"`
-	Role     *string `json:"role"`
-}
-
-// Compare-and-swap rotation: moves current refresh_token →
-// previous_refresh_token and writes the new token, but ONLY if the current
-// token is still the one the caller verified.  refresh_rotated_at is set to
-// now() so the Refresh handler can enforce the 30 s grace window.
-//
-// ── WHY `AND refresh_token = @expected_token` ──
-// The handler reads the user, compares the cookie against refresh_token,
-// then writes — three steps, no transaction, a JWT signing in between.
-// Without the predicate that read-check-write loses two ways:
-//
-//  1. Two concurrent refreshes both holding T0 both pass the check.  The
-//     first writes previous=T0, current=T1.  The second then reads
-//     `previous_refresh_token = refresh_token` as T1 and produces
-//     previous=T1, current=T2 — T0 is gone from BOTH slots and the next
-//     request carrying it gets a 401.  The 30 s grace window exists for
-//     exactly this case and was being erased by it.
-//
-//  2. A logout landing between the read and the write nulls all three
-//     columns, and the in-flight rotation writes a live token straight
-//     back — the user pressed logout and stayed signed in, with a 7-day
-//     cookie.  The predicate turns that into zero rows.
-//
-// `:one` + RETURNING rather than `:execrows`: SignAccess needs username and
-// role (jwtx.SignAccess), so returning them collapses the happy path from
-// SELECT → sign → UPDATE into a single statement — no pre-read at all.
-// Zero rows surfaces as pgx.ErrNoRows, which the handler treats as "lost the
-// race / already logged out / password just changed" and routes into the
-// existing grace branch after re-reading the row.
-//
-// Named parameters are deliberate: new_token and expected_token are both
-// *string, and with sqlc's query_parameter_limit they stay positional in the
-// generated signature.  Swapping them would compile, pass every stub test
-// (the fakes do not model the WHERE clause), and make the CAS match nothing
-// — every refresh would fall to grace and the whole site would 401 thirty
-// seconds later.  RETURNING removes the temptation to hand-roll a row count.
-func (q *Queries) RotateRefreshToken(ctx context.Context, newToken *string, iD uuid.UUID, expectedToken *string) (RotateRefreshTokenRow, error) {
-	row := q.db.QueryRow(ctx, rotateRefreshToken, newToken, iD, expectedToken)
-	var i RotateRefreshTokenRow
-	err := row.Scan(&i.Username, &i.Role)
-	return i, err
 }
 
 const setResetPasswordToken = `-- name: SetResetPasswordToken :exec
@@ -499,34 +490,15 @@ WHERE id = $1
 // UpdateUserPassword behaves like its two siblings above.  Being wrong in
 // the same direction as the others is the cheaper failure.
 //
-// NOTE FOR WHOEVER WIRES THIS UP: clearing refresh_token logs out the acting
-// session too, since that is the cookie the caller is holding.  A
+// NOTE FOR WHOEVER WIRES THIS UP: the password trigger (migration 0052) ends
+// every user_sessions row, the acting device's included, since that is the
+// session the caller is holding.  A
 // change-password handler must issue a fresh token pair and re-set the
 // cookies before responding, or the user changes their password and is
 // immediately bounced to the login screen.  Access tokens are unaffected
 // either way (stateless JWT, valid until accessTTL expires).
 func (q *Queries) UpdateUserPassword(ctx context.Context, iD uuid.UUID, password string) error {
 	_, err := q.db.Exec(ctx, updateUserPassword, iD, password)
-	return err
-}
-
-const updateUserRefreshToken = `-- name: UpdateUserRefreshToken :exec
-UPDATE users
-SET refresh_token          = $2,
-    previous_refresh_token = NULL,
-    refresh_rotated_at     = NULL,
-    updated_at             = now()
-WHERE id = $1
-`
-
-// Called after login (set new token) and logout (set NULL for all three
-// token columns — clears both current and grace-window state so a stolen
-// REFRESH cookie is fully invalidated).  The noun matters: access tokens are
-// stateless JWTs and no column write reaches them, so "fully invalidated"
-// scopes to the refresh credential only.  See ResetUserPassword.
-// updated_at bumps to now() so callers can audit last-session activity.
-func (q *Queries) UpdateUserRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error {
-	_, err := q.db.Exec(ctx, updateUserRefreshToken, iD, refreshToken)
 	return err
 }
 

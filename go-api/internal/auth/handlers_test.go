@@ -39,49 +39,17 @@ type pgconnPgError = pgconn.PgError
 // Per-test setup overrides the fields it cares about; unset fields
 // panic if invoked so missing wiring is caught immediately.
 type fakeAuthDB struct {
-	createUser              func(ctx context.Context, username, email, password string) (dbgen.User, error)
-	getUserByEmail          func(ctx context.Context, email string) (dbgen.User, error)
-	getUserByUsername       func(ctx context.Context, username string) (dbgen.User, error)
-	getUserByID             func(ctx context.Context, id uuid.UUID) (dbgen.User, error)
-	updateUserRefreshToken  func(ctx context.Context, id uuid.UUID, refreshToken *string) error
-	updateRefreshCalledWith *string
-	updateRefreshCalledID   uuid.UUID
-	// updateRefreshCallCount makes "the DB was never touched" an explicit
-	// assertion.  Logout clears cookies unconditionally but must only write
-	// when the refresh cookie verifies, and a zero uuid is too easy to read
-	// as "called with the zero value".
-	updateRefreshCallCount int
+	createUser        func(ctx context.Context, username, email, password string) (dbgen.User, error)
+	getUserByEmail    func(ctx context.Context, email string) (dbgen.User, error)
+	getUserByUsername func(ctx context.Context, username string) (dbgen.User, error)
+	getUserByID       func(ctx context.Context, id uuid.UUID) (dbgen.User, error)
+	// sess is the in-memory user_sessions (fake_sessions_test.go), created
+	// on first use.  It models the WHERE clauses, not just the calls.
+	sess *sessionModel
 
-	// RotateRefreshToken captures the call so tests can assert the rotation
-	// happened (or didn't, on a grace hit).
-	//
-	// rotateCASEnabled + rotateCASCurrent MODEL THE WHERE CLAUSE.  The real
-	// query only swaps when refresh_token still equals expectedToken; a fake
-	// that ignores that would let a reversed argument order — the hazard the
-	// generated positional signature creates, since newToken and
-	// expectedToken are both *string — pass every test here while the CAS
-	// matched nothing in production.
-	//
-	// Two fields rather than one because nil is a real value: with
-	// rotateCASEnabled set, rotateCASCurrent == nil means "the row's
-	// refresh_token IS NULL", which no expectedToken can ever equal.  A
-	// single *string would conflate that with "don't model the predicate".
-	rotateCASEnabled        bool
-	rotateCASCurrent        *string
-	rotateRefreshTokenFn    func(ctx context.Context, newToken *string, id uuid.UUID, expectedToken *string) (dbgen.RotateRefreshTokenRow, error)
-	rotateRefreshCalledWith *string
-	rotateRefreshExpected   *string
-	rotateRefreshCalledID   uuid.UUID
-	rotateRefreshCallCount  int
-	// rotateCASMissCount counts swaps the predicate refused.  Since the
-	// check moved into the WHERE clause, "the grace path did not rotate"
-	// is no longer "the query was never issued" — the query IS the check.
-	// The invariant to assert is that it matched nothing.
-	rotateCASMissCount int
-
-	// Logout's CAS.  Same reasoning as rotateCAS above, for the other
-	// predicate: ClearRefreshTokenIfMatches only clears when the presented
-	// token still equals refresh_token OR previous_refresh_token, and a fake
+	// Logout's CAS for a pre-0052 cookie: ClearRefreshTokenIfMatches only
+	// clears when the presented token still equals refresh_token OR
+	// previous_refresh_token, and a fake
 	// that ignored that would report success for a stale token replayed as a
 	// forced-logout — precisely the abuse the predicate was added to remove.
 	//
@@ -145,20 +113,6 @@ func (f *fakeAuthDB) GetUserByID(ctx context.Context, id uuid.UUID) (dbgen.User,
 	}
 	return f.getUserByID(ctx, id)
 }
-func (f *fakeAuthDB) UpdateUserRefreshToken(ctx context.Context, id uuid.UUID, refreshToken *string) error {
-	f.updateRefreshCallCount++
-	f.updateRefreshCalledID = id
-	if refreshToken != nil {
-		v := *refreshToken
-		f.updateRefreshCalledWith = &v
-	} else {
-		f.updateRefreshCalledWith = nil
-	}
-	if f.updateUserRefreshToken == nil {
-		return nil
-	}
-	return f.updateUserRefreshToken(ctx, id, refreshToken)
-}
 
 // ClearRefreshTokenIfMatches models the predicate rather than just recording
 // the call.  With clearCASEnabled, a presented token that matches neither the
@@ -188,45 +142,6 @@ func (f *fakeAuthDB) ClearRefreshTokenIfMatches(ctx context.Context, id uuid.UUI
 		return 1, nil
 	}
 	return 0, nil
-}
-
-// RotateRefreshToken captures the call, MODELS THE CAS PREDICATE, then
-// delegates to rotateRefreshTokenFn if set.  rotateRefreshCallCount lets
-// tests assert the normal rotation path fires (or does NOT, on a grace hit).
-//
-// The predicate matters: when rotateCASCurrent is set, a mismatch returns
-// pgx.ErrNoRows exactly like Postgres would, so tests exercise the handler's
-// "lost the race → re-read → grace" branch for real instead of trusting a
-// fake that always succeeds.
-func (f *fakeAuthDB) RotateRefreshToken(ctx context.Context, newToken *string, id uuid.UUID, expectedToken *string) (dbgen.RotateRefreshTokenRow, error) {
-	f.rotateRefreshCalledID = id
-	if newToken != nil {
-		v := *newToken
-		f.rotateRefreshCalledWith = &v
-	} else {
-		f.rotateRefreshCalledWith = nil
-	}
-	if expectedToken != nil {
-		v := *expectedToken
-		f.rotateRefreshExpected = &v
-	} else {
-		f.rotateRefreshExpected = nil
-	}
-	f.rotateRefreshCallCount++
-
-	if f.rotateCASEnabled {
-		matched := f.rotateCASCurrent != nil &&
-			expectedToken != nil &&
-			*expectedToken == *f.rotateCASCurrent
-		if !matched {
-			f.rotateCASMissCount++
-			return dbgen.RotateRefreshTokenRow{}, pgx.ErrNoRows
-		}
-	}
-	if f.rotateRefreshTokenFn == nil {
-		return dbgen.RotateRefreshTokenRow{Username: "tester"}, nil
-	}
-	return f.rotateRefreshTokenFn(ctx, newToken, id, expectedToken)
 }
 
 // SetResetPasswordToken captures the (id, token, expires) tuple AND
@@ -422,12 +337,16 @@ func TestRegister_HappyPath_201(t *testing.T) {
 		t.Errorf("user payload mismatch: %+v", data.User)
 	}
 
-	if db.updateRefreshCalledWith == nil || *db.updateRefreshCalledWith == "" {
-		t.Error("UpdateUserRefreshToken was not called with the new refresh token")
+	c := getSetCookie(rec, RefreshCookieName)
+	if c == nil {
+		t.Fatal("refreshToken cookie not set")
 	}
-
-	if c := getSetCookie(rec, RefreshCookieName); c == nil {
-		t.Error("refreshToken cookie not set")
+	claims, err := newTestSigner(t).VerifyRefresh(c.Value)
+	if err != nil {
+		t.Fatalf("refresh cookie does not verify: %v", err)
+	}
+	if row := db.model().session(claims.SessionID); row == nil || row.TokenHash != hashToken(c.Value) {
+		t.Error("register did not open a session holding the cookie's token")
 	}
 }
 
@@ -636,167 +555,9 @@ func TestRefresh_BadToken_401_InvalidToken(t *testing.T) {
 	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
 }
 
-func TestRefresh_DBTokenMismatch_401(t *testing.T) {
-	t.Parallel()
-
-	signer := newTestSigner(t)
-	user := fixtureUser(t)
-	// Sign a refresh token for the user but the DB row stores a
-	// different one — the double-check fails.
-	cookieToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	storedToken := "different-stored-refresh"
-	user.RefreshToken = &storedToken
-
-	db := &fakeAuthDB{
-		// The row holds a different token, so the CAS matches nothing —
-		// this check now lives in the WHERE clause, not in Go.
-		rotateCASEnabled: true,
-		rotateCASCurrent: &storedToken,
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return user, nil
-		},
-	}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
-	rec := httptest.NewRecorder()
-	h.Refresh(rec, req)
-
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
-}
-
-func TestRefresh_DBTokenNil_401(t *testing.T) {
-	t.Parallel()
-
-	signer := newTestSigner(t)
-	user := fixtureUser(t)
-	cookieToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	user.RefreshToken = nil
-
-	db := &fakeAuthDB{
-		// refresh_token IS NULL: no expectedToken can equal it, so the CAS
-		// matches nothing and the grace re-read finds nothing either.
-		rotateCASEnabled: true,
-		rotateCASCurrent: nil,
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return user, nil
-		},
-	}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
-	rec := httptest.NewRecorder()
-	h.Refresh(rec, req)
-
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
-}
-
-func TestRefresh_HappyPath_200(t *testing.T) {
-	t.Parallel()
-
-	signer := newTestSigner(t)
-	user := fixtureUser(t)
-	cookieToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	user.RefreshToken = &cookieToken
-
-	db := &fakeAuthDB{
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return user, nil
-		},
-	}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
-	rec := httptest.NewRecorder()
-	h.Refresh(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var data RefreshData
-	decodeData(t, rec.Body.Bytes(), &data)
-	if data.AccessToken == "" {
-		t.Error("accessToken missing in refresh response")
-	}
-
-	// After normal rotation, RotateRefreshToken must have been called once.
-	if db.rotateRefreshCallCount != 1 {
-		t.Errorf("RotateRefreshToken call count = %d, want 1", db.rotateRefreshCallCount)
-	}
-
-	// New refresh cookie must be set (different from the old one in
-	// most invocations; at minimum, present and non-empty).
-	c := getSetCookie(rec, RefreshCookieName)
-	if c == nil || c.Value == "" {
-		t.Error("new refresh cookie not set on refresh response")
-	}
-}
-
 // -----------------------------------------------------------------------------
 // Logout
 // -----------------------------------------------------------------------------
-
-func TestLogout_ClearsDBAndCookie(t *testing.T) {
-	t.Parallel()
-
-	user := fixtureUser(t)
-	db := &fakeAuthDB{
-		updateUserRefreshToken: func(ctx context.Context, id uuid.UUID, refreshToken *string) error {
-			return nil
-		},
-	}
-	signer := newTestSigner(t)
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
-	req, tok := withRefreshCookieToken(t, req, signer, user.ID)
-	db.clearCASEnabled = true
-	db.clearCASCurrent = &tok
-	rec := httptest.NewRecorder()
-	h.Logout(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-
-	// DB-side: the CAS clear ran, against this user, carrying the presented
-	// token.  The token argument is the load-bearing one — it is what stops a
-	// stale-but-signed cookie from clearing somebody's live session.
-	if db.clearCallCount != 1 {
-		t.Errorf("ClearRefreshTokenIfMatches called %d times, want 1", db.clearCallCount)
-	}
-	if db.clearCalledID != user.ID {
-		t.Errorf("ClearRefreshTokenIfMatches id = %s, want %s", db.clearCalledID, user.ID)
-	}
-	if db.clearCalledWith == nil || *db.clearCalledWith != tok {
-		t.Errorf("ClearRefreshTokenIfMatches token = %v, want the presented cookie value", db.clearCalledWith)
-	}
-
-	// Cookie-side: Set-Cookie has MaxAge<=0.
-	c := getSetCookie(rec, RefreshCookieName)
-	if c == nil {
-		t.Fatal("no refreshToken cookie cleared")
-	}
-	if c.MaxAge > 0 {
-		t.Errorf("MaxAge = %d, want <= 0", c.MaxAge)
-	}
-
-	// Body: {"data":{"message":"Logged out"}}
-	var data MessageData
-	decodeData(t, rec.Body.Bytes(), &data)
-	if data.Message != "Logged out" {
-		t.Errorf("message = %q, want Logged out", data.Message)
-	}
-}
 
 // -----------------------------------------------------------------------------
 // Me
@@ -950,12 +711,12 @@ func withRefreshCookie(t *testing.T, req *http.Request, s *jwtx.Signer, id uuid.
 // the case the predicate is designed to reject.
 func withRefreshCookieToken(t *testing.T, req *http.Request, s *jwtx.Signer, id uuid.UUID) (*http.Request, string) {
 	t.Helper()
-	tok, err := s.SignRefresh(id)
+	issued, err := s.SignRefresh(id, uuid.New())
 	if err != nil {
 		t.Fatalf("SignRefresh: %v", err)
 	}
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: tok})
-	return req, tok
+	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: issued.Token})
+	return req, issued.Token
 }
 
 func injectClaims(ctx context.Context, userID uuid.UUID, username string, role *string) context.Context {
@@ -1127,34 +888,6 @@ func TestLogin_BadJSON_400(t *testing.T) {
 	}
 }
 
-func TestRefresh_UserNotFound_401(t *testing.T) {
-	t.Parallel()
-
-	signer := newTestSigner(t)
-	user := fixtureUser(t)
-	cookieToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-
-	db := &fakeAuthDB{
-		// No such row, so the CAS updates nothing; the re-read that follows
-		// also finds nothing and the request ends as INVALID_TOKEN.
-		rotateCASEnabled: true,
-		rotateCASCurrent: nil,
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return dbgen.User{}, pgx.ErrNoRows
-		},
-	}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
-	rec := httptest.NewRecorder()
-	h.Refresh(rec, req)
-
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
-}
-
 // assertAuthCookiesCleared checks all three auth cookies carry an expiring
 // Set-Cookie.  Logout must emit these on EVERY path, authenticated or not —
 // clearing the caller's own browser is never something we withhold.
@@ -1178,50 +911,15 @@ func assertAuthCookiesCleared(t *testing.T, rec *httptest.ResponseRecorder) {
 // Logout sat behind jwtx.RequireAuth while the access cookie lives only
 // accessTTL (15m).  A tab idle past that window got a 401 from the
 // middleware and the handler NEVER RAN: no Clear-Cookie headers, no DB
-// write.  The browser kept its 7-day refresh cookie, next-app's proxy.ts
+// write.  The browser kept its refresh cookie, next-app's proxy.ts
 // saw needsRefresh(session)==true (the access token had expired — that is
 // exactly why logout 401'd) plus a live refreshToken, refreshed, and signed
 // the user straight back in.  The UI said logged out; the session was not.
 //
-// Deterministic, not a race.  These three tests are what keep it fixed.
+// Deterministic, not a race.  These two tests and
+// TestLogout_EndsOnlyThisSession (sessions_test.go — it runs with no access
+// claims in ctx, which is the bug's shape) are what keep it fixed.
 // ---------------------------------------------------------------------------
-
-// The bug itself: no access claims in ctx at all (what RequireAuth's absence
-// looks like from the handler's side) plus a valid refresh cookie must still
-// end the session server-side.
-func TestLogout_NoAccessClaims_StillEndsSessionInDB(t *testing.T) {
-	t.Parallel()
-
-	user := fixtureUser(t)
-	signer := newTestSigner(t)
-	db := &fakeAuthDB{clearCASEnabled: true}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
-	req, tok := withRefreshCookieToken(t, req, signer, user.ID)
-	// The row holds exactly the token the tab is presenting — an idle tab's
-	// refresh cookie is still the live one, which is why adding the predicate
-	// does not reinstate the bug this test guards.
-	db.clearCASCurrent = &tok
-	rec := httptest.NewRecorder()
-	h.Logout(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if db.clearCallCount != 1 {
-		t.Fatalf("ClearRefreshTokenIfMatches called %d times, want 1 — "+
-			"an expired access token must not stop the session from ending",
-			db.clearCallCount)
-	}
-	if db.clearCalledID != user.ID {
-		t.Errorf("ended session for %s, want %s", db.clearCalledID, user.ID)
-	}
-	if db.clearCASCurrent != nil {
-		t.Errorf("the row still holds a live refresh token after logout: %v", *db.clearCASCurrent)
-	}
-	assertAuthCookiesCleared(t, rec)
-}
 
 // No credentials at all: still 200, still clears cookies, but must NOT
 // touch the DB — we do not null a user row on an unverified claim.
@@ -1238,9 +936,9 @@ func TestLogout_NoCredentials_ClearsCookiesWithoutDBWrite(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 — logout must always succeed", rec.Code)
 	}
-	if db.updateRefreshCallCount != 0 {
-		t.Errorf("UpdateUserRefreshToken called %d times, want 0 with no credentials",
-			db.updateRefreshCallCount)
+	if db.model().writes != 0 || db.clearCallCount != 0 {
+		t.Errorf("session writes = %d, legacy clears = %d, want 0 with no credentials",
+			db.model().writes, db.clearCallCount)
 	}
 	assertAuthCookiesCleared(t, rec)
 }
@@ -1261,9 +959,9 @@ func TestLogout_ForgedRefreshCookie_ClearsCookiesWithoutDBWrite(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 — failures must not be distinguishable", rec.Code)
 	}
-	if db.updateRefreshCallCount != 0 {
-		t.Errorf("UpdateUserRefreshToken called %d times, want 0 for an unverified cookie",
-			db.updateRefreshCallCount)
+	if db.model().writes != 0 || db.clearCallCount != 0 {
+		t.Errorf("session writes = %d, legacy clears = %d, want 0 for an unverified cookie",
+			db.model().writes, db.clearCallCount)
 	}
 	assertAuthCookiesCleared(t, rec)
 }
@@ -1412,18 +1110,10 @@ func TestAuthHint_SetOnRefresh_NormalPath(t *testing.T) {
 
 	signer := newTestSigner(t)
 	user := fixtureUser(t)
-	cookieToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	user.RefreshToken = &cookieToken
-
-	db := &fakeAuthDB{
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return user, nil
-		},
-	}
+	db := &fakeAuthDB{}
+	cookieToken, _ := seedSession(t, db, signer, user)
 	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
+
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
 	rec := httptest.NewRecorder()
@@ -1455,32 +1145,23 @@ func TestAuthHint_SetOnRefresh_GracePath(t *testing.T) {
 
 	signer := newTestSigner(t)
 	user := fixtureUser(t)
-
-	oldToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh old: %v", err)
-	}
-	currentToken := "current-token-sentinel-auth-hint"
-	user.RefreshToken = &currentToken
-	user.PreviousRefreshToken = &oldToken
-	user.RefreshRotatedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
-
-	db := &fakeAuthDB{
-		// The winning request already swapped current to currentToken, so
-		// this one's CAS (expecting oldToken) matches nothing — which is
-		// exactly what routes it into the grace branch instead of letting it
-		// rotate a second time and erase oldToken from both slots.
-		rotateCASEnabled: true,
-		rotateCASCurrent: &currentToken,
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return user, nil
-		},
-	}
+	db := &fakeAuthDB{}
+	oldToken, _ := seedSession(t, db, signer, user)
 	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: oldToken})
-	rec := httptest.NewRecorder()
-	h.Refresh(rec, req)
+
+	refresh := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
+		req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: oldToken})
+		rec := httptest.NewRecorder()
+		h.Refresh(rec, req)
+		return rec
+	}
+	// The first request wins the rotation; the second, carrying the same
+	// cookie, lands in the grace window.
+	if rec := refresh(); rec.Code != http.StatusOK {
+		t.Fatalf("first refresh status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	rec := refresh()
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
@@ -2142,311 +1823,8 @@ func TestResetPassword_BadJSON_400(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Refresh grace-window tests (concurrent-refresh race fix)
+// UpdateMe
 // -----------------------------------------------------------------------------
-
-// TestRefresh_NormalRotate_200 verifies the NORMAL path: cookie matches the
-// current DB refresh_token → 200, RotateRefreshToken called once.
-func TestRefresh_NormalRotate_200(t *testing.T) {
-	t.Parallel()
-
-	signer := newTestSigner(t)
-	user := fixtureUser(t)
-	cookieToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	user.RefreshToken = &cookieToken
-
-	db := &fakeAuthDB{
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return user, nil
-		},
-	}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
-	rec := httptest.NewRecorder()
-	h.Refresh(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-
-	// RotateRefreshToken must have been called exactly once (not UpdateUserRefreshToken).
-	if db.rotateRefreshCallCount != 1 {
-		t.Errorf("RotateRefreshToken call count = %d, want 1", db.rotateRefreshCallCount)
-	}
-	if db.rotateRefreshCalledID != user.ID {
-		t.Errorf("RotateRefreshToken id = %s, want %s", db.rotateRefreshCalledID, user.ID)
-	}
-	if db.rotateRefreshCalledWith == nil || *db.rotateRefreshCalledWith == "" {
-		t.Error("RotateRefreshToken called with empty token")
-	}
-
-	// The new refresh cookie must be present and non-empty.
-	c := getSetCookie(rec, RefreshCookieName)
-	if c == nil || c.Value == "" {
-		t.Error("new refresh cookie not set")
-	}
-
-	var data RefreshData
-	decodeData(t, rec.Body.Bytes(), &data)
-	if data.AccessToken == "" {
-		t.Error("accessToken missing")
-	}
-}
-
-// TestRefresh_GraceHit_200 verifies the GRACE path: cookie matches
-// previous_refresh_token within the 30 s window →
-//   - 200
-//   - refresh cookie re-set to the CURRENT token (not a new one)
-//   - RotateRefreshToken NOT called (no re-rotation)
-//
-// Note: JWT tokens signed within the same second are byte-identical because
-// the payload only has second-precision timestamps.  To ensure the DB's
-// current token is distinguishable from the cookie (grace) token, we set
-// the DB's current token to a known distinct raw string — the handler only
-// does string equality against it (it never JWT-verifies the current token).
-func TestRefresh_GraceHit_200(t *testing.T) {
-	t.Parallel()
-
-	signer := newTestSigner(t)
-	user := fixtureUser(t)
-
-	// The cookie carries the old (previously-current) signed JWT.
-	oldToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh old: %v", err)
-	}
-
-	// The DB current token is a sentinel that proves the grace path
-	// re-sets the cookie to the current token, not a freshly issued one.
-	currentToken := "current-token-sentinel-after-rotation"
-
-	// DB state after the first (winning) rotation: current=NEW, previous=OLD,
-	// rotated_at=now (well within the 30 s window).
-	user.RefreshToken = &currentToken
-	user.PreviousRefreshToken = &oldToken
-	user.RefreshRotatedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
-
-	db := &fakeAuthDB{
-		// The winning request already swapped current to currentToken, so
-		// this one's CAS (expecting oldToken) matches nothing — which is
-		// exactly what routes it into the grace branch instead of letting it
-		// rotate a second time and erase oldToken from both slots.
-		rotateCASEnabled: true,
-		rotateCASCurrent: &currentToken,
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return user, nil
-		},
-	}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-
-	// Second (concurrent) request arrives with the OLD token.
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: oldToken})
-	rec := httptest.NewRecorder()
-	h.Refresh(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-
-	// No re-rotation on a grace hit.  The swap IS attempted — that attempt
-	// is now the check — but the predicate must refuse it.  Re-rotating here
-	// would write previous=oldToken (the token this request sent, already
-	// stale on the winning request) and erase the only value that still
-	// lets the loser recover.
-	if db.rotateCASMissCount != 1 {
-		t.Errorf("CAS misses = %d, want 1 — the grace hit must be a refused swap, not a landed one",
-			db.rotateCASMissCount)
-	}
-	if db.rotateRefreshCallCount != 1 {
-		t.Errorf("RotateRefreshToken called %d times, want exactly 1 attempt", db.rotateRefreshCallCount)
-	}
-
-	// Refresh cookie must be re-set to the CURRENT token (so the client catches up).
-	c := getSetCookie(rec, RefreshCookieName)
-	if c == nil {
-		t.Fatal("refresh cookie not set on grace hit")
-	}
-	if c.Value != currentToken {
-		t.Errorf("refresh cookie = %q, want current token %q", c.Value, currentToken)
-	}
-
-	// A new access token must be issued.
-	var data RefreshData
-	decodeData(t, rec.Body.Bytes(), &data)
-	if data.AccessToken == "" {
-		t.Error("accessToken missing in grace-hit response")
-	}
-}
-
-// TestRefresh_GraceExpired_401 verifies that the grace window is enforced:
-// same setup as GraceHit but refresh_rotated_at is 1 min ago → 401.
-func TestRefresh_GraceExpired_401(t *testing.T) {
-	t.Parallel()
-
-	signer := newTestSigner(t)
-	user := fixtureUser(t)
-
-	// Cookie carries the old signed JWT.
-	oldToken, err := signer.SignRefresh(user.ID)
-	if err != nil {
-		t.Fatalf("SignRefresh old: %v", err)
-	}
-	// DB current token is a distinct sentinel (see GraceHit note).
-	currentToken := "current-token-sentinel-expired-grace"
-
-	user.RefreshToken = &currentToken
-	user.PreviousRefreshToken = &oldToken
-	// Rotated 1 minute ago — well outside the 30 s grace window.
-	user.RefreshRotatedAt = pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
-
-	db := &fakeAuthDB{
-		// Current is the sentinel, so the CAS on oldToken matches nothing
-		// and the request falls through to the (expired) grace check.
-		rotateCASEnabled: true,
-		rotateCASCurrent: &currentToken,
-		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
-			return user, nil
-		},
-	}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: oldToken})
-	rec := httptest.NewRecorder()
-	h.Refresh(rec, req)
-
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
-
-	// The swap is attempted (that attempt is the check) but must be refused;
-	// nothing may land on a row whose grace window has already closed.
-	if db.rotateCASMissCount != 1 {
-		t.Errorf("CAS misses = %d, want 1 — expired grace must still be a refused swap",
-			db.rotateCASMissCount)
-	}
-	if db.rotateRefreshCallCount != 1 {
-		t.Errorf("RotateRefreshToken called %d times, want exactly 1 attempt", db.rotateRefreshCallCount)
-	}
-}
-
-// TestLogout_NullsBothTokenColumns verifies that logout clears both
-// refresh_token AND previous_refresh_token (via UpdateUserRefreshToken(nil))
-// so a grace-window token can't be replayed after logout.
-func TestLogout_NullsBothTokenColumns(t *testing.T) {
-	t.Parallel()
-
-	user := fixtureUser(t)
-	db := &fakeAuthDB{clearCASEnabled: true}
-	signer := newTestSigner(t)
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
-	req, tok := withRefreshCookieToken(t, req, signer, user.ID)
-	db.clearCASCurrent = &tok
-	rec := httptest.NewRecorder()
-	h.Logout(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-
-	// What this test can actually see is that the handler issued the CLEAR
-	// query for this user with the presented token.  Whether that statement
-	// then nulls all three token columns is a property of the SQL, which no
-	// fake can observe; that half is pinned in
-	// test/integration/user_session_columns_test.go against a real Postgres.
-	// Stated because the obvious reading of "logout was called" is that the
-	// columns were checked, and they were not.
-	if db.clearCallCount != 1 {
-		t.Errorf("ClearRefreshTokenIfMatches called %d times, want 1", db.clearCallCount)
-	}
-	if db.clearCalledID != user.ID {
-		t.Errorf("ClearRefreshTokenIfMatches id = %s, want %s", db.clearCalledID, user.ID)
-	}
-
-	// RotateRefreshToken must NOT have been called.
-	if db.rotateRefreshCallCount != 0 {
-		t.Errorf("RotateRefreshToken called %d times on logout, want 0", db.rotateRefreshCallCount)
-	}
-}
-
-// TestLogout_StaleButSignedToken_ClearsNothing is the whole reason the write
-// carries a predicate.
-//
-// A refresh token stays SIGNATURE-valid for its full 7-day TTL, including
-// long after the server revoked it.  Without the predicate, replaying such a
-// token against /logout nulls whatever session the row currently holds — so a
-// dead credential from an old browser profile or a stale backup becomes a
-// week-long forced-logout weapon aimed at one specific user, renewable every
-// few minutes and costing the attacker one unauthenticated request.
-//
-// The caller's own cookies are still cleared: they asked to be logged out and
-// they are, locally. What must not happen is the write reaching a session
-// they no longer hold.
-func TestLogout_StaleButSignedToken_ClearsNothing(t *testing.T) {
-	t.Parallel()
-
-	user := fixtureUser(t)
-	signer := newTestSigner(t)
-
-	// The row has moved on — the user logged in again elsewhere, so the live
-	// token is not the one this request carries.
-	live := "the-current-session-token"
-	db := &fakeAuthDB{clearCASEnabled: true, clearCASCurrent: &live}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
-	req, stale := withRefreshCookieToken(t, req, signer, user.ID)
-	rec := httptest.NewRecorder()
-	h.Logout(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 — logout never reports whether it matched", rec.Code)
-	}
-	if db.clearCallCount != 1 {
-		t.Fatalf("ClearRefreshTokenIfMatches called %d times, want 1", db.clearCallCount)
-	}
-	if db.clearCalledWith == nil || *db.clearCalledWith != stale {
-		t.Errorf("the presented token must be passed to the predicate, got %v", db.clearCalledWith)
-	}
-	if db.clearCASCurrent == nil || *db.clearCASCurrent != live {
-		t.Errorf("a stale token cleared the live session: %v", db.clearCASCurrent)
-	}
-	assertAuthCookiesCleared(t, rec)
-}
-
-// TestLogout_GraceSlotToken_StillClears keeps the predicate from being too
-// tight.  A tab that refreshed moments ago holds the token that just moved
-// into previous_refresh_token; it is a legitimate session and must be able to
-// end itself.  Matching only refresh_token would 200-and-do-nothing for
-// exactly the users who were most recently active.
-func TestLogout_GraceSlotToken_StillClears(t *testing.T) {
-	t.Parallel()
-
-	user := fixtureUser(t)
-	signer := newTestSigner(t)
-	newer := "token-that-won-the-rotation"
-	db := &fakeAuthDB{clearCASEnabled: true, clearCASCurrent: &newer}
-	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
-	req, graceTok := withRefreshCookieToken(t, req, signer, user.ID)
-	db.clearCASPrevious = &graceTok
-	rec := httptest.NewRecorder()
-	h.Logout(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if db.clearCASCurrent != nil || db.clearCASPrevious != nil {
-		t.Errorf("a grace-slot token must still end the session; current=%v previous=%v",
-			db.clearCASCurrent, db.clearCASPrevious)
-	}
-}
 
 func TestUpdateMe_UpdatesPrivacyFlag(t *testing.T) {
 	t.Parallel()
