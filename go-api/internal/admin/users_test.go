@@ -210,7 +210,7 @@ func withAdminClaims(t *testing.T, ctx context.Context, userID uuid.UUID, userna
 		t.Fatalf("NewSigner: %v", err)
 	}
 	role := "admin"
-	tok, err := signer.SignAccess(userID, username, &role)
+	tok, err := signer.SignAccess(userID, uuid.New(), username, &role)
 	if err != nil {
 		t.Fatalf("SignAccess: %v", err)
 	}

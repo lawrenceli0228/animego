@@ -200,6 +200,19 @@ DELETE FROM user_sessions
 WHERE user_id = sqlc.arg(user_id)
   AND id <> sqlc.arg(keep_id);
 
+-- name: UserSessionLive :one
+-- Whether an access token's session still stands (jwtx.SessionChecker,
+-- asked on every authenticated request): a primary-key lookup.  Once the row
+-- is gone or expired the token is refused, so ending a session signs its
+-- device out on its next request rather than when the token runs out.
+SELECT EXISTS (
+    SELECT 1
+    FROM user_sessions
+    WHERE id = sqlc.arg(id)
+      AND user_id = sqlc.arg(user_id)
+      AND expires_at > now()
+) AS live;
+
 -- name: GetHeldUserSession :one
 -- Which session is this device: the sid in the request's refresh cookie,
 -- only while that cookie is still the session's current or grace-slot

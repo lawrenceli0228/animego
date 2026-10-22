@@ -47,7 +47,7 @@ func anonOrUserHandler(t *testing.T) http.Handler {
 func TestOptionalAuth_ValidHeaderToken_InjectsClaims(t *testing.T) {
 	s := newOptionalSigner(t)
 	userID := uuid.New()
-	tok, err := s.SignAccess(userID, "alice", nil)
+	tok, err := s.SignAccess(userID, uuid.New(), "alice", nil)
 	require.NoError(t, err)
 
 	handler := OptionalAuth(s)(anonOrUserHandler(t))
@@ -63,7 +63,7 @@ func TestOptionalAuth_ValidHeaderToken_InjectsClaims(t *testing.T) {
 func TestOptionalAuth_ValidCookieToken_InjectsClaims(t *testing.T) {
 	s := newOptionalSigner(t)
 	userID := uuid.New()
-	tok, err := s.SignAccess(userID, "bob", nil)
+	tok, err := s.SignAccess(userID, uuid.New(), "bob", nil)
 	require.NoError(t, err)
 
 	handler := OptionalAuth(s)(anonOrUserHandler(t))
@@ -106,7 +106,7 @@ func TestOptionalAuth_ExpiredToken_ContinuesAsAnon(t *testing.T) {
 	// Build a signer with a negative TTL so tokens are born expired.
 	expiredSigner, err := NewSigner("opt-access-secret", "opt-refresh-secret", -1*time.Second, time.Hour)
 	require.NoError(t, err)
-	tok, err := expiredSigner.SignAccess(uuid.New(), "expired-user", nil)
+	tok, err := expiredSigner.SignAccess(uuid.New(), uuid.New(), "expired-user", nil)
 	require.NoError(t, err)
 
 	// Verify with the normal signer (same secret, but the token exp < now).

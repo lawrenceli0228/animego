@@ -509,3 +509,24 @@ func (q *Queries) RotateUserSession(ctx context.Context, arg RotateUserSessionPa
 	err := row.Scan(&i.Username, &i.Role)
 	return i, err
 }
+
+const userSessionLive = `-- name: UserSessionLive :one
+SELECT EXISTS (
+    SELECT 1
+    FROM user_sessions
+    WHERE id = $1
+      AND user_id = $2
+      AND expires_at > now()
+) AS live
+`
+
+// Whether an access token's session still stands (jwtx.SessionChecker,
+// asked on every authenticated request): a primary-key lookup.  Once the row
+// is gone or expired the token is refused, so ending a session signs its
+// device out on its next request rather than when the token runs out.
+func (q *Queries) UserSessionLive(ctx context.Context, iD uuid.UUID, userID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, userSessionLive, iD, userID)
+	var live bool
+	err := row.Scan(&live)
+	return live, err
+}

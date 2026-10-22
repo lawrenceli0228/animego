@@ -5,12 +5,16 @@
 // drive that list across real browser contexts: separate cookie jars, one
 // account, each signed in through the login form.
 //
-// "Signed out" is checked the way it would be felt. Deleting a context's
-// `session` cookie stands in for its 15-minute access token running out;
-// proxy.ts then refreshes with the `refreshToken` cookie on the next
-// navigation, and that refresh is exactly what ending the session breaks.
-// The context that did the signing out is put through the same step and
-// must come back signed in — ending the others must not end itself.
+// "Signed out" is checked the way it would be felt, and at once: the device
+// that was signed out keeps its cookies — an access token that still
+// verifies for up to 15 minutes — and must be turned away on its very next
+// request anyway, by each of the three layers that see one:
+//   - proxy.ts, when it opens a personal page (/settings → /login);
+//   - go-api, when a freshly loaded page asks who is signed in;
+//   - the Navbar's recheck, when a page left open is focused again.
+// The context that did the signing out is put through an access-token
+// expiry (its `session` cookie deleted, so proxy.ts refreshes) and must come
+// back signed in — ending the others must not end itself.
 //
 // Lives in specs/sandbox/ (not the top-level specs/): the chromium-prod
 // project ignores sandbox/** so these writes never hit the live VPS.
@@ -80,8 +84,13 @@ async function expireAccessToken(device: Device): Promise<void> {
   await device.page.goto("/");
 }
 
+/** The reader comes back to a page that was left open. */
+async function refocus(page: Page): Promise<void> {
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+}
+
 test.describe("settings · signed-in devices", () => {
-  test("退出 on another device's tile signs that device out, and only that one", async ({ browser }) => {
+  test("退出 on another device's tile signs that device out at once, and only that one", async ({ browser }) => {
     test.setTimeout(SPEC_TIMEOUT_MS);
     const user = await seedUser();
     const a = await signedInDevice(browser, user);
@@ -100,7 +109,11 @@ test.describe("settings · signed-in devices", () => {
     await expect(tiles).toHaveCount(1);
     await expect(a.page.getByText(/^(已退出|Signed out) /)).toBeVisible();
 
-    await expireAccessToken(b);
+    // B still holds an access token that verifies. Its next personal page
+    // is refused anyway, and the refusal takes its cookies with it.
+    await b.page.goto("/settings");
+    await expect(b.page).toHaveURL(/\/login\?from=/);
+    await b.page.goto("/");
     await expectSignedOut(b.page);
 
     await expireAccessToken(a);
@@ -111,7 +124,7 @@ test.describe("settings · signed-in devices", () => {
     await b.context.close();
   });
 
-  test("退出其他设备 → 全部退出 signs every other device out", async ({ browser }) => {
+  test("退出其他设备 → 全部退出 signs every other device out at once", async ({ browser }) => {
     test.setTimeout(SPEC_TIMEOUT_MS);
     const user = await seedUser();
     const a = await signedInDevice(browser, user);
@@ -133,9 +146,11 @@ test.describe("settings · signed-in devices", () => {
     // Nothing left to end, so nothing offers to.
     await expect(a.page.getByRole("button", { name: /^(退出其他设备|Sign out other devices)$/ })).toHaveCount(0);
 
-    await expireAccessToken(b);
+    // B was left open on the home page: coming back to it is enough.
+    await refocus(b.page);
     await expectSignedOut(b.page);
-    await expireAccessToken(c);
+    // C loads a page with its cookies untouched: go-api turns its token away.
+    await c.page.goto("/");
     await expectSignedOut(c.page);
 
     await expireAccessToken(a);

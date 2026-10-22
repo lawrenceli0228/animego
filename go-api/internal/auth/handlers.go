@@ -446,20 +446,21 @@ func (h *Handlers) failStartSession(w http.ResponseWriter, err error) {
 // handling are drawn at the top of sessions.go.
 //
 // All failure modes collapse into NO_TOKEN (no cookie) or INVALID_TOKEN
-// (any other reason) — no leak of "did JWT verify fail vs DB mismatch".
+// (any other reason) — no leak of "did JWT verify fail vs DB mismatch" —
+// and every one of them clears the auth cookies (rejectRefresh).
 func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 
 	c, err := r.Cookie(RefreshCookieName)
 	if err != nil || c.Value == "" {
-		httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeNoToken, msgNoToken))
+		h.rejectRefresh(w, codeNoToken, msgNoToken)
 		return
 	}
 
 	claims, err := h.signer.VerifyRefresh(c.Value)
 	if err != nil {
-		httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidToken, msgInvalidToken))
+		h.rejectRefresh(w, codeInvalidToken, msgInvalidToken)
 		return
 	}
 

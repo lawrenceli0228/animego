@@ -29,9 +29,10 @@ func OptionalAuth(s *Signer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := ClaimsFromRequest(s, r)
-			if !ok {
-				// No token, or a token that is present but invalid (expired
-				// / tampered) → anon.  Don't error.  This matches Express's
+			if !ok || s.checkSession(r.Context(), claims) != sessionLive {
+				// No token, a token that is present but invalid (expired /
+				// tampered), or one whose session has ended or could not be
+				// looked up → anon.  Don't error.  This matches Express's
 				// optionalAuth catch-all: `catch (_) { /* ignore */ }`.
 				next.ServeHTTP(w, r)
 				return
@@ -46,6 +47,10 @@ func OptionalAuth(s *Signer) func(http.Handler) http.Handler {
 // claims, or (nil, false) when there is no token or the token does not
 // verify.  It never writes to the response and never distinguishes the two
 // failures — callers that need to are looking at RequireAuth.
+//
+// It checks the signature and expiry only, not whether the token's session
+// still stands (WithSessionCheck): that lookup belongs to the middleware that
+// decides access, not to callers that only want to know who is calling.
 //
 // This is a read of the request, not a mutation of it.  Attaching the claims
 // stays the private business of RequireAuth / OptionalAuth via withClaims, so

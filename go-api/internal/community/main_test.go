@@ -111,7 +111,7 @@ func (e *env) userWith(name string, public bool, role *string) user {
 		INSERT INTO users (username, email, password, is_public, role)
 		VALUES ($1, $1 || '@example.test', 'hash', $2, $3)
 		RETURNING id`, name, public, role).Scan(&id))
-	tok, err := e.signer.SignAccess(id, name, role)
+	tok, err := e.signer.SignAccess(id, uuid.New(), name, role)
 	require.NoError(e.t, err)
 	return user{ID: id, Name: name, token: tok}
 }

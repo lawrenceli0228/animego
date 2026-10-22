@@ -125,7 +125,7 @@ func (f *flow) user(name string, admin bool) account {
 	require.NoError(f.t, f.pool.QueryRow(context.Background(),
 		`INSERT INTO users (username, email, password, role) VALUES ($1, $1 || '@example.test', 'x', $2) RETURNING id`,
 		name, role).Scan(&id))
-	token, err := f.signer.SignAccess(id, name, role)
+	token, err := f.signer.SignAccess(id, uuid.New(), name, role)
 	require.NoError(f.t, err)
 	return account{id: id, token: token}
 }

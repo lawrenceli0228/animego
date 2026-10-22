@@ -56,7 +56,7 @@ func TestClaimsSink_WritingToASinkDoesNotAuthenticate(t *testing.T) {
 func TestClaimsSink_FilledByRequireAuth(t *testing.T) {
 	signer := sinkTestSigner(t)
 	userID := uuid.New()
-	token, err := signer.SignAccess(userID, "tester", nil)
+	token, err := signer.SignAccess(userID, uuid.New(), "tester", nil)
 	if err != nil {
 		t.Fatalf("SignAccess: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestClaimsSink_StaysEmptyForAnonymousAndForgedTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSigner: %v", err)
 	}
-	foreign, err := other.SignAccess(uuid.New(), "elsewhere", nil)
+	foreign, err := other.SignAccess(uuid.New(), uuid.New(), "elsewhere", nil)
 	if err != nil {
 		t.Fatalf("SignAccess: %v", err)
 	}

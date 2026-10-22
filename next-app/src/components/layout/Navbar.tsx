@@ -13,7 +13,7 @@
 // lib/nav/navLinks, shared with the drawer.
 
 import Link from "@/components/ui/LocaleLink";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { useLang } from "@/lib/lang-client";
@@ -30,6 +30,7 @@ import NavAuthCta from "./NavAuthCta";
 import NavDrawer from "./NavDrawer";
 import NavSearch from "./NavSearch";
 import { useNavScroll } from "./useNavScroll";
+import { useSessionRecheck } from "./useSessionRecheck";
 import styles from "./Navbar.module.css";
 
 export interface NavUser {
@@ -79,6 +80,18 @@ export default function Navbar({ season, year }: NavbarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const { hidden, glass } = useNavScroll(headerRef);
+  const router = useRouter();
+
+  // The session behind this open tab ended elsewhere — another device's
+  // 登录设备 → 退出, a password change, logout in another tab — and the page
+  // has made no request since to find out. Drop the signed-in chrome and the
+  // per-user state (as logout does), then re-render the route: the proxy
+  // sends a personal page to /login and a public one renders signed out.
+  useSessionRecheck(Boolean(user), () => {
+    setUser(null);
+    broadcastSignedOut();
+    router.refresh();
+  });
 
   useEffect(() => {
     let cancelled = false;

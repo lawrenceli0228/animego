@@ -328,3 +328,185 @@ describe("proxy session-refresh step (needsRefresh + refreshToken present)", () 
     expect(setCookieHeader).toContain(`session=${newSession}`);
   });
 });
+
+// A device signed out from another device's settings page (or by logout, or
+// a password change) still holds an access token that verifies for up to 15
+// minutes. The gate's jwt.verify cannot see that; go-api can.
+describe("proxy: a session that has ended", () => {
+  const AUTH_COOKIES = ["session", "refreshToken", "auth_hint"];
+
+  function sessionFor(extra: Record<string, unknown> = {}) {
+    return jwt.sign({ userId: "u1", sid: "s-1", username: "alice", ...extra }, SECRET, {
+      expiresIn: "15m",
+    });
+  }
+
+  function clearedCookies(res: Response): string[] {
+    return res.headers
+      .getSetCookie()
+      .filter((c) => /Expires=Thu, 01 Jan 1970|Max-Age=0/.test(c))
+      .map((c) => c.slice(0, c.indexOf("=")));
+  }
+
+  function meResponse(status: number) {
+    return mockFetch(async (input) => {
+      expect(String(input)).toEndWith("/api/auth/me");
+      return new Response(status === 200 ? '{"data":{"user":{}}}' : "{}", { status });
+    });
+  }
+
+  test("a gated page whose session go-api no longer knows sends the device to /login and clears every auth cookie", async () => {
+    globalThis.fetch = meResponse(401);
+
+    const res = await proxy(
+      buildRequest("/settings", { session: sessionFor(), refreshToken: "rt", auth_hint: "1" }),
+    );
+
+    expect(res.status).toBe(307);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/login");
+    expect(loc.searchParams.get("from")).toBe("/settings");
+    expect(clearedCookies(res).sort()).toEqual([...AUTH_COOKIES].sort());
+  });
+
+  test("asks with the device's own access token and the reader's address, never a shared one", async () => {
+    const token = sessionFor();
+    const spy = meResponse(200);
+    globalThis.fetch = spy;
+    const headers = new Headers({
+      Cookie: `session=${token}; refreshToken=rt`,
+      "x-real-ip": "203.0.113.7",
+      "x-forwarded-for": "203.0.113.7",
+    });
+
+    const res = await proxy(new NextRequest(new URL("https://animegoclub.com/library"), { headers }));
+
+    expect(res.status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const sent = new Headers(spy.mock.calls[0][1]?.headers);
+    expect(sent.get("authorization")).toBe(`Bearer ${token}`);
+    expect(sent.get("x-real-ip")).toBe("203.0.113.7");
+    expect(sent.get("cookie")).toBeNull();
+  });
+
+  test("a live session passes the gate untouched", async () => {
+    globalThis.fetch = meResponse(200);
+
+    const res = await proxy(buildRequest("/watching", { session: sessionFor() }));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(clearedCookies(res)).toEqual([]);
+  });
+
+  test("go-api unreachable or failing is not a verdict: the page goes through", async () => {
+    for (const fetchImpl of [
+      mockFetch(async () => {
+        throw new Error("connect ECONNREFUSED");
+      }),
+      mockFetch(async () => new Response("{}", { status: 500 })),
+      mockFetch(async () => new Response("{}", { status: 429 })),
+    ]) {
+      globalThis.fetch = fetchImpl;
+
+      const res = await proxy(buildRequest("/profile", { session: sessionFor() }));
+
+      expect(res.status).toBe(200);
+      expect(clearedCookies(res)).toEqual([]);
+    }
+  });
+
+  test("the admin role check still applies to a live session", async () => {
+    globalThis.fetch = meResponse(200);
+
+    const res = await proxy(buildRequest("/admin", { session: sessionFor() }));
+
+    expect(res.status).toBe(403);
+  });
+
+  test("tokens minted before they named a session, and public pages, are not looked up", async () => {
+    const spy = mockFetch(async () => new Response("{}", { status: 401 }));
+    globalThis.fetch = spy;
+    const legacy = jwt.sign({ userId: "u1", username: "alice" }, SECRET, { expiresIn: "15m" });
+
+    expect((await proxy(buildRequest("/settings", { session: legacy }))).status).toBe(200);
+    expect((await proxy(buildRequest("/", { session: sessionFor() }))).status).toBe(200);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  test("prefetches are not looked up: a page prefetches every gated link in view, and the navigation that follows is checked", async () => {
+    const spy = mockFetch(async () => new Response("{}", { status: 401 }));
+    globalThis.fetch = spy;
+    const token = sessionFor();
+
+    for (const header of ["next-router-prefetch", "next-router-segment-prefetch"]) {
+      const headers = new Headers({ Cookie: `session=${token}`, [header]: "1" });
+      const res = await proxy(new NextRequest(new URL("https://animegoclub.com/library"), { headers }));
+      expect(res.status).toBe(200);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  test("a session refreshed in this same request is not looked up again", async () => {
+    const fresh = sessionFor();
+    const spy = mockFetch(async () =>
+      new Response(null, { status: 200, headers: { "set-cookie": `session=${fresh}; Path=/; HttpOnly` } }),
+    );
+    globalThis.fetch = spy;
+
+    const res = await proxy(buildRequest("/settings", { refreshToken: "rt" }));
+
+    expect(res.status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(String(spy.mock.calls[0][0])).toEndWith("/api/auth/refresh");
+  });
+});
+
+describe("proxy: a refresh go-api refuses for good", () => {
+  function clearedCookies(res: Response): string[] {
+    return res.headers
+      .getSetCookie()
+      .filter((c) => /Expires=Thu, 01 Jan 1970|Max-Age=0/.test(c))
+      .map((c) => c.slice(0, c.indexOf("=")))
+      .sort();
+  }
+
+  test("clears every auth cookie, on a public page too, so the browser stops retrying it", async () => {
+    globalThis.fetch = mockFetch(async () => new Response("{}", { status: 401 }));
+
+    const res = await proxy(buildRequest("/", { refreshToken: "dead-rt", auth_hint: "1", lang: "zh" }));
+
+    expect(res.status).toBe(200);
+    expect(clearedCookies(res)).toEqual(["auth_hint", "refreshToken", "session"]);
+    // and this request renders signed out: the page never sees the dead cookies
+    const forwarded = res.headers.get("x-middleware-request-cookie") ?? "";
+    expect(forwarded).not.toContain("refreshToken=");
+    expect(forwarded).not.toContain("auth_hint=");
+    expect(forwarded).toContain("lang=zh");
+  });
+
+  test("a gated page bounces to /login with every auth cookie cleared", async () => {
+    globalThis.fetch = mockFetch(async () => new Response("{}", { status: 401 }));
+
+    const res = await proxy(buildRequest("/settings", { refreshToken: "dead-rt", auth_hint: "1" }));
+
+    expect(res.status).toBe(307);
+    expect(clearedCookies(res)).toEqual(["auth_hint", "refreshToken", "session"]);
+  });
+
+  test("a refresh that failed on go-api's side keeps the cookies for the next try", async () => {
+    for (const fetchImpl of [
+      mockFetch(async () => new Response("{}", { status: 500 })),
+      mockFetch(async () => {
+        throw new Error("network error");
+      }),
+    ]) {
+      globalThis.fetch = fetchImpl;
+
+      const res = await proxy(buildRequest("/", { refreshToken: "rt", auth_hint: "1" }));
+
+      expect(res.status).toBe(200);
+      expect(clearedCookies(res)).toEqual([]);
+    }
+  });
+});

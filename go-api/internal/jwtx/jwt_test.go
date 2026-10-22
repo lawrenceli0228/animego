@@ -53,7 +53,7 @@ func TestSignAccess_HappyPath(t *testing.T) {
 	userID := uuid.New()
 	role := "admin"
 
-	tok, err := s.SignAccess(userID, "alice", &role)
+	tok, err := s.SignAccess(userID, uuid.New(), "alice", &role)
 	require.NoError(t, err)
 	require.NotEmpty(t, tok)
 
@@ -85,7 +85,7 @@ func decodeJWTPayload(t *testing.T, tok string) map[string]any {
 
 func TestSignAccess_Role_Nil_OmittedFromJSON(t *testing.T) {
 	s := newTestSigner(t)
-	tok, err := s.SignAccess(uuid.New(), "bob", nil)
+	tok, err := s.SignAccess(uuid.New(), uuid.New(), "bob", nil)
 	require.NoError(t, err)
 
 	payload := decodeJWTPayload(t, tok)
@@ -99,7 +99,7 @@ func TestSignAccess_Role_Nil_OmittedFromJSON(t *testing.T) {
 func TestSignAccess_Role_NonNil_PresentInJSON(t *testing.T) {
 	s := newTestSigner(t)
 	role := "user"
-	tok, err := s.SignAccess(uuid.New(), "carol", &role)
+	tok, err := s.SignAccess(uuid.New(), uuid.New(), "carol", &role)
 	require.NoError(t, err)
 
 	payload := decodeJWTPayload(t, tok)
@@ -207,7 +207,7 @@ func TestVerifyAccess_Expired_Returns_ErrTokenExpired(t *testing.T) {
 	s, err := NewSigner(testAccessSecret, testRefreshSecret, -1*time.Second, time.Hour)
 	require.NoError(t, err)
 
-	tok, err := s.SignAccess(uuid.New(), "expired-user", nil)
+	tok, err := s.SignAccess(uuid.New(), uuid.New(), "expired-user", nil)
 	require.NoError(t, err)
 
 	_, err = s.VerifyAccess(tok)
@@ -217,7 +217,7 @@ func TestVerifyAccess_Expired_Returns_ErrTokenExpired(t *testing.T) {
 
 func TestVerifyAccess_WrongSecret(t *testing.T) {
 	signer := newTestSigner(t)
-	tok, err := signer.SignAccess(uuid.New(), "dave", nil)
+	tok, err := signer.SignAccess(uuid.New(), uuid.New(), "dave", nil)
 	require.NoError(t, err)
 
 	other, err := NewSigner("different-access-secret", testRefreshSecret, time.Minute, time.Hour)
@@ -299,7 +299,7 @@ func TestSignAccess_Username_Roundtrip_Unicode(t *testing.T) {
 	}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
-			tok, err := s.SignAccess(uuid.New(), name, nil)
+			tok, err := s.SignAccess(uuid.New(), uuid.New(), name, nil)
 			require.NoError(t, err)
 			claims, err := s.VerifyAccess(tok)
 			require.NoError(t, err)

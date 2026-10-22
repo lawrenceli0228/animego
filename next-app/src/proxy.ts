@@ -28,7 +28,8 @@ import {
 //   2. AUTH GATE (/admin, /library, library-mode /player, /profile, /settings,
 //      /watching) — verify the (now
 //      possibly refreshed) session against JWT_SECRET and redirect to
-//      /login?from=<path> if absent/expired/tampered. /admin additionally
+//      /login?from=<path> if absent/expired/tampered, or if go-api says the
+//      session it names has ended (sessionVerdict). /admin additionally
 //      requires role "admin". Bare /player is a public local-file trial;
 //      /player?seriesId=... stays gated because it opens a user's persisted
 //      library. /profile (P11) is the user's own subscription list — auth-only,
@@ -45,9 +46,14 @@ import {
 
 interface SessionPayload {
   userId?: string;
+  sid?: string;
   username?: string;
   role?: string;
 }
+
+// The cookies a signed-in browser carries, cleared together once go-api says
+// the session behind them has ended.
+const AUTH_COOKIES = ["session", "refreshToken", "auth_hint"] as const;
 
 const GO_API_INTERNAL_URL =
   process.env.GO_API_INTERNAL_URL || "http://go-api:8080";
@@ -188,6 +194,75 @@ function rebuildCookieHeader(
   return out.join("; ");
 }
 
+// The reader's own address for go-api calls made on their behalf. go-api keys
+// its per-IP rate limiter on X-Real-IP (auth.clientIP) and falls back to
+// r.RemoteAddr, which for a server-side fetch is the next-app CONTAINER's
+// address — so without these headers every such call on the site collapses
+// into one shared bucket. When it drains, the calls fail and every reader is
+// rendered as logged-out at once: a group-wide silent sign-out caused by
+// traffic, not by anything wrong with their sessions. lib/api.ts:buildHeaders
+// does the same.
+function clientAddressHeaders(req: NextRequest): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp) headers["X-Real-IP"] = realIp;
+  const forwardedFor = req.headers.get("x-forwarded-for");
+  if (forwardedFor) headers["X-Forwarded-For"] = forwardedFor;
+  return headers;
+}
+
+// Whether the session an access token names still stands. The gate's
+// jwt.verify only proves the token was signed and has not expired, and a
+// device signed out from another device's settings page — or by logout, or
+// a password change — holds a token that verifies for up to 15 more
+// minutes. go-api refuses such a token (jwtx.WithSessionCheck), so ask it.
+// "unknown" (unreachable, 5xx, rate-limited) lets the page through, as the
+// refresh step does: the page's own requests meet the same answer, and a
+// hiccup must not sign anyone out.
+async function sessionVerdict(
+  token: string,
+  req: NextRequest,
+): Promise<"live" | "ended" | "unknown"> {
+  try {
+    const r = await fetch(`${GO_API_INTERNAL_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}`, ...clientAddressHeaders(req) },
+      cache: "no-store",
+    });
+    if (r.ok) return "live";
+    return r.status === 401 ? "ended" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+// A router prefetch renders no reader data, and a page prefetches every gated
+// link in view: asking go-api for each would spend the reader's own share of
+// the per-IP API limit on links they never open. The navigation that follows
+// is a real request and is checked.
+function isPrefetch(req: NextRequest): boolean {
+  return (
+    req.headers.has("next-router-prefetch") ||
+    req.headers.has("next-router-segment-prefetch")
+  );
+}
+
+function clearAuthCookies(res: NextResponse): void {
+  for (const name of AUTH_COOKIES) res.cookies.delete(name);
+}
+
+// The Cookie header without the named cookies, so the render of this very
+// request sees what the browser will hold after it (signed out).
+function withoutCookies(original: string, names: readonly string[]): string {
+  return original
+    .split(/;\s*/)
+    .filter((part) => {
+      const eq = part.indexOf("=");
+      const name = eq === -1 ? part : part.slice(0, eq);
+      return part !== "" && !names.includes(name);
+    })
+    .join("; ");
+}
+
 export async function proxy(req: NextRequest) {
   // --- 0. Resolve the locale. No side effects: this only decides which
   // locale the request addresses and what the path is inside it. The rewrite
@@ -211,29 +286,21 @@ export async function proxy(req: NextRequest) {
 
   let effectiveSession = session;
   let setCookies: string[] | null = null;
+  // go-api refused the refresh token for good (401: no session, ended,
+  // replayed). The browser's auth cookies are dead and are cleared below;
+  // left in place they were retried on every request for 30 days.
+  let refreshRefused = false;
 
   // --- 1. Refresh step (all routes) ---
   if (needsRefresh(session) && refreshToken) {
     try {
-      // Forward the real client IP. go-api keys its per-IP rate limiter on
-      // X-Real-IP (auth.clientIP) and falls back to r.RemoteAddr, which for a
-      // server-side fetch is the next-app CONTAINER's address — so without
-      // these headers every SSR refresh on the site collapses into one shared
+      // The real client IP (clientAddressHeaders): the auth limiter is a
       // 120-per-15-minutes bucket, about eight per minute for all users
-      // combined. When it drains, r.ok is false and the fall-through below
-      // renders every one of them as logged-out: a group-wide silent sign-out
-      // caused by traffic, not by anything wrong with their sessions.
-      //
-      // lib/api.ts:buildHeaders already does exactly this, and its comment
-      // describes this same failure mode. This call site was simply never
-      // updated to match.
+      // combined if every SSR refresh shared the container's address.
       const refreshHeaders: Record<string, string> = {
         cookie: req.headers.get("cookie") ?? "",
+        ...clientAddressHeaders(req),
       };
-      const realIp = req.headers.get("x-real-ip");
-      if (realIp) refreshHeaders["X-Real-IP"] = realIp;
-      const forwardedFor = req.headers.get("x-forwarded-for");
-      if (forwardedFor) refreshHeaders["X-Forwarded-For"] = forwardedFor;
       // The browser's own User-Agent and Cloudflare's location headers: a
       // refresh rewrites the session's device columns (the settings page's
       // device list), and this fetch otherwise reaches go-api as Node's
@@ -255,10 +322,13 @@ export async function proxy(req: NextRequest) {
           effectiveSession =
             valueFromSetCookies(cookies, "session") ?? effectiveSession;
         }
+      } else if (r.status === 401) {
+        refreshRefused = true;
+        effectiveSession = undefined;
       }
-      // Non-ok (refreshToken truly expired/invalid): fall through. The gate
-      // will bounce gated routes to /login; non-gated routes render as
-      // logged-out, which is correct.
+      // Non-ok: fall through. The gate will bounce gated routes to /login;
+      // non-gated routes render as logged-out, which is correct. Only a 401
+      // is a verdict on the token; a 5xx keeps the cookies for the next try.
     } catch {
       // Transient go-api hiccup — never block the page; fall through with
       // the existing (stale) session.
@@ -289,8 +359,21 @@ export async function proxy(req: NextRequest) {
       // Expired/tampered and not refreshable — clear and bounce so the
       // browser stops replaying the bad cookie.
       const res = redirectToLogin(req, path, locale);
-      res.cookies.delete("session");
+      if (refreshRefused) clearAuthCookies(res);
+      else res.cookies.delete("session");
       return res;
+    }
+
+    // A token that names its session is asked about, unless it was minted
+    // by the refresh above a moment ago or this is a prefetch. Tokens from
+    // before access tokens named their session cannot be, and run out within
+    // 15 minutes.
+    if (decoded.sid && !setCookies && effectiveSession && !isPrefetch(req)) {
+      if ((await sessionVerdict(effectiveSession, req)) === "ended") {
+        const res = redirectToLogin(req, path, locale);
+        clearAuthCookies(res);
+        return res;
+      }
     }
 
     if (path.startsWith("/admin") && decoded.role !== "admin") {
@@ -319,6 +402,13 @@ export async function proxy(req: NextRequest) {
   // double-prefix guard fall out for free rather than needing its own check.
   const reqHeaders = new Headers(req.headers);
 
+  if (refreshRefused) {
+    reqHeaders.set(
+      "cookie",
+      withoutCookies(req.headers.get("cookie") ?? "", AUTH_COOKIES),
+    );
+  }
+
   if (setCookies) {
     const updates: Record<string, string> = {};
     const newSession = valueFromSetCookies(setCookies, "session");
@@ -343,6 +433,7 @@ export async function proxy(req: NextRequest) {
   if (setCookies) {
     for (const c of setCookies) res.headers.append("set-cookie", c);
   }
+  if (refreshRefused) clearAuthCookies(res);
   return res;
 }
 

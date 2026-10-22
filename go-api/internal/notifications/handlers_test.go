@@ -67,7 +67,7 @@ func authenticatedRequest(t *testing.T, method, target string, userID uuid.UUID)
 	t.Helper()
 	signer, err := jwtx.NewSigner("notifications-access-secret", "notifications-refresh-secret", time.Minute, time.Hour)
 	require.NoError(t, err)
-	token, err := signer.SignAccess(userID, "viewer", nil)
+	token, err := signer.SignAccess(userID, uuid.New(), "viewer", nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(method, target, nil)

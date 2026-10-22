@@ -3628,6 +3628,11 @@ type Querier interface {
 	// Directional companion for profile/UI state: true only when the first user
 	// owns the block row against the second user.
 	UserBlockedTarget(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (bool, error)
+	// Whether an access token's session still stands (jwtx.SessionChecker,
+	// asked on every authenticated request): a primary-key lookup.  Once the row
+	// is gone or expired the token is refused, so ending a session signs its
+	// device out on its next request rather than when the token runs out.
+	UserSessionLive(ctx context.Context, iD uuid.UUID, userID uuid.UUID) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -24,7 +24,7 @@ func testSigner(t testing.TB) *jwtx.Signer {
 
 func bearerRequest(t testing.TB, signer *jwtx.Signer, path string, userID uuid.UUID) *http.Request {
 	t.Helper()
-	token, err := signer.SignAccess(userID, "tester", nil)
+	token, err := signer.SignAccess(userID, uuid.New(), "tester", nil)
 	if err != nil {
 		t.Fatalf("SignAccess: %v", err)
 	}

@@ -541,6 +541,7 @@ func TestRefresh_NoCookie_401_NoToken(t *testing.T) {
 	h.Refresh(rec, req)
 
 	assertError(t, rec, http.StatusUnauthorized, "NO_TOKEN", "Please log in again")
+	assertAuthCookiesCleared(t, rec)
 }
 
 func TestRefresh_BadToken_401_InvalidToken(t *testing.T) {
@@ -553,6 +554,7 @@ func TestRefresh_BadToken_401_InvalidToken(t *testing.T) {
 	h.Refresh(rec, req)
 
 	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
+	assertAuthCookiesCleared(t, rec)
 }
 
 // -----------------------------------------------------------------------------
@@ -721,7 +723,7 @@ func withRefreshCookieToken(t *testing.T, req *http.Request, s *jwtx.Signer, id 
 
 func injectClaims(ctx context.Context, userID uuid.UUID, username string, role *string) context.Context {
 	signer, _ := jwtx.NewSigner("test-access-secret", "test-refresh-secret", 15*time.Minute, time.Hour)
-	tok, _ := signer.SignAccess(userID, username, role)
+	tok, _ := signer.SignAccess(userID, uuid.New(), username, role)
 
 	// Spin up a no-op handler behind RequireAuth so jwtx can populate
 	// the context with claims using its own internal API.
