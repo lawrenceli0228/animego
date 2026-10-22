@@ -250,6 +250,15 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "public, max-age=2592000" }, // 30 days
         ],
       },
+      // The self-hosted webfonts (scripts/fonts/vendor-google-fonts.mjs).
+      // Unlike jassub these names carry a content hash, so they can be
+      // cached for good: a changed font is a new file name.
+      {
+        source: "/fonts/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
     ];
   },
 };

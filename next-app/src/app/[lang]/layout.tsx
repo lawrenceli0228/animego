@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
+import { preload } from "react-dom";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { LocaleHint } from "@/components/layout/LocaleHint";
@@ -9,32 +9,12 @@ import { LanguageProvider } from "@/lib/lang-client";
 import { HTML_LANG, OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { localeParams, resolveLocale, type LangParams } from "@/lib/i18n/route";
 import { SITE_ORIGIN } from "@/lib/seo/alternates";
+import { FONT_PRELOADS } from "../fontPreloads";
+// The webfonts are files in public/fonts, not a build-time download from
+// Google: a failed download used to break `next dev` and could break a
+// build. Regenerate with scripts/fonts/vendor-google-fonts.mjs.
+import "../fonts.css";
 import "../globals.css";
-
-const sora = Sora({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800"],
-  variable: "--font-display",
-  display: "swap",
-  preload: true,
-});
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600"],
-  style: ["normal", "italic"],
-  variable: "--font-sans",
-  display: "swap",
-  preload: true,
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-  display: "swap",
-  preload: false,
-});
 
 // ISR islanding: the Navbar auth state is no longer fetched server-side
 // here (that no-store /api/auth/me call forced every page dynamic). The
@@ -153,14 +133,14 @@ export default async function RootLayout({
   params,
 }: Readonly<{ children: React.ReactNode } & LangParams>) {
   const { lang, dict } = await resolveLocale(params);
+  for (const href of FONT_PRELOADS) {
+    preload(href, { as: "font", type: "font/woff2", crossOrigin: "" });
+  }
   const season = getCurrentSeason();
   const year = new Date().getFullYear();
 
   return (
-    <html
-      lang={HTML_LANG[lang]}
-      className={`${sora.variable} ${dmSans.variable} ${jetbrainsMono.variable}`}
-    >
+    <html lang={HTML_LANG[lang]}>
       <body
         style={{
           minHeight: "100vh",
