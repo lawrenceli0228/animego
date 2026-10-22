@@ -147,6 +147,10 @@ test.describe("auth journey", () => {
   const HOME_NAV = { waitUntil: "domcontentloaded" } as const;
 
   test("signing in on a second browser does not sign the first one out", async ({ browser }) => {
+    // Two sign-ins, two home-page loads and a sign-out on `next dev`: 21-24 s
+    // on a good run, and a shard whose dev server just restarted (cold
+    // compiles) ran past the 30 s default.
+    test.setTimeout(60_000);
     const user = makeUser();
     await insertPgUser({
       username: user.username,

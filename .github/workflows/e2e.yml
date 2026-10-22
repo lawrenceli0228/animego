@@ -14,9 +14,12 @@ name: E2E (Playwright)
 #     stack. That workflow now exists: .github/workflows/e2e-sandbox.yml
 #     boots Postgres + go-api from docker compose and runs `next dev` on
 #     the runner, so nothing there touches prod data.
+# A change that touches only prose skips the run (the `paths` rule is
+# explained in unit-tests.yml).
 on:
   pull_request:
     branches: [main, feat/go-backend]
+    paths: ["**", "!**/*.md", "!docs/**", "DESIGN.md"]
   workflow_dispatch:
 
 # Only one suite per branch in flight — duplicate runs against live
@@ -39,13 +42,20 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install e2e deps
-        working-directory: e2e
-        run: bun install --frozen-lockfile
+      # The browser and the system packages `--with-deps` adds. Their apt
+      # download once took 8.5 min and timed this job out — see
+      # e2e/scripts/ci-install-playwright.sh. Same key as e2e-sandbox.yml.
+      - name: Restore Playwright browser and packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/bun.lock') }}
 
-      - name: Install Playwright browsers
+      - name: Install e2e deps and Playwright Chromium
         working-directory: e2e
-        run: bunx playwright install --with-deps chromium
+        run: bash scripts/ci-install-playwright.sh
 
       - name: Run Playwright (prod project only)
         working-directory: e2e

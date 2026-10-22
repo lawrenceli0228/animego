@@ -2,6 +2,10 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { waitForHydration } from "../../fixtures/hydration";
 import { collectConsoleErrors } from "../_helpers";
 
+// How many flicks a test makes before concluding none of them flung; on a
+// loaded machine the moves can arrive too far apart to read as a flick.
+const FLICK_TRIES = 5;
+
 /**
  * 今日更新 — the homepage's rail of today's episodes.
  *
@@ -203,9 +207,10 @@ test.describe("今日更新 on a desktop", () => {
     // the moves' timestamps, and on a loaded machine they can arrive spread
     // out enough to read as a pointer that came to rest (no fling, by design).
     // So a few tries, of which one must carry on — and every one, fling or
-    // not, must come to rest on a stop.
+    // not, must come to rest on a stop. Five, not three: a sharded CI runner
+    // whose dev server had just compiled cold missed three in a row, twice.
     let flung = false;
-    for (let attempt = 0; attempt < 3 && !flung; attempt++) {
+    for (let attempt = 0; attempt < FLICK_TRIES && !flung; attempt++) {
       await rail!.evaluate((el) => el.scrollTo({ left: 0, behavior: "instant" }));
       await settled(rail!);
       await page.mouse.move(x0, y);
@@ -218,7 +223,7 @@ test.describe("今日更新 on a desktop", () => {
       // Carried on past where the button came up (a settle alone moves at most half a card).
       flung = rest > atRelease + 90;
     }
-    expect(flung, "none of three flicks carried on after the button was up").toBe(true);
+    expect(flung, `none of ${FLICK_TRIES} flicks carried on after the button was up`).toBe(true);
     await expect(rail!).not.toHaveAttribute("data-moving", "true");
   });
 
@@ -315,7 +320,7 @@ test.describe("今日更新 on a desktop", () => {
       return (await rail!.getAttribute("data-moving")) === "true";
     };
     const flickTillItFlings = async () => {
-      for (let i = 0; i < 3; i++) if (await flick()) return true;
+      for (let i = 0; i < FLICK_TRIES; i++) if (await flick()) return true;
       return false;
     };
 

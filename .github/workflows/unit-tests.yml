@@ -6,6 +6,9 @@ name: Unit Tests
 #                 GitHub-hosted ubuntu runners ship Docker, so the PG-backed
 #                 packages (admin/comments/social/subscriptions/danmaku/
 #                 dandanplay/bgmidmap) spin their own container and run for real.
+#   - go-api-integration : the `integration`-tagged suite (test/integration),
+#                 in its own job so it runs beside the untagged tests rather
+#                 than after them.
 #   - next-app  : `bun test` (bun:test) — proxy gate, server actions, lib utils.
 #   - ws-server : `jest` — socket auth, danmaku handler, connection lifecycle.
 #   - next-app-build : `next build` + `tsc --noEmit` + lint ratchet + an
@@ -15,11 +18,17 @@ name: Unit Tests
 #
 # This is the safety net that keeps the suites GREEN. E2E (live prod) lives
 # in a sibling workflow; this one is the fast unit gate.
+# A change that touches only prose skips the run. Order matters in `paths`:
+# a later pattern overrides an earlier one, so everything counts except
+# Markdown and docs/ — and DESIGN.md counts again, because next-app's
+# globals.test.ts and scoreStyle.test.ts check the CSS against its tables.
 on:
   pull_request:
     branches: [main, feat/go-backend]
+    paths: ["**", "!**/*.md", "!docs/**", "DESIGN.md"]
   push:
     branches: [main, feat/go-backend]
+    paths: ["**", "!**/*.md", "!docs/**", "DESIGN.md"]
   workflow_dispatch:
 
 # One run per branch in flight; a newer push supersedes an in-flight run.
@@ -60,7 +69,25 @@ jobs:
         working-directory: go-api
         run: go test ./... -count=1
 
-      # `go test ./...` above does not compile files behind a build tag, so
+  go-api-integration:
+    name: go-api (integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go-api/go.mod
+          cache-dependency-path: go-api/go.sum
+
+      # Same custom image as the go-api job builds (see the note there).
+      - name: Build test Postgres image (animego-postgres:dev — pg_cron)
+        run: docker build -t animego-postgres:dev go-api/docker/postgres
+
+      # `go test ./...` in the go-api job does not compile files behind a build tag, so
       # everything under test/integration was invisible to CI. It rotted
       # accordingly: by 2026-08-21 the package had not compiled since
       # migration 0011 added bgm_match_source in June, because the V12DB test

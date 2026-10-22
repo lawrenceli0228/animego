@@ -41,9 +41,25 @@ name: E2E Sandbox (Playwright + docker compose)
 # nginx routing. ws-server is skipped because no sandbox spec opens a
 # socket — player.spec.ts explicitly filters socket.io/websocket console
 # noise out of its assertions.
+#
+# ─── Sharded ────────────────────────────────────────────────────────────
+#
+# The suite (300-odd tests) is split across parallel jobs with
+# Playwright's --shard. Each shard boots its OWN stack — Postgres, go-api,
+# `next dev` — so a shard's tests never share a dev server with another
+# shard's, which is also where most of the old single job's slowness came
+# from (three workers queueing behind one on-demand compiler). The setup
+# (~2 min) is paid once per shard; the suite itself was ~9 of the old
+# job's ~11 minutes, so the wall time drops to roughly setup plus one
+# shard's share.
+# `Playwright against a PR-local stack` is the one check that sums them up.
+#
+# A change that touches only prose skips the run (see unit-tests.yml for
+# the `paths` rule; DESIGN.md counts there and is harmless here).
 on:
   pull_request:
     branches: [main]
+    paths: ["**", "!**/*.md", "!docs/**", "DESIGN.md"]
   workflow_dispatch:
 
 # One run per branch in flight; a newer push supersedes an in-flight run.
@@ -53,17 +69,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  e2e-sandbox:
-    name: Playwright against a PR-local stack
+  shard:
+    name: Sandbox e2e (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    # Measured shape of a cold run: ~3 min building the Postgres image
-    # (pg_cron is compiled from source), ~3 min building go-api, ~2 min of
-    # bun/playwright installs, ~2 min for `next dev` to boot and compile
-    # the warmed routes, then the suite itself. 14 specs over 3 workers on
-    # a dev-mode server, with `retries: 1` on CI able to replay the slow
-    # ones, lands around 8 min. 30 leaves headroom for a cold Docker layer
-    # cache without letting a hung container burn a full hour.
-    timeout-minutes: 30
+    # Measured on 2026-10-22: one job was ~2 min of setup (images,
+    # installs, `next dev` warming its routes) and ~9 min of suite; four
+    # shards ran 2-3 min of suite each, the heaviest file (seasonal-browse,
+    # ~160 s) deciding the slowest. Six keeps every shard's suite near two
+    # minutes. 20 leaves headroom for a cold Docker layer cache without
+    # letting a hung container burn an hour.
+    timeout-minutes: 20
+    strategy:
+      # Every shard runs to the end: one failing must not cancel the
+      # others' evidence.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       # Both compose files, once. The --env-file flag is still passed
       # explicitly on every call rather than via COMPOSE_ENV_FILES: a
@@ -82,6 +103,28 @@ jobs:
           # Pinned (not `latest`) so a Bun release can't silently flip the
           # gate. Same pin as unit-tests.yml.
           bun-version: "1.3.11"
+
+      # Chromium and the system packages `--with-deps` adds, which have
+      # taken minutes to download from the Ubuntu mirror — see
+      # e2e/scripts/ci-install-playwright.sh. Same key as e2e.yml.
+      - name: Restore Playwright browser and packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/bun.lock') }}
+
+      - name: Start installing Playwright (background)
+        # Nothing before the suite needs Playwright, so it installs beside
+        # the image builds and `next dev`'s warm-up, and "Finish installing
+        # Playwright" collects it before the suite.
+        working-directory: e2e
+        run: |
+          (
+            bash scripts/ci-install-playwright.sh
+            echo $? > /tmp/playwright-install.exit
+          ) > /tmp/playwright-install.log 2>&1 &
 
       - name: Mint throwaway credentials
         # This job requires NO repository secret, by design. Everything
@@ -219,6 +262,9 @@ jobs:
         # letting the suite run for three and report nine confusing specs.
         run: |
           set -euo pipefail
+          # One pass of wait + warm. It returns rather than exits, so the loop
+          # at the end can restart a dev server whose fonts failed to load.
+          warm() {
           for i in $(seq 1 60); do
             if curl -sf http://localhost:3000/api/healthz > /dev/null; then
               echo "next dev is listening after ${i}s"
@@ -226,8 +272,7 @@ jobs:
             fi
             if [ "$i" -eq 60 ]; then
               echo "next dev did not come up in 60s"
-              cat /tmp/next-dev.log
-              exit 1
+              return 1
             fi
             sleep 1
           done
@@ -321,18 +366,43 @@ jobs:
               if [ "$code" = "404" ]; then
                 echo "::error::A 404 here is one of two things: (1) the dev-server defect documented above this loop, where every route with a dynamic segment under [lang] stops resolving for the whole run, or (2) a real product regression on this route. The dev log below does NOT tell them apart — measured 2026-09-06: the '○ Compiling <segment>' line is not always emitted even for routes that compile and work; the first attempt is not reliably near-zero (a defective run produced a 650ms first 404); and repeat hits collapse to ~100ms for a genuine product 404 (/anime/0) just as they do for a segment that never built. Every log-shape rule tried so far has a counter-example. What settles it in under a minute: check out this commit, run 'npx next dev' locally and request the same route. The seasonal page swallows API failures, so no backend is needed. Resolves locally => (1). 404s locally => (2), and you have a reproduction."
               fi
-              cat /tmp/next-dev.log
-              exit 1
+              return 1
             fi
           done
+          }
 
-      - name: Install e2e deps
-        working-directory: e2e
-        run: bun install --frozen-lockfile
+          # Up to two restarts, for one failure only. next/font/google fetches
+          # the fonts from Google while it compiles the root layout; when that
+          # fetch goes wrong the font module stays broken for the life of the
+          # dev server — every page 500s with "Can't resolve
+          # '@vercel/turbopack-next/internal/font/google/font'" — and neither
+          # the retries nor the touch above clear it. Seen twice on
+          # 2026-10-22, and six shards make six chances per run. A fresh server
+          # with an empty .next fetches the fonts again. Any other failure
+          # fails the step as before, log and all.
+          for boot in 1 2 3; do
+            if warm; then exit 0; fi
+            if [ "$boot" -lt 3 ] && grep -qE "internal/font/google/font'|next/font/google queries" /tmp/next-dev.log; then
+              echo "::warning::next/font/google could not load its fonts; restarting next dev with an empty .next"
+              kill "$(cat /tmp/next-dev.pid)" 2>/dev/null || true
+              lsof -t -i :3000 | xargs -r kill 2>/dev/null || true
+              sleep 2
+              rm -rf next-app/.next
+              (cd next-app && GO_API_INTERNAL_URL=http://localhost:8080 nohup bun run dev > /tmp/next-dev.log 2>&1 & echo $! > /tmp/next-dev.pid)
+              continue
+            fi
+            cat /tmp/next-dev.log
+            exit 1
+          done
 
-      - name: Install Playwright Chromium
-        working-directory: e2e
-        run: bun run install:browsers
+      - name: Finish installing Playwright
+        run: |
+          for _ in $(seq 1 600); do
+            [ -f /tmp/playwright-install.exit ] && break
+            sleep 1
+          done
+          cat /tmp/playwright-install.log
+          test "$(cat /tmp/playwright-install.exit 2>/dev/null)" = 0
 
       - name: Run sandbox suite
         working-directory: e2e
@@ -368,7 +438,7 @@ jobs:
         # all, so suppressing it would trade a visible flake for a permanently
         # blind assertion. If it turns into a regular failure, that is signal
         # about the rescan effect, not about this workflow.
-        run: bun run test:sandbox
+        run: bun run test:sandbox --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       - name: Dump service logs on failure
         if: failure()
@@ -394,7 +464,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-sandbox
+          name: playwright-report-sandbox-${{ matrix.shard }}
           path: e2e/playwright-report/
           retention-days: 14
 
@@ -406,3 +476,18 @@ jobs:
         run: |
           kill "$(cat /tmp/next-dev.pid)" 2>/dev/null || true
           docker compose --env-file .env.production down -v || true
+
+  # The single answer for the whole suite, under the name the check has
+  # always had: green only if every shard was.
+  e2e-sandbox:
+    name: Playwright against a PR-local stack
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard passed
+        run: |
+          echo "shards: ${{ needs.shard.result }}"
+          test "${{ needs.shard.result }}" = "success"
+
