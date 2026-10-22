@@ -272,6 +272,9 @@ jobs:
         # letting the suite run for three and report nine confusing specs.
         run: |
           set -euo pipefail
+          # One pass of wait + warm. It returns rather than exits, so the loop
+          # at the end can restart a dev server whose fonts failed to load.
+          warm() {
           for i in $(seq 1 60); do
             if curl -sf http://localhost:3000/api/healthz > /dev/null; then
               echo "next dev is listening after ${i}s"
@@ -279,8 +282,7 @@ jobs:
             fi
             if [ "$i" -eq 60 ]; then
               echo "next dev did not come up in 60s"
-              cat /tmp/next-dev.log
-              exit 1
+              return 1
             fi
             sleep 1
           done
@@ -374,9 +376,33 @@ jobs:
               if [ "$code" = "404" ]; then
                 echo "::error::A 404 here is one of two things: (1) the dev-server defect documented above this loop, where every route with a dynamic segment under [lang] stops resolving for the whole run, or (2) a real product regression on this route. The dev log below does NOT tell them apart — measured 2026-09-06: the '○ Compiling <segment>' line is not always emitted even for routes that compile and work; the first attempt is not reliably near-zero (a defective run produced a 650ms first 404); and repeat hits collapse to ~100ms for a genuine product 404 (/anime/0) just as they do for a segment that never built. Every log-shape rule tried so far has a counter-example. What settles it in under a minute: check out this commit, run 'npx next dev' locally and request the same route. The seasonal page swallows API failures, so no backend is needed. Resolves locally => (1). 404s locally => (2), and you have a reproduction."
               fi
-              cat /tmp/next-dev.log
-              exit 1
+              return 1
             fi
+          done
+          }
+
+          # Up to two restarts, for one failure only. next/font/google fetches
+          # the fonts from Google while it compiles the root layout; when that
+          # fetch goes wrong the font module stays broken for the life of the
+          # dev server — every page 500s with "Can't resolve
+          # '@vercel/turbopack-next/internal/font/google/font'" — and neither
+          # the retries nor the touch above clear it. Seen twice on
+          # 2026-10-22, and six shards make six chances per run. A fresh server
+          # with an empty .next fetches the fonts again. Any other failure
+          # fails the step as before, log and all.
+          for boot in 1 2 3; do
+            if warm; then exit 0; fi
+            if [ "$boot" -lt 3 ] && grep -qE "internal/font/google/font'|next/font/google queries" /tmp/next-dev.log; then
+              echo "::warning::next/font/google could not load its fonts; restarting next dev with an empty .next"
+              kill "$(cat /tmp/next-dev.pid)" 2>/dev/null || true
+              lsof -t -i :3000 | xargs -r kill 2>/dev/null || true
+              sleep 2
+              rm -rf next-app/.next
+              (cd next-app && GO_API_INTERNAL_URL=http://localhost:8080 nohup bun run dev > /tmp/next-dev.log 2>&1 & echo $! > /tmp/next-dev.pid)
+              continue
+            fi
+            cat /tmp/next-dev.log
+            exit 1
           done
 
       - name: Finish installing Playwright

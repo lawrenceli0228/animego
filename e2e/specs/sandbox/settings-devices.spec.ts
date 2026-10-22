@@ -102,6 +102,16 @@ async function authCookies(device: Device): Promise<string[]> {
   return names.filter((n) => ["session", "refreshToken", "auth_hint"].includes(n)).sort();
 }
 
+// A signed-out device's way out runs probe → refused refresh → re-render →
+// redirect, each a round trip through `next dev`; on a busy runner that has
+// taken longer than expect's 5 s default.
+const SIGN_OUT_MS = 15_000;
+
+/** Until the device holds no auth cookie (the refused refresh clears them). */
+async function expectCookiesCleared(device: Device): Promise<void> {
+  await expect.poll(() => authCookies(device), { timeout: SIGN_OUT_MS }).toEqual([]);
+}
+
 test.describe("settings · signed-in devices", () => {
   test("退出 on another device's tile signs that device out at once, and only that one", async ({ browser }) => {
     test.setTimeout(SPEC_TIMEOUT_MS);
@@ -109,8 +119,10 @@ test.describe("settings · signed-in devices", () => {
     const a = await signedInDevice(browser, user);
     const b = await signedInDevice(browser, user);
     const errors = collectConsoleErrors(a.page);
-    // B is reading its own settings page when it is signed out elsewhere.
+    // B is reading its own settings page when it is signed out elsewhere —
+    // and its navbar knows it is signed in, which is what arms the recheck.
     await openDevices(b.page);
+    await expectSignedIn(b.page, user.username);
 
     const tiles = await openDevices(a.page);
     await expect(tiles).toHaveCount(2);
@@ -127,8 +139,8 @@ test.describe("settings · signed-in devices", () => {
     // B still holds an access token that verifies. Coming back to the open
     // page is enough: it leaves for /login, and its cookies go with it.
     await refocus(b.page);
-    await expect(b.page).toHaveURL(/\/login\?from=%2Fsettings/);
-    expect(await authCookies(b)).toEqual([]);
+    await expect(b.page).toHaveURL(/\/login\?from=%2Fsettings/, { timeout: SIGN_OUT_MS });
+    await expectCookiesCleared(b);
 
     await expireAccessToken(a);
     await expectSignedIn(a.page, user.username);
@@ -163,15 +175,18 @@ test.describe("settings · signed-in devices", () => {
 
     // B was left open on the home page: coming back to it is enough.
     await refocus(b.page);
+    await expectCookiesCleared(b);
     await expectSignedOut(b.page);
     // C, cookies untouched, opens a personal page: proxy.ts turns it away.
     await c.page.goto("/settings", NAV);
-    await expect(c.page).toHaveURL(/\/login\?from=%2Fsettings/);
-    expect(await authCookies(c)).toEqual([]);
+    await expect(c.page).toHaveURL(/\/login\?from=%2Fsettings/, { timeout: SIGN_OUT_MS });
+    await expectCookiesCleared(c);
     // D, cookies untouched, loads a public page: go-api turns its token away.
+    // (The navbar reads 登录 on first paint, before its probe has answered,
+    // so the cookies are what say the probe ran and was refused.)
     await d.page.goto("/", NAV);
+    await expectCookiesCleared(d);
     await expectSignedOut(d.page);
-    expect(await authCookies(d)).toEqual([]);
 
     await expireAccessToken(a);
     await expectSignedIn(a.page, user.username);
