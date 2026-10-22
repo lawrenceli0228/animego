@@ -121,6 +121,27 @@ func (q *Queries) DeleteUserSessionIfHeld(ctx context.Context, iD uuid.UUID, use
 	return result.RowsAffected(), nil
 }
 
+const getHeldUserSession = `-- name: GetHeldUserSession :one
+SELECT id
+FROM user_sessions
+WHERE id = $1
+  AND user_id = $2
+  AND (token_hash = $3 OR previous_hash = $3)
+  AND expires_at > now()
+`
+
+// Which session is this device: the sid in the request's refresh cookie,
+// only while that cookie is still the session's current or grace-slot
+// token.  A verified signature is not enough — a session revoked a minute
+// ago signs exactly as well — and the device list's endpoints act on the
+// answer (auth.Handlers.currentSession).
+func (q *Queries) GetHeldUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getHeldUserSession, iD, userID, presentedHash)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getUserSession = `-- name: GetUserSession :one
 SELECT
     s.id, s.user_id, s.token_hash, s.previous_hash, s.rotated_at,
@@ -316,6 +337,26 @@ func (q *Queries) ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockHeldUserSession = `-- name: LockHeldUserSession :one
+SELECT id
+FROM user_sessions
+WHERE id = $1
+  AND user_id = $2
+  AND (token_hash = $3 OR previous_hash = $3)
+  AND expires_at > now()
+FOR UPDATE
+`
+
+// GetHeldUserSession inside auth.Store.RevokeOtherSessions' transaction,
+// holding the row: the session being kept cannot be revoked or rotated away
+// between being checked and the others being deleted.
+func (q *Queries) LockHeldUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockHeldUserSession, iD, userID, presentedHash)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const lockUserForNewSession = `-- name: LockUserForNewSession :one

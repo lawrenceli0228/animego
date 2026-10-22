@@ -124,12 +124,12 @@ func TestDevices_RevokeOtherSessionsKeepsThisDeviceOnly(t *testing.T) {
 	store := auth.NewStore(pool)
 	u := seedUser(t, ctx, pool, "revoker") // seeded with a pre-0052 token on the row
 	bystander := seedUser(t, ctx, pool, "revokebystander")
-	_, keep := openDevice(t, ctx, q, s, u.id, nil, nil, nil)
+	keepToken, keep := openDevice(t, ctx, q, s, u.id, nil, nil, nil)
 	openDevice(t, ctx, q, s, u.id, nil, nil, nil)
 	openDevice(t, ctx, q, s, u.id, nil, nil, nil)
 	openDevice(t, ctx, q, s, bystander.id, nil, nil, nil)
 
-	n, err := store.RevokeOtherSessions(ctx, u.id, keep)
+	n, err := store.RevokeOtherSessions(ctx, u.id, keep, sha(keepToken))
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(3), n, "two sessions and the pre-0052 token")
@@ -199,3 +199,65 @@ func countSessionsByEmail(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 		`SELECT count(*) FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE u.email = $1`, email).Scan(&n))
 	return n
 }
+
+// The session to keep is re-checked inside the transaction: one that was
+// revoked a moment ago must not be the survivor while every live one goes.
+func TestDevices_RevokeOtherSessionsRefusesAGoneSession(t *testing.T) {
+	ctx, pool, q := freshSessionDB(t)
+	s := sessionSigner(t)
+	store := auth.NewStore(pool)
+	u := seedUser(t, ctx, pool, "goner")
+	staleToken, stale := openDevice(t, ctx, q, s, u.id, nil, nil, nil)
+	openDevice(t, ctx, q, s, u.id, nil, nil, nil)
+	_, err := q.DeleteUserSession(ctx, stale, u.id) // the owner signed this device out
+	require.NoError(t, err)
+
+	_, err = store.RevokeOtherSessions(ctx, u.id, stale, sha(staleToken))
+
+	assert.ErrorIs(t, err, auth.ErrSessionGone)
+	assert.Equal(t, 1, sessionCount(t, ctx, pool, u.id), "nothing may be deleted on behalf of a gone session")
+	user, err := q.GetUserByID(ctx, u.id)
+	require.NoError(t, err)
+	assert.NotNil(t, user.RefreshToken, "the pre-0052 token was cleared on behalf of a gone session")
+}
+
+// "Sign out other devices" racing the adoption of a pre-0052 token: the
+// adoption is held open after claiming the users row, the revoke is
+// confirmed waiting on that row, then the adoption commits — and its
+// session must be one of the "others".
+func TestDevices_RevokeOtherSessionsCatchesARacingAdoption(t *testing.T) {
+	ctx, pool, q := freshSessionDB(t)
+	s := sessionSigner(t)
+	store := auth.NewStore(pool)
+	u := seedUser(t, ctx, pool, "adoptrace")
+	setLegacyToken(t, ctx, pool, u.id, legacyToken)
+	keepToken, keep := openDevice(t, ctx, q, s, u.id, nil, nil, nil)
+
+	adopt, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = adopt.Rollback(context.Background()) })
+	p, _ := adoptParams(t, s, u.id, legacyToken)
+	_, err = dbgen.New(adopt).ClaimLegacyRefreshToken(ctx, u.id, &p.PresentedToken)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := store.RevokeOtherSessions(ctx, u.id, keep, sha(keepToken))
+		done <- err
+	}()
+	waitForLockWait(t, ctx, pool)
+	_, err = dbgen.New(adopt).InsertAdoptedSession(ctx, p.Session)
+	require.NoError(t, err)
+	require.NoError(t, adopt.Commit(ctx))
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the revoke never returned")
+	}
+	assert.Equal(t, 1, sessionCount(t, ctx, pool, u.id), "the session adopted during the revoke survived it")
+	_, err = q.GetUserSession(ctx, 30, keep, u.id)
+	assert.NoError(t, err, "this device's session was ended")
+}
+

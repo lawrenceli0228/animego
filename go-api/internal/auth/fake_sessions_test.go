@@ -53,7 +53,7 @@ type sessionModel struct {
 	// refuses a verified hash that differs (LockUserForNewSession).
 	passwords map[uuid.UUID]string
 
-	createErr, pruneErr, rotateErr, getErr, deleteErr, adoptErr error
+	createErr, pruneErr, rotateErr, getErr, deleteErr, adoptErr, heldErr error
 
 	pruneCalls []pruneCall
 	writes     int // statements that changed or would change a row
@@ -310,15 +310,41 @@ func (f *fakeAuthDB) ListUserSessions(_ context.Context, userID uuid.UUID) ([]db
 	return out, nil
 }
 
-// RevokeOtherSessions mirrors Store's transaction: every other row of the
-// user, plus the pre-0052 token on the users row.
-func (f *fakeAuthDB) RevokeOtherSessions(_ context.Context, userID, keepID uuid.UUID) (int64, error) {
+// held mirrors GetHeldUserSession's predicate.  Caller holds m.mu.
+func (m *sessionModel) held(id, userID uuid.UUID, presentedHash string) bool {
+	r, ok := m.rows[id]
+	if !ok || r.UserID != userID || !r.ExpiresAt.After(time.Now()) {
+		return false
+	}
+	return r.TokenHash == presentedHash || (r.PreviousHash != nil && *r.PreviousHash == presentedHash)
+}
+
+func (f *fakeAuthDB) GetHeldUserSession(_ context.Context, id, userID uuid.UUID, presentedHash string) (uuid.UUID, error) {
+	m := f.model()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.heldErr != nil {
+		return uuid.Nil, m.heldErr
+	}
+	if !m.held(id, userID, presentedHash) {
+		return uuid.Nil, pgx.ErrNoRows
+	}
+	return id, nil
+}
+
+// RevokeOtherSessions mirrors Store's transaction: the kept session must
+// still be live, then every other row of the user goes, plus the pre-0052
+// token on the users row.
+func (f *fakeAuthDB) RevokeOtherSessions(_ context.Context, userID, keepID uuid.UUID, presentedHash string) (int64, error) {
 	m := f.model()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.writes++
 	if m.deleteErr != nil {
 		return 0, m.deleteErr
+	}
+	if !m.held(keepID, userID, presentedHash) {
+		return 0, ErrSessionGone
 	}
 	var n int64
 	for id, r := range m.rows {

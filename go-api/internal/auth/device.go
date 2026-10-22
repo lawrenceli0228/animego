@@ -27,38 +27,59 @@ type clientInfo struct {
 	City      *string
 }
 
-var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
+var (
+	countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
+	// A city name: letters (any script) and the punctuation real names use.
+	cityName = regexp.MustCompile(`^[\p{L}\p{M}][\p{L}\p{M}\p{N} .'’()-]*$`)
+)
+
+// serverUserAgents are the defaults of HTTP clients that call the API on a
+// reader's behalf (next-app's server-side refresh runs on Node).  They name
+// the server, not the reader's device, so they never overwrite one.
+var serverUserAgents = []string{"node", "undici", "node-fetch"}
 
 // clientInfoFrom reads the device columns off a request.
 //
 // The location headers are trusted as far as the device list needs: the
 // origin only accepts Cloudflare's addresses, and Cloudflare sets
 // CF-IPCountry itself.  CF-IPCity comes from a managed transform that may be
-// off, in which case a client could send its own — which would only relabel
-// its own session in its own device list, as text.  "XX" (unknown) and "T1"
-// (Tor) are Cloudflare's non-answers and are dropped.
+// off, in which case a client could send its own and label its own session
+// with it — so it is held to the shape of a place name, and is never more
+// than a label next to the device a session was opened from.  "XX"
+// (unknown) and "T1" (Tor) are Cloudflare's non-answers and are dropped.
 func clientInfoFrom(r *http.Request) clientInfo {
 	var info clientInfo
-	if ua := cleanText(r.UserAgent(), maxUserAgentLen); ua != "" {
+	if ua := cleanText(r.UserAgent(), maxUserAgentLen); ua != "" && !isServerUserAgent(ua) {
 		info.UserAgent = &ua
 	}
 	if cc := strings.ToUpper(strings.TrimSpace(r.Header.Get("CF-IPCountry"))); countryCode.MatchString(cc) && cc != "XX" && cc != "T1" {
 		info.Country = &cc
 	}
-	if city := cleanText(r.Header.Get("CF-IPCity"), maxCityLen); city != "" {
+	if city := cleanText(r.Header.Get("CF-IPCity"), maxCityLen); city != "" && cityName.MatchString(city) {
 		info.City = &city
 	}
 	return info
 }
 
-// cleanText drops invalid UTF-8 and control characters, trims, and cuts to
-// max characters.
+func isServerUserAgent(ua string) bool {
+	lower := strings.ToLower(ua)
+	for _, s := range serverUserAgents {
+		if lower == s || strings.HasPrefix(lower, s+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// cleanText drops invalid UTF-8, control characters and format characters
+// (bidi overrides, zero-width marks — the ones that make a line render in a
+// different order than it reads), trims, and cuts to max characters.
 func cleanText(s string, max int) string {
 	if !utf8.ValidString(s) {
 		s = strings.ToValidUTF8(s, "")
 	}
 	s = strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r

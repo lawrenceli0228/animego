@@ -151,7 +151,8 @@ type AuthDB interface {
 	// transaction — Store implements it — because it also ends a pre-0052
 	// token still held on the users row.
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]dbgen.ListUserSessionsRow, error)
-	RevokeOtherSessions(ctx context.Context, userID, keepID uuid.UUID) (int64, error)
+	GetHeldUserSession(ctx context.Context, id uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error)
+	RevokeOtherSessions(ctx context.Context, userID, keepID uuid.UUID, presentedHash string) (int64, error)
 
 	// AdoptLegacySession turns a pre-0052 refresh token (no sid, held on the
 	// users row) into a session, in one transaction — Store implements it.

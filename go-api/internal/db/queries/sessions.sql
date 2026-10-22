@@ -199,3 +199,28 @@ ORDER BY last_used_at DESC, id;
 DELETE FROM user_sessions
 WHERE user_id = sqlc.arg(user_id)
   AND id <> sqlc.arg(keep_id);
+
+-- name: GetHeldUserSession :one
+-- Which session is this device: the sid in the request's refresh cookie,
+-- only while that cookie is still the session's current or grace-slot
+-- token.  A verified signature is not enough — a session revoked a minute
+-- ago signs exactly as well — and the device list's endpoints act on the
+-- answer (auth.Handlers.currentSession).
+SELECT id
+FROM user_sessions
+WHERE id = sqlc.arg(id)
+  AND user_id = sqlc.arg(user_id)
+  AND (token_hash = sqlc.arg(presented_hash) OR previous_hash = sqlc.arg(presented_hash))
+  AND expires_at > now();
+
+-- name: LockHeldUserSession :one
+-- GetHeldUserSession inside auth.Store.RevokeOtherSessions' transaction,
+-- holding the row: the session being kept cannot be revoked or rotated away
+-- between being checked and the others being deleted.
+SELECT id
+FROM user_sessions
+WHERE id = sqlc.arg(id)
+  AND user_id = sqlc.arg(user_id)
+  AND (token_hash = sqlc.arg(presented_hash) OR previous_hash = sqlc.arg(presented_hash))
+  AND expires_at > now()
+FOR UPDATE;

@@ -1252,6 +1252,12 @@ type Querier interface {
 	// 0022 called out as expected: there is no predicate to accelerate and an
 	// index on this table would cost more than the scan it saves.
 	GetHantStats(ctx context.Context) (GetHantStatsRow, error)
+	// Which session is this device: the sid in the request's refresh cookie,
+	// only while that cookie is still the session's current or grace-slot
+	// token.  A verified signature is not enough — a session revoked a minute
+	// ago signs exactly as well — and the device list's endpoints act on the
+	// answer (auth.Handlers.currentSession).
+	GetHeldUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error)
 	// people_pages.sql — the person and character pages (internal/people).
 	// Database only; adult titles are filtered here, where credits are read,
 	// and a profile row counts only once AniList returned it (fetched_at).
@@ -2453,6 +2459,10 @@ type Querier interface {
 	// Read-modify-write of one overlay: two reviews of the same page accept
 	// one after the other, and neither loses the other's fields.
 	LockEntityOverlay(ctx context.Context, kind string, entityID int32) ([]byte, error)
+	// GetHeldUserSession inside auth.Store.RevokeOtherSessions' transaction,
+	// holding the row: the session being kept cannot be revoked or rotated away
+	// between being checked and the others being deleted.
+	LockHeldUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error)
 	// user_sessions: one refresh session per device (migration 0052).
 	//
 	// Every hash here is the sha256 hex digest of a refresh token
@@ -2475,6 +2485,13 @@ type Querier interface {
 	// row (the login is refused).  FOR KEY SHARE would not conflict, and the
 	// password predicate without a lock would serialise nothing.
 	LockUserForNewSession(ctx context.Context, iD uuid.UUID, verifiedPassword string) (uuid.UUID, error)
+	// First statement of auth.Store.RevokeOtherSessions: takes the users row so
+	// the revoke and an adoption of a pre-0052 token serialise.  Without it an
+	// adoption could commit between the revoke's delete and its legacy clear,
+	// and the session it inserts would survive "sign out everywhere else".
+	// NO KEY UPDATE, not UPDATE: it must conflict with the adoption's UPDATE of
+	// the row but not with the KEY SHARE an INSERT into user_sessions takes on it.
+	LockUserForRevoke(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	// Authoritative AniList->Bangumi binding from the vendored id map
 	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
 	// consults this BEFORE any Bangumi search; a hit binds the subject with

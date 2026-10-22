@@ -385,6 +385,26 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 	return i, err
 }
 
+const lockUserForRevoke = `-- name: LockUserForRevoke :one
+SELECT id
+FROM users
+WHERE id = $1
+FOR NO KEY UPDATE
+`
+
+// First statement of auth.Store.RevokeOtherSessions: takes the users row so
+// the revoke and an adoption of a pre-0052 token serialise.  Without it an
+// adoption could commit between the revoke's delete and its legacy clear,
+// and the session it inserts would survive "sign out everywhere else".
+// NO KEY UPDATE, not UPDATE: it must conflict with the adoption's UPDATE of
+// the row but not with the KEY SHARE an INSERT into user_sessions takes on it.
+func (q *Queries) LockUserForRevoke(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockUserForRevoke, id)
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const resetUserPassword = `-- name: ResetUserPassword :exec
 UPDATE users
 SET password               = $2,

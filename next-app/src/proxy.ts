@@ -234,6 +234,15 @@ export async function proxy(req: NextRequest) {
       if (realIp) refreshHeaders["X-Real-IP"] = realIp;
       const forwardedFor = req.headers.get("x-forwarded-for");
       if (forwardedFor) refreshHeaders["X-Forwarded-For"] = forwardedFor;
+      // The browser's own User-Agent and Cloudflare's location headers: a
+      // refresh rewrites the session's device columns (the settings page's
+      // device list), and this fetch otherwise reaches go-api as Node's
+      // "node" from nowhere, turning the reader's laptop into an unknown
+      // device on every server-side refresh.
+      for (const name of ["user-agent", "cf-ipcountry", "cf-ipcity"]) {
+        const value = req.headers.get(name);
+        if (value) refreshHeaders[name] = value;
+      }
 
       const r = await fetch(`${GO_API_INTERNAL_URL}/api/auth/refresh`, {
         method: "POST",

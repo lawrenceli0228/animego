@@ -99,6 +99,11 @@ func TestClientInfoFrom(t *testing.T) {
 		{"not a country code", "", "CHN", "", "<nil>", "<nil>", "<nil>"},
 		{"control characters are dropped", "a\x00b\nc", "", "Sha\x07nghai", "abc", "<nil>", "Shanghai"},
 		{"only control characters is nothing", "\x01\x02", "", "\x03", "<nil>", "<nil>", "<nil>"},
+		{"bidi overrides and zero-width marks are dropped", "Mac\u202eOS", "", "Shang\u200bhai", "MacOS", "<nil>", "Shanghai"},
+		{"a city must look like a place name", "", "", "<script>", "<nil>", "<nil>", "<nil>"},
+		{"place names keep their punctuation and scripts", "", "", "Saint-Jean-d'Angély", "<nil>", "<nil>", "Saint-Jean-d'Angély"},
+		{"a server-side client's default is not the reader's device", "node", "", "", "<nil>", "<nil>", "<nil>"},
+		{"undici too", "undici/6.19.8", "", "", "<nil>", "<nil>", "<nil>"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

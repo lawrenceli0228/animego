@@ -160,9 +160,9 @@ func TestListSessions_ThisDeviceFirstThenMostRecent(t *testing.T) {
 	}
 }
 
-// Without a refresh cookie, or with one that is not this user's, no
-// session is "this device".
-func TestListSessions_CurrentNeedsTheUsersOwnCookie(t *testing.T) {
+// The device list is for one of the devices on it: an access token alone,
+// or with a refresh cookie that is not this user's live session, gets 401.
+func TestListSessions_NeedsALiveSessionOfTheUsersOwn(t *testing.T) {
 	t.Parallel()
 	db := &fakeAuthDB{}
 	h, signer, _ := newSessionHandlers(t, db)
@@ -171,14 +171,16 @@ func TestListSessions_CurrentNeedsTheUsersOwnCookie(t *testing.T) {
 	other := fixtureUser(t)
 	other.ID = uuid.New()
 	otherCookie, _ := seedSession(t, db, signer, other)
+	gone, goneSID := seedSession(t, db, signer, user)
+	db.model().mu.Lock()
+	delete(db.model().rows, goneSID)
+	db.model().mu.Unlock()
 
-	for name, cookie := range map[string]string{"no cookie": "", "another user's": otherCookie, "forged": "not.a.jwt"} {
+	for name, cookie := range map[string]string{"no cookie": "", "another user's": otherCookie, "forged": "not.a.jwt", "a revoked session's": gone} {
 		rec := httptest.NewRecorder()
 		devicesRouter(h).ServeHTTP(rec, authed(http.MethodGet, "/api/auth/sessions", user, cookie))
-		var data SessionsData
-		decodeData(t, rec.Body.Bytes(), &data)
-		if len(data.Items) != 1 || data.Items[0].Current {
-			t.Errorf("%s: items = %+v, want the user's one session, not current", name, data.Items)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status = %d, want 401", name, rec.Code)
 		}
 	}
 }
@@ -186,14 +188,65 @@ func TestListSessions_CurrentNeedsTheUsersOwnCookie(t *testing.T) {
 func TestListSessions_DBError500(t *testing.T) {
 	t.Parallel()
 	db := &fakeAuthDB{}
+	h, signer, _ := newSessionHandlers(t, db)
+	user := fixtureUser(t)
+	cookie, _ := seedSession(t, db, signer, user)
 	db.model().getErr = errors.New("connection reset")
-	h, _, _ := newSessionHandlers(t, db)
 
 	rec := httptest.NewRecorder()
-	devicesRouter(h).ServeHTTP(rec, authed(http.MethodGet, "/api/auth/sessions", fixtureUser(t), ""))
+	devicesRouter(h).ServeHTTP(rec, authed(http.MethodGet, "/api/auth/sessions", user, cookie))
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestDevices_SessionLookupError500(t *testing.T) {
+	t.Parallel()
+	db := &fakeAuthDB{}
+	h, signer, _ := newSessionHandlers(t, db)
+	user := fixtureUser(t)
+	cookie, _ := seedSession(t, db, signer, user)
+	db.model().heldErr = errors.New("connection reset")
+
+	rec := httptest.NewRecorder()
+	devicesRouter(h).ServeHTTP(rec, authed(http.MethodDelete, "/api/auth/sessions", user, cookie))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// A device the owner has just signed out keeps a working access token for
+// up to 15 minutes, and its refresh cookie still verifies.  It must not be
+// able to turn around and sign the owner's devices out.
+func TestDevices_ARevokedDeviceCannotActOnTheOwnersSessions(t *testing.T) {
+	t.Parallel()
+	db := &fakeAuthDB{}
+	h, signer, _ := newSessionHandlers(t, db)
+	user := fixtureUser(t)
+	ownerCookie, owner := seedSession(t, db, signer, user)
+	intruderCookie, intruder := seedSession(t, db, signer, user)
+
+	rec := httptest.NewRecorder()
+	devicesRouter(h).ServeHTTP(rec, authed(http.MethodDelete, "/api/auth/sessions/"+intruder.String(), user, ownerCookie))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("owner's revoke: status %d", rec.Code)
+	}
+
+	for name, req := range map[string]*http.Request{
+		"sign out others": authed(http.MethodDelete, "/api/auth/sessions", user, intruderCookie),
+		"sign out owner":  authed(http.MethodDelete, "/api/auth/sessions/"+owner.String(), user, intruderCookie),
+		"list":            authed(http.MethodGet, "/api/auth/sessions", user, intruderCookie),
+	} {
+		rec := httptest.NewRecorder()
+		devicesRouter(h).ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s by the revoked device: status = %d, want 401", name, rec.Code)
+		}
+	}
+	if db.model().session(owner) == nil {
+		t.Fatal("the revoked device ended the owner's session")
 	}
 }
 
@@ -275,10 +328,12 @@ func TestRevokeSession_SomeoneElsesSessionEndsNothing(t *testing.T) {
 func TestRevokeSession_BadID400(t *testing.T) {
 	t.Parallel()
 	db := &fakeAuthDB{}
-	h, _, _ := newSessionHandlers(t, db)
+	h, signer, _ := newSessionHandlers(t, db)
+	user := fixtureUser(t)
+	cookie, _ := seedSession(t, db, signer, user)
 
 	rec := httptest.NewRecorder()
-	devicesRouter(h).ServeHTTP(rec, authed(http.MethodDelete, "/api/auth/sessions/not-a-uuid", fixtureUser(t), ""))
+	devicesRouter(h).ServeHTTP(rec, authed(http.MethodDelete, "/api/auth/sessions/not-a-uuid", user, cookie))
 
 	assertError(t, rec, http.StatusBadRequest, codeValidation, msgBadSessionID)
 }
@@ -338,8 +393,8 @@ func TestRevokeOtherSessions_KeepsThisDevice(t *testing.T) {
 	}
 }
 
-// Without a session of its own the request cannot be "everyone else".
-func TestRevokeOtherSessions_UnknownCurrent400(t *testing.T) {
+// Without a live session of its own the request cannot be "everyone else".
+func TestRevokeOtherSessions_NoLiveSession401(t *testing.T) {
 	t.Parallel()
 	db := &fakeAuthDB{}
 	h, signer, _ := newSessionHandlers(t, db)
@@ -349,7 +404,7 @@ func TestRevokeOtherSessions_UnknownCurrent400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	devicesRouter(h).ServeHTTP(rec, authed(http.MethodDelete, "/api/auth/sessions", user, ""))
 
-	assertError(t, rec, http.StatusBadRequest, codeValidation, msgUnknownCurrent)
+	assertError(t, rec, http.StatusUnauthorized, codeNoToken, msgNoToken)
 	if db.model().session(sid) == nil {
 		t.Error("a request with no session of its own ended sessions")
 	}

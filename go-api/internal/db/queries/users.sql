@@ -92,6 +92,18 @@ WHERE id = sqlc.arg(id)
   AND refresh_token = sqlc.arg(presented_token)
 RETURNING username, role;
 
+-- name: LockUserForRevoke :one
+-- First statement of auth.Store.RevokeOtherSessions: takes the users row so
+-- the revoke and an adoption of a pre-0052 token serialise.  Without it an
+-- adoption could commit between the revoke's delete and its legacy clear,
+-- and the session it inserts would survive "sign out everywhere else".
+-- NO KEY UPDATE, not UPDATE: it must conflict with the adoption's UPDATE of
+-- the row but not with the KEY SHARE an INSERT into user_sessions takes on it.
+SELECT id
+FROM users
+WHERE id = sqlc.arg(id)
+FOR NO KEY UPDATE;
+
 -- name: ClearLegacyRefreshTokens :execrows
 -- "Sign out other devices" (auth.Store.RevokeOtherSessions), for the one
 -- session per account that can still live on this row: a refresh token
