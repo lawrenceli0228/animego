@@ -42,13 +42,20 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install e2e deps
-        working-directory: e2e
-        run: bun install --frozen-lockfile
+      # The browser and the system packages `--with-deps` adds. Their apt
+      # download once took 8.5 min and timed this job out — see
+      # e2e/scripts/ci-install-playwright.sh. Same key as e2e-sandbox.yml.
+      - name: Restore Playwright browser and packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/bun.lock') }}
 
-      - name: Install Playwright browsers
+      - name: Install e2e deps and Playwright Chromium
         working-directory: e2e
-        run: bunx playwright install --with-deps chromium
+        run: bash scripts/ci-install-playwright.sh
 
       - name: Run Playwright (prod project only)
         working-directory: e2e
