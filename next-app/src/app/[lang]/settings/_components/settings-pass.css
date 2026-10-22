@@ -226,8 +226,11 @@
     justify-content: center;
     margin-bottom: 22px;
   }
+  /* The live phone size (member-pass.css: min(80vw, 300px)), not narrower:
+     below about 280px the barcode's half of the nameplate is too narrow for
+     its bars and shows as a bare white chip. */
   .set-pass-phone .agcpass-bay {
-    --w: 240px;
+    --w: min(80vw, 300px);
     padding: 0;
   }
   .set-bk-grid {
