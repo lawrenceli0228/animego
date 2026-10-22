@@ -16,9 +16,19 @@ name: E2E (Playwright)
 #     the runner, so nothing there touches prod data.
 # A change that touches only prose skips the run (the `paths` rule is
 # explained in unit-tests.yml).
+#
+# It also runs on every push to main, for one reason beyond a post-merge
+# smoke test of prod: GitHub Actions caches are scoped to a branch and its
+# base, so the Playwright cache a PR saves is invisible to the next PR. A
+# cache saved on main is visible to all of them. Without this, each new
+# PR's first sandbox run missed it and fetched the fonts from a mirror that
+# has taken nearly ten minutes.
 on:
   pull_request:
     branches: [main, feat/go-backend]
+    paths: ["**", "!**/*.md", "!docs/**", "DESIGN.md"]
+  push:
+    branches: [main]
     paths: ["**", "!**/*.md", "!docs/**", "DESIGN.md"]
   workflow_dispatch:
 
