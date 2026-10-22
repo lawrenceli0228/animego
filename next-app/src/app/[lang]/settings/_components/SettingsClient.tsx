@@ -1,29 +1,29 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
-import Link from "@/components/ui/LocaleLink";
-import { useRouter } from "next/navigation";
-import { authFetch } from "@/lib/authFetch";
+import { useCallback, useState } from "react";
 import { useLang } from "@/lib/lang-client";
 import MemberPass from "@/components/profile/MemberPass";
 import PhotoCropModal from "@/components/profile/PhotoCropModal";
-import { downscaleImage } from "@/components/profile/imageDownscale";
-import { memberNo as makeMemberNo, sinceLabel } from "@/components/profile/memberIdentity";
+import { memberNo as makeMemberNo } from "@/components/profile/memberIdentity";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
-import { DEFAULT_CARD_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
-import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
-import { settingsErrorMessage } from "./settingsState";
-import BlockedUsersList from "./BlockedUsersList";
+import { DEFAULT_AVATAR_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
+import AccountSection from "./AccountSection";
+import DevicesSection from "./DevicesSection";
+import PassSection from "./PassSection";
 import PlaybackSettings from "./PlaybackSettings";
+import PrivacySection from "./PrivacySection";
+import SectionNav from "./SectionNav";
+import { remainingSessions, type DeviceSession } from "./deviceSessions";
+import { SETTINGS_SECTIONS, type SettingsSection } from "./sectionSpy";
+import { usePassEditor } from "./usePassEditor";
+import { usePhotoCrop } from "./usePhotoCrop";
+import { useSectionSpy } from "./useSectionSpy";
+import { useUsernameEditor } from "./useUsernameEditor";
 import "./settings.css";
-import type { Lang } from "@/lib/i18n/lang";
-import { anilistImageSrc } from "@/lib/images/anilistImg";
 
-/** The nav mini-card preview's width (settings.css .set-minicard). */
-const MINICARD_WIDTH = 290;
-/** About the widest a backdrop-picker cell gets (settings.css .set-grid-thumbs). */
-const THUMB_WIDTH = 96;
+/** The identity line's avatar (settings.css .set-me-av). */
+const IDENTITY_AVATAR_WIDTH = 48;
 
 interface SettingsClientProps {
   username: string;
@@ -36,446 +36,148 @@ interface SettingsClientProps {
    */
   usernameHidden: boolean;
   userId: string | null;
-  createdAt: string | null;
+  email: string;
+  /** "SINCE 2026.10" for the pass, worked out on the server so both renders agree. */
+  since: string;
   avatarUrl: string | null;
   backdropAnilistId: number | null;
   backdropOptions: BackdropOption[];
   watchedCount: number;
   topSeason: string | null;
   isPublic: boolean;
+  sessions: DeviceSession[];
+  /** GET /api/auth/sessions failed (see readSessions): 登录设备 says so. */
+  sessionsFailed: boolean;
+  /** The request's clock: every relative time on the page is measured from it. */
+  serverNowMs: number;
 }
 
-type Status = { kind: "idle" | "saving" | "ok" | "err"; msg?: string };
-
-interface PatchResult {
-  ok: boolean;
-  error?: string;
-}
-
-// Takes the language rather than an is-Chinese boolean. Two of the three
-// strings it can return are fallbacks for a failed request, which is exactly
-// the path nobody re-reads — a boolean would have silently handed a third
-// language the English copy.
-const PATCH_FALLBACK: Record<Lang, { save: string; network: string }> = {
-  zh: { save: "保存失败", network: "网络错误" },
-  en: { save: "Save failed", network: "Network error" },
-  "zh-Hant": { save: "儲存失敗", network: "網路錯誤" },
-};
-
-async function patchMe(
-  body: Record<string, unknown>,
-  lang: Lang,
-): Promise<PatchResult> {
-  try {
-    const r = await authFetch("/api/auth/me", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      skipRedirectOnFailure: true,
-    });
-    if (r.ok) return { ok: true };
-    const errorBody: unknown = await r.json().catch(() => null);
-    return {
-      ok: false,
-      error: settingsErrorMessage(errorBody, PATCH_FALLBACK[lang].save),
-    };
-  } catch {
-    return { ok: false, error: PATCH_FALLBACK[lang].network };
-  }
-}
-
+/**
+ * The settings page, option B of the settings canvas: one page, five
+ * sections. On a desktop the live member pass and an index sit on the left;
+ * on a phone an identity line and a sticky row of chips lead, and the pass
+ * moves into its own section.
+ */
 export default function SettingsClient({
   username,
   usernameHidden,
   userId,
-  createdAt,
+  email,
+  since,
   avatarUrl,
   backdropAnilistId,
   backdropOptions,
   watchedCount,
   topSeason,
   isPublic,
+  sessions,
+  sessionsFailed,
+  serverNowMs,
 }: SettingsClientProps) {
-  const router = useRouter();
   const { lang, t } = useLang();
   const memberNo = makeMemberNo(userId);
-  const since = sinceLabel(createdAt);
+  const account = useUsernameEditor(username, usernameHidden);
+  const pass = usePassEditor({ photo: avatarUrl, backdrop: backdropAnilistId });
+  const crop = usePhotoCrop(pass.setPhoto);
+  const spy = useSectionSpy(SETTINGS_SECTIONS);
 
-  const [name, setName] = useState(username);
+  // Sessions signed out from this page. The list itself stays the server's
+  // (a refresh brings a new one); this only hides what has been ended since.
+  const [signedOut, setSignedOut] = useState<ReadonlySet<string>>(() => new Set());
+  const devices = remainingSessions(sessions, signedOut);
+  const markSignedOut = useCallback((ids: string[]) => {
+    setSignedOut((before) => new Set([...before, ...ids]));
+  }, []);
 
-  // The server decides whether the name is hidden; we never re-derive it.
-  // Gated on the field still holding the handle, so the warning clears the
-  // moment they type a replacement rather than lingering until the save
-  // round-trips.
-  const usernameIsHidden = usernameHidden && name.trim() === username;
-
-  const [nameStatus, setNameStatus] = useState<Status>({ kind: "idle" });
-  const [photoUrl, setPhotoUrl] = useState<string | null>(avatarUrl);
-  const [passStatus, setPassStatus] = useState<Status>({ kind: "idle" });
-  const [backdropId, setBackdropId] = useState<number | null>(backdropAnilistId);
-  const [cropOpen, setCropOpen] = useState(false);
-  const [cropSrc, setCropSrc] = useState<string | null>(null);
-  const [publicProfile, setPublicProfile] = useState(isPublic);
-  const [privacyStatus, setPrivacyStatus] = useState<Status>({ kind: "idle" });
-  const fileRef = useRef<HTMLInputElement>(null);
-
+  // The pass face and the profile backdrop both come from the chosen anime —
+  // or, before one is chosen, from the first in the list, as before.
   const chosen =
-    backdropOptions.find((o) => o.anilistId === backdropId) ??
-    backdropOptions[0] ??
-    null;
+    backdropOptions.find((o) => o.anilistId === pass.edited.backdrop) ?? backdropOptions[0] ?? null;
   const cardArt = chosen?.coverUrl ?? null;
-  const chosenBanner = chosen?.bannerUrl ?? chosen?.coverUrl ?? DEFAULT_BACKDROP_IMAGE;
-  // The page backdrop is a WIDE banner — only offer anime that actually have
-  // one (a portrait cover stretched wide looks bad).
-  const bannerOptions = backdropOptions.filter((o) => o.bannerUrl);
+  const banner = chosen?.bannerUrl ?? chosen?.coverUrl ?? DEFAULT_BACKDROP_IMAGE;
+  const avatarSrc = pass.edited.photo ?? cardArt ?? DEFAULT_AVATAR_IMAGE;
+  const displayName = account.draft.trim() || account.saved;
 
-  // ── username ──
-  const saveName = useCallback(async () => {
-    const v = name.trim();
-    if (v.length < 3) {
-      setNameStatus({ kind: "err", msg: t("settings.usernameTooShort") });
-      return;
-    }
-    if (v === username) {
-      setNameStatus({ kind: "idle" });
-      return;
-    }
-    setNameStatus({ kind: "saving" });
-    const res = await patchMe({ username: v }, lang);
-    if (res.ok) {
-      setNameStatus({ kind: "ok", msg: t("settings.saved") });
-      router.refresh();
-    } else {
-      setNameStatus({ kind: "err", msg: res.error });
-    }
-  }, [name, username, lang, router, t]);
+  // Rendered twice — in the aside on a desktop, in the 通行证 section on a
+  // phone; CSS shows one. Both follow the edit as it is made.
+  const passCard = (
+    <MemberPass
+      username={displayName}
+      memberNo={memberNo}
+      since={since}
+      watchedCount={watchedCount}
+      topSeason={topSeason}
+      artUrl={cardArt}
+      photoUrl={pass.edited.photo}
+      lang={lang}
+    />
+  );
 
-  // ── photo ──
-  const onFile = useCallback((file: File | undefined) => {
-    if (!file || !/^image\//.test(file.type)) return;
-    const fr = new FileReader();
-    fr.onload = () => {
-      void downscaleImage(String(fr.result)).then((u) => {
-        setCropSrc(u);
-        setCropOpen(true);
-      });
-    };
-    fr.readAsDataURL(file);
-  }, []);
-
-  // Photo + backdrop edits stay local (live preview + mini-card) until the
-  // user clicks 保存 on the 会员通行证 card — mirrors the 账号 section's
-  // explicit-save flow.
-  const onCropConfirm = useCallback((cropped: string) => {
-    setCropOpen(false);
-    setPhotoUrl(cropped);
-    setPassStatus({ kind: "idle" });
-  }, []);
-
-  const removePhoto = useCallback(() => {
-    setPhotoUrl(null);
-    setPassStatus({ kind: "idle" });
-  }, []);
-
-  const pickBackdrop = useCallback((id: number) => {
-    setBackdropId(id);
-    setPassStatus({ kind: "idle" });
-  }, []);
-
-  const photoChanged = (photoUrl ?? null) !== (avatarUrl ?? null);
-  const backdropChanged = (backdropId ?? null) !== (backdropAnilistId ?? null);
-  const passDirty = photoChanged || backdropChanged;
-
-  const savePass = useCallback(async () => {
-    const body: Record<string, unknown> = {};
-    if (photoChanged) body.avatarUrl = photoUrl ?? "";
-    if (backdropChanged) body.backdropAnilistId = backdropId ?? 0;
-    if (Object.keys(body).length === 0) return;
-    setPassStatus({ kind: "saving" });
-    const res = await patchMe(body, lang);
-    if (res.ok) {
-      setPassStatus({ kind: "ok", msg: t("settings.saved") });
-      router.refresh();
-    } else {
-      setPassStatus({ kind: "err", msg: res.error });
-    }
-  }, [photoChanged, backdropChanged, photoUrl, backdropId, lang, router, t]);
-
-  const savePrivacy = useCallback(async () => {
-    if (publicProfile === isPublic) return;
-    setPrivacyStatus({ kind: "saving" });
-    const res = await patchMe({ isPublic: publicProfile }, lang);
-    if (res.ok) {
-      setPrivacyStatus({ kind: "ok", msg: t("settings.saved") });
-      router.refresh();
-    } else {
-      setPublicProfile(isPublic);
-      setPrivacyStatus({ kind: "err", msg: res.error });
-    }
-  }, [isPublic, publicProfile, router, t, lang]);
-
-  const msgEl = (s: Status) =>
-    s.kind === "ok" || s.kind === "err" ? (
-      <span className={`set-msg ${s.kind}`}>{s.msg}</span>
-    ) : null;
-
-  const idDisplay = useMemo(() => `#${memberNo}`, [memberNo]);
+  const labels: Record<SettingsSection, string> = {
+    pass: t("settings.passTitle"),
+    account: t("settings.accountTitle"),
+    devices: t("settings.devicesTitle"),
+    privacy: t("settings.privacyTitle"),
+    playback: t("settings.playbackTitle"),
+  };
+  const nav = {
+    label: t("settings.sectionsAria"),
+    labels,
+    current: spy.current,
+    deviceCount: devices.length,
+    onSelect: spy.select,
+  };
 
   return (
-    <div className="set-page">
-      <div className="set-head">
-        <div className="set-head-titles">
-          <p className="set-kicker">{t("settings.kicker")}</p>
-          <h1 className="set-title">{t("settings.pageTitle")}</h1>
-        </div>
-        {/* live nav mini-card preview: picking a backdrop shows its banner here */}
-        <div className="set-minicard">
-          {chosenBanner && (
-            <div
-              className="set-minicard-bg"
-              style={{ backgroundImage: cssUrl(anilistImageSrc(chosenBanner, MINICARD_WIDTH), DEFAULT_BACKDROP_IMAGE) }}
-              aria-hidden="true"
+    <>
+      <div className="set-root">
+        <h1 className="set-title">{t("settings.pageTitle")}</h1>
+        <div className="set-grid">
+          <aside className="set-side">
+            {passCard}
+            <SectionNav variant="toc" {...nav} />
+          </aside>
+
+          <div className="set-main">
+            <div className="set-me">
+              <FallbackImg
+                key={avatarSrc}
+                className="set-me-av"
+                src={avatarSrc}
+                fallback={DEFAULT_AVATAR_IMAGE}
+                width={IDENTITY_AVATAR_WIDTH}
+              />
+              <div className="set-me-text">
+                <p className="set-me-name">{displayName}</p>
+                <p className="set-me-id">{`#${memberNo}`}</p>
+              </div>
+            </div>
+            <SectionNav variant="chips" {...nav} />
+
+            <PassSection
+              passCard={passCard}
+              options={backdropOptions.filter((o) => o.bannerUrl)}
+              editor={pass}
+              name={displayName}
+              avatarSrc={avatarSrc}
+              previewBanner={banner}
+              onPhotoFile={crop.start}
             />
-          )}
-          <div className="av">
-            <FallbackImg src={photoUrl ?? cardArt ?? DEFAULT_CARD_IMAGE} fallback={DEFAULT_CARD_IMAGE} />
-          </div>
-          <div className="info">
-            <b>{name || username}</b>
-            <span>{t("settings.navPreview")}</span>
+            <AccountSection editor={account} memberNo={memberNo} email={email} />
+            <DevicesSection
+              sessions={devices}
+              failed={sessionsFailed}
+              nowMs={serverNowMs}
+              onSignedOut={markSignedOut}
+            />
+            <PrivacySection isPublic={isPublic} />
+            <PlaybackSettings />
           </div>
         </div>
       </div>
 
-      <div className="set-grid">
-        {/* live preview */}
-        <aside className="set-preview">
-          <MemberPass
-            username={name || username}
-            memberNo={memberNo}
-            since={since}
-            watchedCount={watchedCount}
-            topSeason={topSeason}
-            artUrl={cardArt}
-            photoUrl={photoUrl}
-            lang={lang}
-          />
-          <span className="set-id">{idDisplay}</span>
-          <span className="hint">{t("settings.livePreview")}</span>
-        </aside>
-
-        <div className="set-cols">
-          {/* pass: photo + backdrop */}
-          <section className="set-card">
-            <h2>{t("settings.passTitle")}</h2>
-            <p className="sub">{t("settings.passSubtitle")}</p>
-
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={(e) => {
-                onFile(e.target.files?.[0]);
-                e.target.value = "";
-              }}
-            />
-            <div className="set-photo">
-              {photoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img className="set-thumb" src={photoUrl} alt={t("settings.currentCardAlt")} />
-              )}
-              <div className="set-actions">
-                <button type="button" className="set-btn" onClick={() => fileRef.current?.click()}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <path d="M17 8l-5-5-5 5" />
-                    <path d="M12 3v13" />
-                  </svg>
-                  {photoUrl ? t("settings.changePhoto") : t("settings.uploadPhoto")}
-                </button>
-                {photoUrl && (
-                  <button type="button" className="set-btn danger" onClick={removePhoto}>
-                    {t("settings.removePhoto")}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div style={{ marginTop: 18 }}>
-              <label style={{ fontSize: 12.5, fontWeight: 600, color: "rgba(235,235,245,0.7)" }}>
-                {t("settings.backdropLabel")}
-              </label>
-              {bannerOptions.length === 0 ? (
-                <p className="hint" style={{ marginTop: 8 }}>
-                  {t("settings.backdropEmpty")}
-                </p>
-              ) : (
-                <div
-                  className="set-grid-thumbs"
-                  role="listbox"
-                  aria-label={t("settings.backdropListAria")}
-                >
-                  {bannerOptions.map((o) => (
-                    <button
-                      key={o.anilistId}
-                      type="button"
-                      className="set-cell"
-                      role="option"
-                      aria-selected={o.anilistId === backdropId}
-                      title={o.title}
-                      onClick={() => pickBackdrop(o.anilistId)}
-                    >
-                      <FallbackImg
-                        src={o.coverUrl ?? o.bannerUrl ?? DEFAULT_CARD_IMAGE}
-                        fallback={DEFAULT_CARD_IMAGE}
-                        alt={o.title}
-                        loading="lazy"
-                        width={THUMB_WIDTH}
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div
-              className="set-actions"
-              style={{ marginTop: 18, borderTop: "1px solid #38383a", paddingTop: 16 }}
-            >
-              <button
-                type="button"
-                className="set-btn"
-                disabled={!passDirty || passStatus.kind === "saving"}
-                onClick={savePass}
-              >
-                {passStatus.kind === "saving"
-                  ? t("settings.saving")
-                  : t("settings.savePass")}
-              </button>
-              {msgEl(passStatus)}
-            </div>
-          </section>
-
-          {/* account: username */}
-          <section className="set-card">
-            <h2>{t("settings.accountTitle")}</h2>
-            <p className="sub">{t("settings.accountSubtitle").replace("{{id}}", idDisplay)}</p>
-            <div className="set-field">
-              <label htmlFor="set-username">{t("settings.usernameLabel")}</label>
-              <input
-                id="set-username"
-                className="set-input"
-                value={name}
-                maxLength={50}
-                onChange={(e) => setName(e.target.value)}
-                aria-describedby={usernameIsHidden ? "set-username-hidden" : undefined}
-              />
-            </div>
-            {usernameIsHidden && (
-              // Each run of copy is a single string expression rather than JSX
-              // text. JSX turns a newline + indent into a space, which is
-              // correct for English and wrong for Chinese — that is what put
-              // stray gaps mid-sentence here before.
-              <div id="set-username-hidden" className="set-warn" role="status">
-                <p className="set-warn-title">
-                  {t("settings.usernameHiddenTitle")}
-                </p>
-                <p className="set-warn-body">
-                  {t("settings.usernameHiddenBody")}
-                </p>
-                <code className="set-warn-code">{username}</code>
-              </div>
-            )}
-            <div className="set-actions">
-              <button
-                type="button"
-                className="set-btn"
-                disabled={nameStatus.kind === "saving" || name.trim() === username}
-                onClick={saveName}
-              >
-                {nameStatus.kind === "saving" ? t("settings.saving") : t("settings.saveUsername")}
-              </button>
-              {msgEl(nameStatus)}
-            </div>
-          </section>
-
-          {/* playback: device-local prefs, no server round trip, no Save */}
-          <PlaybackSettings />
-
-          {/* community & privacy */}
-          <section className="set-card">
-            <h2>{t("settings.communityTitle")}</h2>
-            <p className="sub">{t("settings.communitySubtitle")}</p>
-            <label className="set-toggle" htmlFor="set-public-profile">
-              <input
-                id="set-public-profile"
-                type="checkbox"
-                checked={publicProfile}
-                onChange={(event) => {
-                  setPublicProfile(event.target.checked);
-                  setPrivacyStatus({ kind: "idle" });
-                }}
-              />
-              <span>
-                <b>{t("settings.publicProfile")}</b>
-                <span className="set-toggle-desc">
-                  {publicProfile
-                    ? t("settings.publicProfileOn")
-                    : t("settings.publicProfileOff")}
-                </span>
-              </span>
-            </label>
-            <div className="set-actions" style={{ marginTop: 18 }}>
-              <button
-                type="button"
-                className="set-btn"
-                disabled={privacyStatus.kind === "saving" || publicProfile === isPublic}
-                onClick={() => void savePrivacy()}
-              >
-                {privacyStatus.kind === "saving"
-                  ? t("settings.saving")
-                  : t("settings.savePrivacy")}
-              </button>
-              {msgEl(privacyStatus)}
-            </div>
-            <BlockedUsersList />
-          </section>
-
-          {/* security: password changes go through the email reset flow */}
-          <section className="set-card">
-            <h2>{t("settings.securityTitle")}</h2>
-            <p className="sub">{t("settings.securitySubtitle")}</p>
-            <p
-              style={{
-                fontSize: 13.5,
-                color: "rgba(235,235,245,0.72)",
-                lineHeight: 1.65,
-                margin: 0,
-              }}
-            >
-              {t("settings.passwordResetHint")}
-            </p>
-            <p
-              style={{
-                fontSize: 12.5,
-                color: "rgba(235,235,245,0.45)",
-                lineHeight: 1.6,
-                margin: "6px 0 0",
-              }}
-            >
-              {t("settings.passwordResetHintAlt")}
-            </p>
-            <div className="set-actions" style={{ marginTop: 16 }}>
-              <Link href="/login" className="set-btn ghost" style={{ textDecoration: "none" }}>
-                {t("settings.goToLogin")}
-              </Link>
-            </div>
-          </section>
-        </div>
-      </div>
-
-      <PhotoCropModal open={cropOpen} src={cropSrc} onConfirm={onCropConfirm} onCancel={() => setCropOpen(false)} />
-    </div>
+      {/* Outside .set-root, whose button and focus rules are not the modal's. */}
+      <PhotoCropModal open={crop.open} src={crop.src} onConfirm={crop.confirm} onCancel={crop.cancel} />
+    </>
   );
 }

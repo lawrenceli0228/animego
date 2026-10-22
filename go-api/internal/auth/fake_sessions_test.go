@@ -35,7 +35,11 @@ type fakeSessionRow struct {
 	dbgen.GetUserSessionRow
 	ExpiresAt  time.Time
 	LastUsedAt time.Time
+	CreatedAt  time.Time
 	LegacyHash *string
+	UserAgent  *string
+	Country    *string
+	City       *string
 }
 
 // sessionModel is the table plus the pre-0052 users.refresh_token column the
@@ -49,7 +53,7 @@ type sessionModel struct {
 	// refuses a verified hash that differs (LockUserForNewSession).
 	passwords map[uuid.UUID]string
 
-	createErr, pruneErr, rotateErr, getErr, deleteErr, adoptErr error
+	createErr, pruneErr, rotateErr, getErr, deleteErr, adoptErr, heldErr error
 
 	pruneCalls []pruneCall
 	writes     int // statements that changed or would change a row
@@ -99,6 +103,10 @@ func (f *fakeAuthDB) StartUserSession(_ context.Context, verifiedPassword string
 		},
 		ExpiresAt:  arg.TokenExp.Time,
 		LastUsedAt: time.Now(),
+		CreatedAt:  time.Now(),
+		UserAgent:  arg.UserAgent,
+		Country:    arg.Country,
+		City:       arg.City,
 	}
 	return nil
 }
@@ -157,6 +165,15 @@ func (f *fakeAuthDB) RotateUserSession(_ context.Context, arg dbgen.RotateUserSe
 	r.RotatedAt = timestamptz(time.Now())
 	r.LastUsedAt = time.Now()
 	r.ExpiresAt = arg.NewExp.Time
+	if arg.UserAgent != nil {
+		r.UserAgent = arg.UserAgent
+	}
+	if arg.Country != nil {
+		r.Country = arg.Country
+	}
+	if arg.City != nil {
+		r.City = arg.City
+	}
 	return dbgen.RotateUserSessionRow{Username: r.Username, Role: r.Role}, nil
 }
 
@@ -260,9 +277,87 @@ func (f *fakeAuthDB) AdoptLegacySession(_ context.Context, p AdoptLegacySessionP
 		},
 		ExpiresAt:  s.TokenExp.Time,
 		LastUsedAt: time.Now(),
+		CreatedAt:  time.Now(),
 		LegacyHash: s.LegacyHash,
+		UserAgent:  s.UserAgent,
+		Country:    s.Country,
+		City:       s.City,
 	}
 	return dbgen.ClaimLegacyRefreshTokenRow{Username: username, Role: role}, nil
+}
+
+// ListUserSessions mirrors the SQL: live rows of the user, most recently
+// used first.
+func (f *fakeAuthDB) ListUserSessions(_ context.Context, userID uuid.UUID) ([]dbgen.ListUserSessionsRow, error) {
+	m := f.model()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	var out []dbgen.ListUserSessionsRow
+	now := time.Now()
+	for _, r := range m.rows {
+		if r.UserID != userID || !r.ExpiresAt.After(now) {
+			continue
+		}
+		out = append(out, dbgen.ListUserSessionsRow{
+			ID: r.ID, UserAgent: r.UserAgent, Country: r.Country, City: r.City,
+			CreatedAt: timestamptz(r.CreatedAt), LastUsedAt: timestamptz(r.LastUsedAt),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastUsedAt.Time.After(out[j].LastUsedAt.Time) })
+	return out, nil
+}
+
+// held mirrors GetHeldUserSession's predicate.  Caller holds m.mu.
+func (m *sessionModel) held(id, userID uuid.UUID, presentedHash string) bool {
+	r, ok := m.rows[id]
+	if !ok || r.UserID != userID || !r.ExpiresAt.After(time.Now()) {
+		return false
+	}
+	return r.TokenHash == presentedHash || (r.PreviousHash != nil && *r.PreviousHash == presentedHash)
+}
+
+func (f *fakeAuthDB) GetHeldUserSession(_ context.Context, id, userID uuid.UUID, presentedHash string) (uuid.UUID, error) {
+	m := f.model()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.heldErr != nil {
+		return uuid.Nil, m.heldErr
+	}
+	if !m.held(id, userID, presentedHash) {
+		return uuid.Nil, pgx.ErrNoRows
+	}
+	return id, nil
+}
+
+// RevokeOtherSessions mirrors Store's transaction: the kept session must
+// still be live, then every other row of the user goes, plus the pre-0052
+// token on the users row.
+func (f *fakeAuthDB) RevokeOtherSessions(_ context.Context, userID, keepID uuid.UUID, presentedHash string) (int64, error) {
+	m := f.model()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.writes++
+	if m.deleteErr != nil {
+		return 0, m.deleteErr
+	}
+	if !m.held(keepID, userID, presentedHash) {
+		return 0, ErrSessionGone
+	}
+	var n int64
+	for id, r := range m.rows {
+		if r.UserID == userID && id != keepID {
+			delete(m.rows, id)
+			n++
+		}
+	}
+	if _, ok := m.legacy[userID]; ok {
+		delete(m.legacy, userID)
+		n++
+	}
+	return n, nil
 }
 
 // -----------------------------------------------------------------------------

@@ -90,6 +90,7 @@ var mustKillSession = map[string]string{
 	"UpdateUserPassword":   "dormant self-serve change-password: ships in the shape its first caller will trust",
 	"ClaimLegacyRefreshToken": "adoption of a pre-0052 token: the old credential is over the moment it " +
 		"becomes a user_sessions row, grace slot included",
+	"ClearLegacyRefreshTokens": "sign out other devices: a pre-0052 token nobody has refreshed is one of them",
 	"ClearRefreshTokenIfMatches": "logout: ends the presented session, so it must not leave a grace slot " +
 		"the Refresh handler would still honour",
 }

@@ -79,6 +79,34 @@ func (q *Queries) ClaimLegacyRefreshToken(ctx context.Context, iD uuid.UUID, pre
 	return i, err
 }
 
+const clearLegacyRefreshTokens = `-- name: ClearLegacyRefreshTokens :execrows
+UPDATE users
+SET refresh_token          = NULL,
+    previous_refresh_token = NULL,
+    refresh_rotated_at     = NULL,
+    updated_at             = now()
+WHERE id = $1
+  AND (refresh_token IS NOT NULL OR previous_refresh_token IS NOT NULL)
+`
+
+// "Sign out other devices" (auth.Store.RevokeOtherSessions), for the one
+// session per account that can still live on this row: a refresh token
+// issued before migration 0052 that no refresh has adopted yet.  It has no
+// user_sessions row, so the device list cannot show it and deleting the
+// user's other rows does not reach it; without this, a phone left in a
+// drawer since before the deploy would survive "sign out everywhere else".
+//
+// Clears all three columns, like every statement that ends a session here.
+// The device asking cannot be holding this token: a sid in its own refresh
+// cookie is what identified it.  Remove with the columns.
+func (q *Queries) ClearLegacyRefreshTokens(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, clearLegacyRefreshTokens, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearRefreshTokenIfMatches = `-- name: ClearRefreshTokenIfMatches :execrows
 UPDATE users
 SET refresh_token          = NULL,
@@ -355,6 +383,26 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.BackdropAnilistID,
 	)
 	return i, err
+}
+
+const lockUserForRevoke = `-- name: LockUserForRevoke :one
+SELECT id
+FROM users
+WHERE id = $1
+FOR NO KEY UPDATE
+`
+
+// First statement of auth.Store.RevokeOtherSessions: takes the users row so
+// the revoke and an adoption of a pre-0052 token serialise.  Without it an
+// adoption could commit between the revoke's delete and its legacy clear,
+// and the session it inserts would survive "sign out everywhere else".
+// NO KEY UPDATE, not UPDATE: it must conflict with the adoption's UPDATE of
+// the row but not with the KEY SHARE an INSERT into user_sessions takes on it.
+func (q *Queries) LockUserForRevoke(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockUserForRevoke, id)
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const resetUserPassword = `-- name: ResetUserPassword :exec

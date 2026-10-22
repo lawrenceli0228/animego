@@ -145,6 +145,56 @@ func (s *Store) StartUserSession(ctx context.Context, verifiedPassword string, a
 	return nil
 }
 
+// ErrSessionGone is RevokeOtherSessions' answer when the session the
+// request came from is no longer live — revoked, rotated past, or expired —
+// by the time the transaction holds it.  Nothing was deleted.
+var ErrSessionGone = errors.New("auth: the request's session is no longer live")
+
+// RevokeOtherSessions ends every session of the user except keepID — the
+// one the request came from, still holding presentedHash — and, in the same
+// transaction, a pre-0052 refresh token still held on the users row
+// (ClearLegacyRefreshTokens says why that one has to be named separately).
+// Returns how many sessions ended.
+//
+// Order matters.  The users row is locked first, so an adoption of a
+// pre-0052 token either commits before (its session is then one of the
+// "others") or waits and finds its token cleared.  The kept session is
+// locked and re-checked next: a session revoked a moment ago must not be the
+// one that survives while every live one goes.
+func (s *Store) RevokeOtherSessions(ctx context.Context, userID, keepID uuid.UUID, presentedHash string) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("auth: begin revoke: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := dbgen.New(tx)
+	if _, err := q.LockUserForRevoke(ctx, userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrSessionGone
+		}
+		return 0, fmt.Errorf("auth: lock user for revoke: %w", err)
+	}
+	if _, err := q.LockHeldUserSession(ctx, keepID, userID, presentedHash); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrSessionGone
+		}
+		return 0, fmt.Errorf("auth: lock kept session: %w", err)
+	}
+	legacy, err := q.ClearLegacyRefreshTokens(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("auth: clear legacy session: %w", err)
+	}
+	n, err := q.DeleteOtherUserSessions(ctx, userID, keepID)
+	if err != nil {
+		return 0, fmt.Errorf("auth: delete other sessions: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("auth: commit revoke: %w", err)
+	}
+	return n + legacy, nil
+}
+
 // AdoptLegacySessionParams is a pre-0052 refresh token to adopt and the
 // session it becomes.
 type AdoptLegacySessionParams struct {
@@ -189,7 +239,7 @@ func (s *Store) AdoptLegacySession(ctx context.Context, p AdoptLegacySessionPara
 // touched beyond pruning past maxSessionsPerUser.  Returns the access and
 // refresh tokens to set, or ErrPasswordChanged if user.Password — the hash
 // the caller verified — is no longer the account's.
-func (h *Handlers) startSession(ctx context.Context, user dbgen.User, event string) (string, string, error) {
+func (h *Handlers) startSession(ctx context.Context, user dbgen.User, event string, info clientInfo) (string, string, error) {
 	sid := uuid.New()
 	issued, err := h.signer.SignRefresh(user.ID, sid)
 	if err != nil {
@@ -207,6 +257,9 @@ func (h *Handlers) startSession(ctx context.Context, user dbgen.User, event stri
 		TokenJti:  issued.JTI,
 		TokenIat:  timestamptz(issued.IssuedAt),
 		TokenExp:  timestamptz(issued.ExpiresAt),
+		UserAgent: info.UserAgent,
+		Country:   info.Country,
+		City:      info.City,
 	})
 	switch {
 	case errors.Is(err, ErrPasswordChanged):
@@ -230,7 +283,7 @@ func (h *Handlers) startSession(ctx context.Context, user dbgen.User, event stri
 }
 
 // refreshSession rotates a token that names its session.
-func (h *Handlers) refreshSession(ctx context.Context, w http.ResponseWriter, claims *jwtx.RefreshClaims, cookieToken string) {
+func (h *Handlers) refreshSession(ctx context.Context, w http.ResponseWriter, claims *jwtx.RefreshClaims, cookieToken string, info clientInfo) {
 	uid, sid := claims.UserID, claims.SessionID
 	presented := hashToken(cookieToken)
 
@@ -247,6 +300,9 @@ func (h *Handlers) refreshSession(ctx context.Context, w http.ResponseWriter, cl
 		ID:            sid,
 		UserID:        uid,
 		PresentedHash: presented,
+		UserAgent:     info.UserAgent,
+		Country:       info.Country,
+		City:          info.City,
 	})
 	switch {
 	case err == nil:
@@ -273,7 +329,7 @@ func (h *Handlers) refreshSession(ctx context.Context, w http.ResponseWriter, cl
 
 // refreshLegacy answers a token minted before 0052 (no sid) by adopting it
 // into a session, so the deploy signs nobody out.
-func (h *Handlers) refreshLegacy(ctx context.Context, w http.ResponseWriter, uid uuid.UUID, cookieToken string) {
+func (h *Handlers) refreshLegacy(ctx context.Context, w http.ResponseWriter, uid uuid.UUID, cookieToken string, info clientInfo) {
 	legacyHash := hashToken(cookieToken)
 	sid := uuid.New()
 
@@ -293,6 +349,9 @@ func (h *Handlers) refreshLegacy(ctx context.Context, w http.ResponseWriter, uid
 			TokenJti:   next.JTI,
 			TokenIat:   timestamptz(next.IssuedAt),
 			TokenExp:   timestamptz(next.ExpiresAt),
+			UserAgent:  info.UserAgent,
+			Country:    info.Country,
+			City:       info.City,
 		},
 	})
 	switch {

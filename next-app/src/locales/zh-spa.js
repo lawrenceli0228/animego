@@ -819,44 +819,64 @@ const zh = {
     empty: '还没有通知', loadError: '通知加载失败', retry: '重试',
   },
   settings: {
-    // Page chrome + member pass card. These were 28 inline
-    // `lang === "zh" ? … : …` ternaries in SettingsClient.tsx, which compiled
-    // clean and handed every third language the English branch.
+    // The settings page: one page, five sections (option B of the settings
+    // canvas). These were 28 inline `lang === "zh" ? … : …` ternaries in
+    // SettingsClient.tsx once, which compiled clean and handed every third
+    // language the English branch. `kicker` is the avatar menu's link here.
     kicker: '用户设置',
-    pageTitle: '账号与通行证',
-    navPreview: '导航头像预览 · 改背景实时可见',
-    livePreview: '实时预览',
-    passTitle: '会员通行证',
-    passSubtitle: '设置卡面照片与主页背景',
-    currentCardAlt: '当前卡面',
-    changePhoto: '更换照片',
-    uploadPhoto: '上传照片做卡面',
-    removePhoto: '移除',
-    backdropLabel: '主页背景番剧（用宽幅 banner）',
+    pageTitle: '设置',
+    sectionsAria: '设置分区',
+    // 通行证
+    passTitle: '通行证',
+    photoLabel: '卡面照片',
+    uploadPhoto: '上传照片',
+    removePhoto: '移除照片',
+    backdropLabel: '主页背景',
     backdropEmpty: '列表里还没有带宽幅 banner 的番剧',
-    backdropListAria: '主页背景番剧',
-    savePass: '保存通行证',
-    accountTitle: '账号',
-    accountSubtitle: '专属编号 {{id}} · 不可更改',
+    backdropPick: '用《{{title}}》做主页背景和卡面',
+    showAllBackdrops: '显示全部 {{n}} 部',
+    passDirty: '通行证有改动',
+    revert: '还原',
+    save: '保存',
+    saving: '保存中…',
+    passSaved: '通行证已保存',
+    // 账号与安全. The password link is the login page's own forgot-password mail.
+    accountTitle: '账号与安全',
     usernameLabel: '用户名',
-    usernameTooShort: '用户名至少 3 个字符',
     usernameHiddenTitle: '用户名已隐藏',
     usernameHiddenBody: '你注册时填的名字看起来是邮箱或手机号，所以没有公开显示。现在你和别人看到的都是：',
-    saveUsername: '保存用户名',
-    // The security card is deliberately bilingual in every language: whoever
-    // needs to reset a password should find the instruction whatever they read.
-    securityTitle: '安全',
-    securitySubtitle: '修改密码 · Change password',
-    passwordResetHint: '为了账号安全，修改密码请在登录界面点击「忘记密码」，通过邮箱重置。',
-    passwordResetHintAlt: 'To change your password, click “Forgot password” on the login page.',
-    goToLogin: '前往登录页 · Go to login',
-    communityTitle: '社区与隐私',
-    communitySubtitle: '控制其他用户能看到的追番与活动信息',
+    usernameTooShort: '用户名至少 3 个字符',
+    usernameSaved: '用户名已保存',
+    memberNoLabel: '会员编号',
+    emailLabel: '邮箱',
+    passwordLabel: '密码',
+    sendPasswordLink: '发送修改链接',
+    passwordLinkSentTo: '修改链接已发到 {{email}}',
+    passwordLinkSent: '修改链接已发送',
+    // 登录设备. A tile's device name, place and times are not here: they live in
+    // settings/_components/deviceLabels.ts, which also runs on the server.
+    devicesTitle: '登录设备',
+    thisDevice: '本机',
+    signOut: '退出',
+    signOutDevice: '退出 {{name}}',
+    signedOutDevice: '已退出 {{name}}',
+    signOutOthers: '退出其他设备',
+    signOutOthersTitle: '退出其他 {{n}} 台设备？',
+    signOutOthersTitleOne: '退出其他 1 台设备？',
+    signOutOthersBody: '这些设备下次打开时需要重新登录。',
+    cancel: '取消',
+    signOutAll: '全部退出',
+    signedOutOthers: '已退出其他 {{n}} 台设备',
+    signedOutOthersOne: '已退出其他 1 台设备',
+    // 隐私与社区
+    privacyTitle: '隐私与社区',
     publicProfile: '公开我的社区主页',
     publicProfileOn: '任何人都可以查看你的追番列表与公开活动。',
     publicProfileOff: '只有你自己可以查看追番列表与活动。',
-    savePrivacy: '保存隐私设置', saving: '保存中…', saved: '已保存',
+    saved: '已保存',
     blockedUsers: '已拉黑用户', noBlockedUsers: '暂无拉黑用户',
+    // Either list on the page (登录设备, 已拉黑用户) when it could not be had.
+    loadFailed: '加载失败',
     // 播放：只存在这台设备的 localStorage 里，切换即生效，没有保存按钮。
     playbackTitle: '播放',
     playbackSubtitle: '只影响这台设备上的播放器',

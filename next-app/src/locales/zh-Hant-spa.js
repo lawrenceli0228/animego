@@ -815,46 +815,67 @@ const zhHant = {
     empty: '還沒有通知', loadError: '通知載入失敗', retry: '重試',
   },
   settings: {
-    // Page chrome + member pass card. These were 28 inline
-    // `lang === "zh" ? … : …` ternaries in SettingsClient.tsx, which compiled
-    // clean and handed every third language the English branch.
+    // The settings page: one page, five sections (option B of the settings
+    // canvas). These were 28 inline `lang === "zh" ? … : …` ternaries in
+    // SettingsClient.tsx once, which compiled clean and handed every third
+    // language the English branch. `kicker` is the avatar menu's link here.
     kicker: '使用者設定',
-    pageTitle: '賬號與通行證',
-    navPreview: '導航頭像預覽 · 改背景實時可見',
-    livePreview: '實時預覽',
-    passTitle: '會員通行證',
-    passSubtitle: '設定卡面照片與主頁背景',
-    currentCardAlt: '當前卡面',
-    changePhoto: '更換照片',
-    uploadPhoto: '上傳照片做卡面',
-    removePhoto: '移除',
-    backdropLabel: '主頁背景番劇（用寬幅 banner）',
+    pageTitle: '設定',
+    sectionsAria: '設定分區',
+    // 通行證
+    passTitle: '通行證',
+    photoLabel: '卡面照片',
+    uploadPhoto: '上傳照片',
+    removePhoto: '移除照片',
+    backdropLabel: '主頁背景',
     // 帶寬幅, not 頻寬幅: s2twp read 带宽 out of 带宽幅 and returned the
     // word for network bandwidth. This is a wide banner image.
     backdropEmpty: '列表裡還沒有帶寬幅 banner 的番劇',
-    backdropListAria: '主頁背景番劇',
-    savePass: '儲存通行證',
-    accountTitle: '賬號',
-    accountSubtitle: '專屬編號 {{id}} · 不可更改',
+    backdropPick: '用《{{title}}》做主頁背景和卡面',
+    showAllBackdrops: '顯示全部 {{n}} 部',
+    passDirty: '通行證有改動',
+    revert: '還原',
+    save: '儲存',
+    saving: '儲存中…',
+    passSaved: '通行證已儲存',
+    // 賬號與安全. The password link is the login page's own forgot-password
+    // mail; 傳送, as that page writes it.
+    accountTitle: '賬號與安全',
     usernameLabel: '使用者名稱',
-    usernameTooShort: '使用者名稱至少 3 個字元',
     usernameHiddenTitle: '使用者名稱已隱藏',
     usernameHiddenBody: '你註冊時填的名字看起來是郵箱或手機號，所以沒有公開顯示。現在你和別人看到的都是：',
-    saveUsername: '儲存使用者名稱',
-    // The security card is deliberately bilingual in every language: whoever
-    // needs to reset a password should find the instruction whatever they read.
-    securityTitle: '安全',
-    securitySubtitle: '修改密碼 · Change password',
-    passwordResetHint: '為了賬號安全，修改密碼請在登入介面點選「忘記密碼」，透過郵箱重置。',
-    passwordResetHintAlt: 'To change your password, click “Forgot password” on the login page.',
-    goToLogin: '前往登入頁 · Go to login',
-    communityTitle: '社群與隱私',
-    communitySubtitle: '控制其他使用者能看到的追番與活動資訊',
+    usernameTooShort: '使用者名稱至少 3 個字元',
+    usernameSaved: '使用者名稱已儲存',
+    memberNoLabel: '會員編號',
+    emailLabel: '郵箱',
+    passwordLabel: '密碼',
+    sendPasswordLink: '傳送修改連結',
+    passwordLinkSentTo: '修改連結已傳送到 {{email}}',
+    passwordLinkSent: '修改連結已傳送',
+    // 登入裝置 — 登出 for 退出, as Taiwan writes signing out. A tile's device
+    // name, place and times live in settings/_components/deviceLabels.ts.
+    devicesTitle: '登入裝置',
+    thisDevice: '本機',
+    signOut: '登出',
+    signOutDevice: '登出 {{name}}',
+    signedOutDevice: '已登出 {{name}}',
+    signOutOthers: '登出其他裝置',
+    signOutOthersTitle: '登出其他 {{n}} 台裝置？',
+    signOutOthersTitleOne: '登出其他 1 台裝置？',
+    signOutOthersBody: '這些裝置下次開啟時需要重新登入。',
+    cancel: '取消',
+    signOutAll: '全部登出',
+    signedOutOthers: '已登出其他 {{n}} 台裝置',
+    signedOutOthersOne: '已登出其他 1 台裝置',
+    // 隱私與社群
+    privacyTitle: '隱私與社群',
     publicProfile: '公開我的社群主頁',
     publicProfileOn: '任何人都可以檢視你的追番列表與公開活動。',
     publicProfileOff: '只有你自己可以檢視追番列表與活動。',
-    savePrivacy: '儲存隱私設定', saving: '儲存中…', saved: '已儲存',
+    saved: '已儲存',
     blockedUsers: '已拉黑使用者', noBlockedUsers: '暫無拉黑使用者',
+    // Either list on the page (登入裝置, 已拉黑使用者) when it could not be had.
+    loadFailed: '載入失敗',
     // 播放：只存在这台设备的 localStorage 里，切换即生效，没有保存按钮。
     playbackTitle: '播放',
     playbackSubtitle: '只影響這台裝置上的播放器',

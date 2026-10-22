@@ -302,6 +302,17 @@ type Querier interface {
 	// statement would test the pre-UPDATE values and delete rows that still hold
 	// another source's title.
 	ClearEpisodeTitlesBySourceOutside(ctx context.Context, source string, animeID int32, kept []int32) ([]int32, error)
+	// "Sign out other devices" (auth.Store.RevokeOtherSessions), for the one
+	// session per account that can still live on this row: a refresh token
+	// issued before migration 0052 that no refresh has adopted yet.  It has no
+	// user_sessions row, so the device list cannot show it and deleting the
+	// user's other rows does not reach it; without this, a phone left in a
+	// drawer since before the deploy would survive "sign out everywhere else".
+	//
+	// Clears all three columns, like every statement that ends a session here.
+	// The device asking cannot be holding this token: a sid in its own refresh
+	// cookie is what identified it.  Remove with the columns.
+	ClearLegacyRefreshTokens(ctx context.Context, id uuid.UUID) (int64, error)
 	// Since migration 0052 this ends only a pre-0052 session (a refresh token
 	// with no sid, still held on the users row); sessions issued since live in
 	// user_sessions and logout ends them with DeleteUserSessionIfHeld.  Remove it
@@ -536,6 +547,10 @@ type Querier interface {
 	// whether a row was deleted (matches Express's findOneAndDelete which
 	// returned 200 on either match-and-delete or no-match).
 	DeleteFollow(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (int64, error)
+	// "Sign out other devices": every session of the user but keep_id, the one
+	// the request came from.  Runs with ClearLegacyRefreshTokens in one
+	// transaction (auth.Store.RevokeOtherSessions).
+	DeleteOtherUserSessions(ctx context.Context, userID uuid.UUID, keepID uuid.UUID) (int64, error)
 	// DELETE /api/subscriptions/:anilistId.  Returns the affected row count
 	// so the handler can 404 when no row matched (matches Express's
 	// findOneAndDelete returning null → 404 "Subscription not found"); the
@@ -1237,6 +1252,12 @@ type Querier interface {
 	// 0022 called out as expected: there is no predicate to accelerate and an
 	// index on this table would cost more than the scan it saves.
 	GetHantStats(ctx context.Context) (GetHantStatsRow, error)
+	// Which session is this device: the sid in the request's refresh cookie,
+	// only while that cookie is still the session's current or grace-slot
+	// token.  A verified signature is not enough — a session revoked a minute
+	// ago signs exactly as well — and the device list's endpoints act on the
+	// answer (auth.Handlers.currentSession).
+	GetHeldUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error)
 	// people_pages.sql — the person and character pages (internal/people).
 	// Database only; adult titles are filtered here, where credits are read,
 	// and a profile row counts only once AniList returned it (fetched_at).
@@ -2376,6 +2397,10 @@ type Querier interface {
 	// memory.  Ordered by anilist_id ASC for deterministic batching.
 	ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error)
 	ListUserBlocks(ctx context.Context, blockerID uuid.UUID, limit int32, offset int32) ([]ListUserBlocksRow, error)
+	// The settings page's device list: the user's live sessions, most recently
+	// used first.  Which one is this browser is decided by the caller from the
+	// refresh cookie; the row does not know.
+	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]ListUserSessionsRow, error)
 	// Queries against the subscriptions table (P2.4).
 	//
 	// The subscriptions table has a (user_id, anilist_id) composite PK + FKs
@@ -2434,6 +2459,10 @@ type Querier interface {
 	// Read-modify-write of one overlay: two reviews of the same page accept
 	// one after the other, and neither loses the other's fields.
 	LockEntityOverlay(ctx context.Context, kind string, entityID int32) ([]byte, error)
+	// GetHeldUserSession inside auth.Store.RevokeOtherSessions' transaction,
+	// holding the row: the session being kept cannot be revoked or rotated away
+	// between being checked and the others being deleted.
+	LockHeldUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error)
 	// user_sessions: one refresh session per device (migration 0052).
 	//
 	// Every hash here is the sha256 hex digest of a refresh token
@@ -2456,6 +2485,13 @@ type Querier interface {
 	// row (the login is refused).  FOR KEY SHARE would not conflict, and the
 	// password predicate without a lock would serialise nothing.
 	LockUserForNewSession(ctx context.Context, iD uuid.UUID, verifiedPassword string) (uuid.UUID, error)
+	// First statement of auth.Store.RevokeOtherSessions: takes the users row so
+	// the revoke and an adoption of a pre-0052 token serialise.  Without it an
+	// adoption could commit between the revoke's delete and its legacy clear,
+	// and the session it inserts would survive "sign out everywhere else".
+	// NO KEY UPDATE, not UPDATE: it must conflict with the adoption's UPDATE of
+	// the row but not with the KEY SHARE an INSERT into user_sessions takes on it.
+	LockUserForRevoke(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	// Authoritative AniList->Bangumi binding from the vendored id map
 	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
 	// consults this BEFORE any Bangumi search; a hit binds the subject with
@@ -2924,6 +2960,10 @@ type Querier interface {
 	// nothing (pgx.ErrNoRows) instead of writing a live token back.
 	//
 	// RETURNING username and role saves the access-token signer a read.
+	//
+	// The device columns (migration 0053) follow the latest request, so the
+	// device list shows where a session was last used from; a request that does
+	// not state one (no header, failed validation) keeps what the row has.
 	RotateUserSession(ctx context.Context, arg RotateUserSessionParams) (RotateUserSessionRow, error)
 	SaveEntityOverlay(ctx context.Context, data []byte, updatedBy *uuid.UUID, kind string, entityID int32) error
 	// Queries used by /api/dandanplay/* orchestration (P2.6).

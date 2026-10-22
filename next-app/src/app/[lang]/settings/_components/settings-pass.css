@@ -1,0 +1,261 @@
+/* settings-pass.css — the 通行证 section: the photo, the profile preview,
+ * the backdrop tiles and the save bar. Option B of the settings canvas, like
+ * settings.css (which holds the page frame and the shared controls).
+ */
+
+.set-card {
+  background: var(--bg-card);
+  border: 1px solid var(--separator-opaque);
+  border-radius: 16px;
+  padding: 22px;
+}
+.set-blk + .set-blk {
+  margin-top: 26px;
+}
+.set-photo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* The pass sits here on a phone only; on a desktop it is in the aside. */
+.set-pass-phone {
+  display: none;
+}
+
+/* How the chosen backdrop shows on the profile page and the nav card. */
+.set-prev {
+  position: relative;
+  aspect-ratio: 16 / 5;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+.set-prev-bn {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.set-prev::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.18) 55%, rgba(0, 0, 0, 0) 100%);
+}
+.set-prev-me {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: calc(100% - 32px);
+}
+.set-prev-av {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.set-prev-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
+/* The banner a tile sets, with the cover the card wears. */
+.set-bk-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.set-bk {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 6;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  text-align: left;
+  transition: transform 0.18s ease;
+}
+.set-bk:hover {
+  transform: translateY(-2px);
+}
+/* Held while the pass saves: not lifted, not pointing. Not dimmed either —
+ * the save bar's 保存中… says what is happening, and dimming two dozen tiles
+ * for a moment would flash the whole grid. */
+.set-bk[aria-disabled="true"] {
+  cursor: default;
+}
+.set-bk[aria-disabled="true"]:hover {
+  transform: none;
+}
+.set-bk-bn {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.set-bk::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.4) 48%, rgba(0, 0, 0, 0) 78%);
+}
+.set-bk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: box-shadow 0.16s ease;
+}
+.set-bk[aria-pressed="true"]::after {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.set-bk-in {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 40px 9px 9px;
+}
+.set-bk-cv {
+  flex: none;
+  height: 100%;
+  aspect-ratio: 5 / 7;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.set-bk-nm {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.set-bk-ck {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.set-bk-ck svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.set-more {
+  margin-top: 10px;
+}
+
+/* Sticky save, only while the pass has changes. */
+.set-savebar {
+  position: sticky;
+  bottom: 20px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 8px 8px 8px 18px;
+  border-radius: 14px;
+  background: rgba(36, 36, 40, 0.94);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 48px -16px rgba(0, 0, 0, 0.85);
+}
+.set-savebar-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: #fff;
+}
+
+/* Between the phone layout and a laptop (a tablet held upright) the column
+ * beside the pass is too narrow for three tiles: at 820px they came out
+ * 117px wide with two characters of title showing. The canvas drew 1440 and
+ * 390 only; both are unchanged by this. */
+@media (min-width: 761px) and (max-width: 1023px) {
+  .set-bk-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .set-card {
+    padding: 16px;
+  }
+  .set-pass-phone {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 22px;
+  }
+  /* The live phone size (member-pass.css: min(80vw, 300px)), not narrower:
+     below about 280px the barcode's half of the nameplate is too narrow for
+     its bars and shows as a bare white chip. */
+  .set-pass-phone .agcpass-bay {
+    --w: min(80vw, 300px);
+    padding: 0;
+  }
+  .set-bk-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .set-bk-grid .set-bk {
+    aspect-ratio: 16 / 5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .set-bk,
+  .set-bk::after {
+    transition: none;
+  }
+  .set-bk:hover {
+    transform: none;
+  }
+}

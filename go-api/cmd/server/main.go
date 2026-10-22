@@ -832,6 +832,12 @@ func main() {
 		r.With(logoutRateLimit.Middleware()).Post("/logout", authHandlers.Logout)
 		r.With(jwtx.RequireAuth(signer)).Get("/me", authHandlers.Me)
 		r.With(jwtx.RequireAuth(signer)).Patch("/me", authHandlers.UpdateMe)
+		// The settings page's device list.  DELETE rather than POST for both
+		// revokes: a cross-site DELETE needs a CORS preflight this origin
+		// does not grant, so another site cannot sign a reader's devices out.
+		r.With(jwtx.RequireAuth(signer)).Get("/sessions", authHandlers.ListSessions)
+		r.With(jwtx.RequireAuth(signer)).Delete("/sessions", authHandlers.RevokeOtherSessions)
+		r.With(jwtx.RequireAuth(signer)).Delete("/sessions/{id}", authHandlers.RevokeSession)
 	})
 
 	// Routing note: every literal segment below shares the subtree with

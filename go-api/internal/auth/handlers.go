@@ -147,6 +147,13 @@ type AuthDB interface {
 	DeleteUserSessionIfHeld(ctx context.Context, id uuid.UUID, userID uuid.UUID, presentedHash string) (int64, error)
 	DeleteUserSessionByLegacyHash(ctx context.Context, userID uuid.UUID, legacyHash *string) (int64, error)
 
+	// The settings page's device list (devices.go).  RevokeOtherSessions is a
+	// transaction — Store implements it — because it also ends a pre-0052
+	// token still held on the users row.
+	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]dbgen.ListUserSessionsRow, error)
+	GetHeldUserSession(ctx context.Context, id uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error)
+	RevokeOtherSessions(ctx context.Context, userID, keepID uuid.UUID, presentedHash string) (int64, error)
+
 	// AdoptLegacySession turns a pre-0052 refresh token (no sid, held on the
 	// users row) into a session, in one transaction — Store implements it.
 	// pgx.ErrNoRows means nothing was adopted and nothing was written.
@@ -342,7 +349,7 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, refreshToken, err := h.startSession(ctx, user, eventRegister)
+	accessToken, refreshToken, err := h.startSession(ctx, user, eventRegister, clientInfoFrom(r))
 	if err != nil {
 		h.failStartSession(w, err)
 		return
@@ -399,7 +406,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, refreshToken, err := h.startSession(ctx, user, eventLogin)
+	accessToken, refreshToken, err := h.startSession(ctx, user, eventLogin, clientInfoFrom(r))
 	if err != nil {
 		h.failStartSession(w, err)
 		return
@@ -456,11 +463,12 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	info := clientInfoFrom(r)
 	if claims.SessionID == uuid.Nil {
-		h.refreshLegacy(ctx, w, claims.UserID, c.Value)
+		h.refreshLegacy(ctx, w, claims.UserID, c.Value, info)
 		return
 	}
-	h.refreshSession(ctx, w, claims, c.Value)
+	h.refreshSession(ctx, w, claims, c.Value, info)
 }
 
 // Logout implements POST /api/auth/logout.

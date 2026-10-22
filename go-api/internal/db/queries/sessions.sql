@@ -32,10 +32,12 @@ FOR SHARE;
 -- user's other rows — that is the whole fix.  Runs after
 -- LockUserForNewSession, in its transaction.
 INSERT INTO user_sessions (
-    id, user_id, token_hash, token_jti, token_iat, token_exp, expires_at
+    id, user_id, token_hash, token_jti, token_iat, token_exp, expires_at,
+    user_agent, country, city
 ) VALUES (
     sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(token_hash),
-    sqlc.arg(token_jti), sqlc.arg(token_iat), sqlc.arg(token_exp), sqlc.arg(token_exp)
+    sqlc.arg(token_jti), sqlc.arg(token_iat), sqlc.arg(token_exp), sqlc.arg(token_exp),
+    sqlc.narg(user_agent), sqlc.narg(country), sqlc.narg(city)
 );
 
 -- name: PruneUserSessions :one
@@ -83,6 +85,10 @@ SELECT (
 -- nothing (pgx.ErrNoRows) instead of writing a live token back.
 --
 -- RETURNING username and role saves the access-token signer a read.
+--
+-- The device columns (migration 0053) follow the latest request, so the
+-- device list shows where a session was last used from; a request that does
+-- not state one (no header, failed validation) keeps what the row has.
 UPDATE user_sessions AS s
 SET previous_hash = s.token_hash,
     token_hash    = sqlc.arg(new_hash),
@@ -91,7 +97,10 @@ SET previous_hash = s.token_hash,
     token_exp     = sqlc.arg(new_exp),
     expires_at    = sqlc.arg(new_exp),
     rotated_at    = now(),
-    last_used_at  = now()
+    last_used_at  = now(),
+    user_agent    = COALESCE(sqlc.narg(user_agent), s.user_agent),
+    country       = COALESCE(sqlc.narg(country), s.country),
+    city          = COALESCE(sqlc.narg(city), s.city)
 FROM users AS u
 WHERE s.id = sqlc.arg(id)
   AND s.user_id = sqlc.arg(user_id)
@@ -140,10 +149,12 @@ WHERE s.user_id = sqlc.arg(user_id)
 -- winner instead.
 INSERT INTO user_sessions (
     id, user_id, token_hash, previous_hash, rotated_at,
-    token_jti, token_iat, token_exp, expires_at, legacy_hash
+    token_jti, token_iat, token_exp, expires_at, legacy_hash,
+    user_agent, country, city
 ) VALUES (
     sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(token_hash), sqlc.arg(legacy_hash), now(),
-    sqlc.arg(token_jti), sqlc.arg(token_iat), sqlc.arg(token_exp), sqlc.arg(token_exp), sqlc.arg(legacy_hash)
+    sqlc.arg(token_jti), sqlc.arg(token_iat), sqlc.arg(token_exp), sqlc.arg(token_exp), sqlc.arg(legacy_hash),
+    sqlc.narg(user_agent), sqlc.narg(country), sqlc.narg(city)
 )
 ON CONFLICT (legacy_hash) DO NOTHING;
 
@@ -170,3 +181,46 @@ WHERE id = sqlc.arg(id)
 DELETE FROM user_sessions
 WHERE user_id = sqlc.arg(user_id)
   AND legacy_hash = sqlc.arg(legacy_hash);
+
+-- name: ListUserSessions :many
+-- The settings page's device list: the user's live sessions, most recently
+-- used first.  Which one is this browser is decided by the caller from the
+-- refresh cookie; the row does not know.
+SELECT id, user_agent, country, city, created_at, last_used_at
+FROM user_sessions
+WHERE user_id = sqlc.arg(user_id)
+  AND expires_at > now()
+ORDER BY last_used_at DESC, id;
+
+-- name: DeleteOtherUserSessions :execrows
+-- "Sign out other devices": every session of the user but keep_id, the one
+-- the request came from.  Runs with ClearLegacyRefreshTokens in one
+-- transaction (auth.Store.RevokeOtherSessions).
+DELETE FROM user_sessions
+WHERE user_id = sqlc.arg(user_id)
+  AND id <> sqlc.arg(keep_id);
+
+-- name: GetHeldUserSession :one
+-- Which session is this device: the sid in the request's refresh cookie,
+-- only while that cookie is still the session's current or grace-slot
+-- token.  A verified signature is not enough — a session revoked a minute
+-- ago signs exactly as well — and the device list's endpoints act on the
+-- answer (auth.Handlers.currentSession).
+SELECT id
+FROM user_sessions
+WHERE id = sqlc.arg(id)
+  AND user_id = sqlc.arg(user_id)
+  AND (token_hash = sqlc.arg(presented_hash) OR previous_hash = sqlc.arg(presented_hash))
+  AND expires_at > now();
+
+-- name: LockHeldUserSession :one
+-- GetHeldUserSession inside auth.Store.RevokeOtherSessions' transaction,
+-- holding the row: the session being kept cannot be revoked or rotated away
+-- between being checked and the others being deleted.
+SELECT id
+FROM user_sessions
+WHERE id = sqlc.arg(id)
+  AND user_id = sqlc.arg(user_id)
+  AND (token_hash = sqlc.arg(presented_hash) OR previous_hash = sqlc.arg(presented_hash))
+  AND expires_at > now()
+FOR UPDATE;
