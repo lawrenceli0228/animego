@@ -104,18 +104,36 @@ jobs:
           # gate. Same pin as unit-tests.yml.
           bun-version: "1.3.11"
 
+      # Chromium and the system packages `--with-deps` adds. Those packages
+      # are mostly fonts (CJK, emoji) — and 13 specs measure layout, so the
+      # same fonts have to be there every run. Their download from the
+      # Ubuntu mirror has taken anywhere from 20 s to 7.5 min (21 MB at
+      # 47 kB/s on 2026-10-22), so the .debs are cached and handed back to
+      # apt, which then installs without fetching.
+      - name: Restore Playwright browser and packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/bun.lock') }}
+
       - name: Start installing Playwright (background)
-        # Nothing before the suite needs Playwright, and its apt step has
-        # taken anywhere from 25 s to two minutes depending on the mirror —
-        # the slowest shard of the first sharded run was slow for exactly
-        # that. So it runs beside the image builds and `next dev`'s warm-up,
-        # and "Finish installing Playwright" collects it before the suite.
+        # Nothing before the suite needs Playwright, so it installs beside
+        # the image builds and `next dev`'s warm-up, and "Finish installing
+        # Playwright" collects it before the suite.
         working-directory: e2e
         run: |
           (
             set +e
+            if ls ~/.cache/playwright-debs/*.deb >/dev/null 2>&1; then
+              sudo cp ~/.cache/playwright-debs/*.deb /var/cache/apt/archives/
+            fi
             bun install --frozen-lockfile && bun run install:browsers
-            echo $? > /tmp/playwright-install.exit
+            rc=$?
+            mkdir -p ~/.cache/playwright-debs
+            cp /var/cache/apt/archives/*.deb ~/.cache/playwright-debs/ 2>/dev/null
+            echo $rc > /tmp/playwright-install.exit
           ) > /tmp/playwright-install.log 2>&1 &
 
       - name: Mint throwaway credentials
