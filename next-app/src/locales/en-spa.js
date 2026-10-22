@@ -760,46 +760,62 @@ const en = {
     empty: 'No notifications yet', loadError: 'Could not load notifications', retry: 'Retry',
   },
   settings: {
-    // Page chrome + member pass card. These were 28 inline
-    // `lang === "zh" ? … : …` ternaries in SettingsClient.tsx, which compiled
-    // clean and handed every third language the English branch.
+    // The settings page: one page, five sections (option B of the settings
+    // canvas). These were 28 inline `lang === "zh" ? … : …` ternaries in
+    // SettingsClient.tsx once, which compiled clean and handed every third
+    // language the English branch. `kicker` is the avatar menu's link here.
     kicker: 'Settings',
-    pageTitle: 'Account & Pass',
-    navPreview: 'Nav avatar preview · live',
-    livePreview: 'Live preview',
-    passTitle: 'Member Pass',
-    passSubtitle: 'Card photo and profile backdrop',
-    currentCardAlt: 'Current',
-    changePhoto: 'Change',
+    pageTitle: 'Settings',
+    sectionsAria: 'Settings sections',
+    // Member pass
+    passTitle: 'Member pass',
+    photoLabel: 'Card photo',
     uploadPhoto: 'Upload photo',
-    removePhoto: 'Remove',
-    backdropLabel: 'Backdrop anime (wide banner)',
+    removePhoto: 'Remove photo',
+    backdropLabel: 'Profile backdrop',
     backdropEmpty: 'No anime with a wide banner in your list yet',
-    backdropListAria: 'Profile backdrop anime',
-    savePass: 'Save pass',
-    accountTitle: 'Account',
-    accountSubtitle: 'Member {{id}} · permanent',
+    backdropPick: 'Use {{title}} for your backdrop and card',
+    showAllBackdrops: 'Show all {{n}}',
+    passDirty: 'Unsaved pass changes',
+    revert: 'Revert',
+    save: 'Save',
+    passSaved: 'Pass saved',
+    // Account & security. The password link is the login page's own
+    // forgot-password mail.
+    accountTitle: 'Account & security',
     usernameLabel: 'Username',
-    usernameTooShort: 'Min 3 chars',
     usernameHiddenTitle: 'Username hidden',
     usernameHiddenBody: 'The name you registered with looks like an email address or a phone number, so it is not shown. You and everyone else now see:',
-    saveUsername: 'Save',
-    // The security card is deliberately bilingual in every language: whoever
-    // needs to reset a password should find the instruction whatever they read.
-    // The Simplified half is kept Simplified here — an English reader has no
-    // script preference, and this is the string that shipped.
-    securityTitle: 'Security',
-    securitySubtitle: 'Change password · 修改密码',
-    passwordResetHint: 'For account security, change your password via the “Forgot password” link on the login page (reset by email).',
-    passwordResetHintAlt: '修改密码请在登录界面点击「忘记密码」。',
-    goToLogin: 'Go to login · 前往登录页',
-    communityTitle: 'Community & Privacy',
-    communitySubtitle: 'Control who can see your watchlist and activity',
+    usernameSaved: 'Username saved',
+    memberNoLabel: 'Member no.',
+    emailLabel: 'Email',
+    passwordLabel: 'Password',
+    sendPasswordLink: 'Send reset link',
+    passwordLinkSentTo: 'Link sent to {{email}}',
+    passwordLinkSent: 'Reset link sent',
+    // Signed-in devices. A tile's device name, place and times are not here:
+    // they live in settings/_components/deviceLabels.ts, which also runs on
+    // the server.
+    devicesTitle: 'Signed-in devices',
+    thisDevice: 'This device',
+    signOut: 'Sign out',
+    signOutDevice: 'Sign out {{name}}',
+    signedOutDevice: 'Signed out {{name}}',
+    signOutOthers: 'Sign out other devices',
+    signOutOthersTitle: 'Sign out {{n}} other devices?',
+    signOutOthersTitleOne: 'Sign out 1 other device?',
+    signOutOthersBody: 'They will need to sign in again the next time they open the site.',
+    cancel: 'Cancel',
+    signOutAll: 'Sign out all',
+    signedOutOthers: 'Signed out {{n}} other devices',
+    signedOutOthersOne: 'Signed out 1 other device',
+    // Privacy & community
+    privacyTitle: 'Privacy & community',
     publicProfile: 'Public community profile',
     publicProfileOn: 'Anyone can view your watchlist and public activity.',
     publicProfileOff: 'Only you can view your watchlist and activity.',
-    savePrivacy: 'Save privacy', saving: 'Saving…', saved: 'Saved',
-    blockedUsers: 'Blocked users', noBlockedUsers: 'No blocked users',
+    saved: 'Saved',
+    blockedUsers: 'Blocked users', noBlockedUsers: 'No blocked users', blockedLoadFailed: 'Could not load',
     // Playback: lives in this device's localStorage, applies the moment it is
     // toggled, so there is no Save button.
     playbackTitle: 'Playback',
