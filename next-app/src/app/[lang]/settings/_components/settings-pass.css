@@ -99,6 +99,15 @@
 .set-bk:hover {
   transform: translateY(-2px);
 }
+/* Held while the pass saves: not lifted, not pointing. Not dimmed either —
+ * the save bar's 保存中… says what is happening, and dimming two dozen tiles
+ * for a moment would flash the whole grid. */
+.set-bk[aria-disabled="true"] {
+  cursor: default;
+}
+.set-bk[aria-disabled="true"]:hover {
+  transform: none;
+}
 .set-bk-bn {
   position: absolute;
   inset: 0;

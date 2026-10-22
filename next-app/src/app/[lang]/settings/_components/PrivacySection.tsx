@@ -1,40 +1,46 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useLang } from "@/lib/lang-client";
 import BlockedUsersList from "./BlockedUsersList";
 import SettingSwitch from "./SettingSwitch";
+import { latestWins } from "./latestWins";
 import { patchMe } from "./settingsApi";
 
 /**
- * 隐私与社区: the public-profile switch, which saves the moment it is flipped
- * (and flips back, with the reason, if the save fails), then the blocked list.
+ * 隐私与社区: the public-profile switch, which saves the moment it is flipped,
+ * then the blocked list.
+ *
+ * The switch never waits and never drops a flip: a flip made while a save is
+ * out is sent once that save answers (latestWins), and 已保存 is said once,
+ * about the value the switch shows. A failure puts the switch back to what
+ * the server holds, with the reason.
  */
 export default function PrivacySection({ isPublic: initial }: { isPublic: boolean }) {
   const router = useRouter();
   const { lang, t } = useLang();
   const [isPublic, setIsPublic] = useState(initial);
-  // One save at a time: a flip that lands while one is out is ignored, so a
-  // failure can only ever revert to a value the server really had.
-  const saving = useRef(false);
-
-  const toggle = async (next: boolean) => {
-    if (saving.current) return;
-    saving.current = true;
-    setIsPublic(next);
-    const outcome = await patchMe({ isPublic: next }, lang);
-    saving.current = false;
-    if (!outcome.ok) {
-      setIsPublic(!next);
-      toast.error(outcome.error);
-      return;
-    }
-    toast.success(t("settings.saved"));
-    // Keeps the router's copy of this page current for back/forward.
-    router.refresh();
-  };
+  const [busy, setBusy] = useState(false);
+  // Made once. lang, t and router do not change while this page is mounted:
+  // another language is another URL, and so another page.
+  const [sync] = useState(() =>
+    latestWins<boolean>({
+      saved: initial,
+      send: (value) => patchMe({ isPublic: value }, lang),
+      onBusy: setBusy,
+      onSaved: () => {
+        toast.success(t("settings.saved"));
+        // Keeps the router's copy of this page current for back/forward.
+        router.refresh();
+      },
+      onFailed: (held, error) => {
+        setIsPublic(held);
+        toast.error(error);
+      },
+    }),
+  );
 
   return (
     <section className="set-sec" id="privacy" aria-labelledby="set-privacy-h">
@@ -49,7 +55,11 @@ export default function PrivacySection({ isPublic: initial }: { isPublic: boolea
           title={t("settings.publicProfile")}
           description={isPublic ? t("settings.publicProfileOn") : t("settings.publicProfileOff")}
           checked={isPublic}
-          onChange={(next) => void toggle(next)}
+          busy={busy}
+          onChange={(next) => {
+            setIsPublic(next);
+            sync.want(next);
+          }}
         />
       </div>
       <BlockedUsersList />

@@ -5,19 +5,7 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useLang } from "@/lib/lang-client";
 import { patchMe } from "./settingsApi";
-import { canSaveName } from "./settingsState";
-
-export interface UsernameEditor {
-  /** The field's value, which the pass and the preview show as it is typed. */
-  draft: string;
-  setDraft: (value: string) => void;
-  saved: string;
-  /** The server shows a masked handle for this account and the field still holds it. */
-  hidden: boolean;
-  canSave: boolean;
-  /** Resolves true once the server holds the new name. */
-  save: () => Promise<boolean>;
-}
+import { canSaveName, isNameTooShort, type UsernameEditor } from "./settingsState";
 
 /**
  * The username field. Saved explicitly (保存 appears once the trimmed value
@@ -63,6 +51,8 @@ export function useUsernameEditor(username: string, usernameHidden: boolean): Us
     // so the warning clears the moment a replacement is typed.
     hidden: saved.hidden && draft.trim() === saved.username,
     canSave: canSaveName(draft, saved.username),
+    tooShort: isNameTooShort(draft, saved.username),
+    saving,
     save,
   };
 }

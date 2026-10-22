@@ -6,6 +6,7 @@ import FallbackImg from "@/components/ui/FallbackImg";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
 import { DEFAULT_AVATAR_IMAGE, DEFAULT_BACKDROP_IMAGE, DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import { fillTemplate } from "@/lib/home/time";
+import { shouldMoveFocus } from "./focusRule";
 import type { PassEditor } from "./settingsState";
 import "./settings-pass.css";
 
@@ -73,19 +74,33 @@ export default function PassSection({
     firstRevealedRef.current?.focus();
   }, [expanded]);
 
-  // The save bar goes away once the pass is saved or reverted. Focus that was
-  // on one of its buttons goes to the section heading, not to nowhere.
-  const barHasFocus = () => barRef.current?.contains(document.activeElement) ?? false;
-  const settleFocus = () => headingRef.current?.focus({ preventScroll: true });
+  // The save bar goes away once the pass is saved or reverted. Focus still on
+  // one of its buttons (or already lost) goes to the section heading rather
+  // than to nowhere; focus the reader has taken elsewhere stays there.
+  const settleFocus = () => {
+    if (shouldMoveFocus(document.activeElement, document.body, [barRef.current])) {
+      headingRef.current?.focus({ preventScroll: true });
+    }
+  };
+
+  // While a save is out the pass holds still: its controls say so
+  // (aria-disabled, which keeps keyboard focus where it is, unlike disabled)
+  // and ignore presses, so the edit being saved is the edit on screen.
+  const held = editor.saving;
+
+  const upload = () => {
+    if (!held) fileRef.current?.click();
+  };
 
   const revert = () => {
-    if (barHasFocus()) settleFocus();
+    if (held) return;
+    settleFocus();
     editor.revert();
   };
 
   const save = async () => {
-    const hadFocus = barHasFocus();
-    if ((await editor.save()) && hadFocus) settleFocus();
+    if (held) return;
+    if (await editor.save()) settleFocus();
   };
 
   return (
@@ -95,7 +110,7 @@ export default function PassSection({
           {t("settings.passTitle")}
         </h2>
       </div>
-      <div className="set-card">
+      <div className="set-card" aria-busy={held || undefined}>
         <div className="set-pass-phone">{passCard}</div>
 
         <div className="set-blk">
@@ -115,7 +130,8 @@ export default function PassSection({
               ref={uploadRef}
               type="button"
               className="set-btn ghost sm"
-              onClick={() => fileRef.current?.click()}
+              aria-disabled={held || undefined}
+              onClick={upload}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -128,7 +144,9 @@ export default function PassSection({
               <button
                 type="button"
                 className="set-btn quiet sm"
+                aria-disabled={held || undefined}
                 onClick={(event) => {
+                  if (held) return;
                   // This button goes with the photo; its focus moves next door.
                   if (event.currentTarget === document.activeElement) uploadRef.current?.focus();
                   editor.setPhoto(null);
@@ -177,8 +195,11 @@ export default function PassSection({
                     type="button"
                     className="set-bk"
                     aria-pressed={selected}
+                    aria-disabled={held || undefined}
                     aria-label={fillTemplate(t("settings.backdropPick"), { title: option.title })}
-                    onClick={() => editor.setBackdrop(option.anilistId)}
+                    onClick={() => {
+                      if (!held) editor.setBackdrop(option.anilistId);
+                    }}
                   >
                     <FallbackImg
                       className="set-bk-bn"
@@ -222,11 +243,11 @@ export default function PassSection({
         {editor.dirty && (
           <div className="set-savebar" ref={barRef}>
             <span className="set-savebar-text">{t("settings.passDirty")}</span>
-            <button type="button" className="set-btn quiet sm" onClick={revert}>
+            <button type="button" className="set-btn quiet sm" aria-disabled={held || undefined} onClick={revert}>
               {t("settings.revert")}
             </button>
-            <button type="button" className="set-btn sm" onClick={() => void save()}>
-              {t("settings.save")}
+            <button type="button" className="set-btn sm" aria-disabled={held || undefined} onClick={() => void save()}>
+              {held ? t("settings.saving") : t("settings.save")}
             </button>
           </div>
         )}

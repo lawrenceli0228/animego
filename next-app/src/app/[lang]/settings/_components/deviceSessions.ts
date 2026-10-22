@@ -79,6 +79,26 @@ export function parseSessionList(data: unknown): ApiSession[] {
   return items.map(parseSession).filter((s): s is ApiSession => s !== null);
 }
 
+/** GET /api/auth/sessions as the page uses it: the list, or a failure to say so. */
+export interface SessionsLoad {
+  items: ApiSession[];
+  /** The list could not be had; the section says 加载失败 rather than showing nothing. */
+  failed: boolean;
+}
+
+/**
+ * Read a successful answer. The device this page is open on is always in a
+ * list the server could build (go-api answers 401 when this device's own
+ * session is not live), so an empty or unreadable list is a failure too.
+ */
+export function readSessions(data: unknown): SessionsLoad {
+  const items = parseSessionList(data);
+  return { items, failed: items.length === 0 };
+}
+
+/** A request that did not answer at all: 5xx, timeout, or 401. */
+export const SESSIONS_FAILED: SessionsLoad = { items: [], failed: true };
+
 /** Resolve each session's place for `lang`. Server side — see placeLabel. */
 export function toDeviceSessions(items: readonly ApiSession[], lang: Lang): DeviceSession[] {
   return items.map(({ city, country, ...rest }) => ({ ...rest, place: placeLabel(city, country, lang) }));

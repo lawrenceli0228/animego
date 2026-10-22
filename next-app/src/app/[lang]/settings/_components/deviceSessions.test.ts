@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  SESSIONS_FAILED,
   canEndOthers,
   otherSessions,
   parseSessionList,
+  readSessions,
   remainingSessions,
   toDeviceSessions,
   type ApiSession,
@@ -72,6 +74,25 @@ describe("parseSessionList", () => {
     for (const kind of ["laptop", "desktop", "phone", "tablet", "unknown"]) {
       expect(parseSessionList({ items: [{ ...PHONE, kind }] })[0]?.kind).toBe(kind as ApiSession["kind"]);
     }
+  });
+});
+
+describe("readSessions", () => {
+  test("a list with this device in it is a success", () => {
+    expect(readSessions({ items: [MAC, PHONE] })).toEqual({ items: [MAC, PHONE] as ApiSession[], failed: false });
+  });
+
+  test("an empty list is a failure: this device is always in a list the server could build", () => {
+    expect(readSessions({ items: [] })).toEqual({ items: [], failed: true });
+  });
+
+  test("an unreadable answer is a failure", () => {
+    expect(readSessions(null).failed).toBe(true);
+    expect(readSessions({ items: [{ id: "" }] }).failed).toBe(true);
+  });
+
+  test("a request that did not answer is a failure with nothing to show", () => {
+    expect(SESSIONS_FAILED).toEqual({ items: [], failed: true });
   });
 });
 

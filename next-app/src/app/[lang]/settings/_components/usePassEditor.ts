@@ -5,11 +5,7 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useLang } from "@/lib/lang-client";
 import { patchMe } from "./settingsApi";
-import { passPatch, type PassEditor, type PassFields } from "./settingsState";
-
-function samePass(a: PassFields, b: PassFields): boolean {
-  return a.photo === b.photo && a.backdrop === b.backdrop;
-}
+import { mergeSaved, passPatch, type PassEditor, type PassFields } from "./settingsState";
 
 /**
  * The member pass's photo and backdrop: edited locally (the pass, the
@@ -51,8 +47,7 @@ export function usePassEditor(initial: PassFields): PassEditor {
     }
     const now = outcome.value ? { photo: outcome.value.photo, backdrop: outcome.value.backdrop } : sent;
     setSaved(now);
-    // A change made while the request was out stays, still unsaved.
-    setEdited((current) => (samePass(current, sent) ? now : current));
+    setEdited((current) => mergeSaved(current, sent, now));
     toast.success(t("settings.passSaved"));
     // Keeps the router's copy of this page current for back/forward.
     router.refresh();
@@ -62,6 +57,7 @@ export function usePassEditor(initial: PassFields): PassEditor {
   return {
     edited,
     dirty: passPatch(edited, saved) !== null,
+    saving,
     setPhoto,
     setBackdrop,
     revert,

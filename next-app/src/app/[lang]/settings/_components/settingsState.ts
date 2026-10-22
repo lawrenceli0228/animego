@@ -37,6 +37,37 @@ export function canSaveName(draft: string, saved: string): boolean {
   return name.length >= MIN_USERNAME && name !== saved;
 }
 
+/**
+ * Whether to say the name is too short: a change of one or two characters.
+ * Not for an empty field (nothing typed yet is not a mistake) and not for the
+ * saved name itself, whatever its length.
+ */
+export function isNameTooShort(draft: string, saved: string): boolean {
+  const name = draft.trim();
+  return name.length > 0 && name.length < MIN_USERNAME && name !== saved;
+}
+
+// The editors below are declared here, away from their hooks, so the sections
+// that take them can be rendered in a test: the hooks load react-hot-toast,
+// which bun:test cannot (testImportHygiene.test.ts follows type imports too).
+
+/** The username field (useUsernameEditor). */
+export interface UsernameEditor {
+  /** The field's value, which the pass and the preview show as it is typed. */
+  draft: string;
+  setDraft: (value: string) => void;
+  saved: string;
+  /** The server shows a masked handle for this account and the field still holds it. */
+  hidden: boolean;
+  canSave: boolean;
+  /** One or two characters typed: say so, since 保存 does not appear for them. */
+  tooShort: boolean;
+  /** A save is out. */
+  saving: boolean;
+  /** Resolves true once the server holds the new name. */
+  save: () => Promise<boolean>;
+}
+
 /** The member pass as saved, or as edited on this page. */
 export interface PassFields {
   /** The card photo: an /api/avatars URL once saved, a data: URL while only previewed. */
@@ -44,21 +75,34 @@ export interface PassFields {
   backdrop: number | null;
 }
 
-/**
- * The pass editor the 通行证 section drives (usePassEditor). Declared here,
- * away from the hook, so the section can be rendered in a test: the hook
- * loads react-hot-toast, which bun:test cannot.
- */
+/** The 通行证 section's editor (usePassEditor). */
 export interface PassEditor {
   /** The pass as it looks on this page: the live preview, saved or not. */
   edited: PassFields;
   /** Differs from what is saved, i.e. the save bar is up. */
   dirty: boolean;
+  /** A save is out; the pass's controls hold still until it answers. */
+  saving: boolean;
   setPhoto: (photo: string | null) => void;
   setBackdrop: (anilistId: number) => void;
   revert: () => void;
   /** Resolves true once the server holds the edit. */
   save: () => Promise<boolean>;
+}
+
+/**
+ * The edit after a save answers, field by field: a field still as it was sent
+ * takes the server's value (its /api/avatars URL replaces the data: preview
+ * that went up), and a field changed again meanwhile keeps the newer edit,
+ * still unsaved. Comparing the pass as a whole would keep the data: URL
+ * whenever only the backdrop moved, and the next save would upload the photo
+ * a second time.
+ */
+export function mergeSaved(current: PassFields, sent: PassFields, now: PassFields): PassFields {
+  return {
+    photo: current.photo === sent.photo ? now.photo : current.photo,
+    backdrop: current.backdrop === sent.backdrop ? now.backdrop : current.backdrop,
+  };
 }
 
 /**

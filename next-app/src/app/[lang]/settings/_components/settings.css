@@ -85,6 +85,21 @@
   --w: 300px;
   padding: 0;
 }
+/* The aside is about 650px tall (a 300px pass, 419px high, and the index)
+ * and sticks 88px down, so a window under about 780px high — a 1366×768
+ * laptop, or 1080p at 150% — cut the index off at the bottom. There the pass
+ * scrolls away with the page and only the index stays; the aside stretches
+ * down the grid row so the index has room to stick in. */
+@media (min-width: 761px) and (max-height: 780px) {
+  .set-side {
+    position: static;
+    align-self: stretch;
+  }
+  .set-toc {
+    position: sticky;
+    top: calc(var(--nav-h) + 24px);
+  }
+}
 .set-toc {
   display: flex;
   flex-direction: column;
@@ -186,7 +201,10 @@
 .set-btn:active {
   transform: scale(0.98);
 }
-.set-btn[disabled] {
+/* aria-disabled is how a button is held while its request is out: it looks
+ * and reads as disabled but keeps keyboard focus, which `disabled` drops. */
+.set-btn[disabled],
+.set-btn[aria-disabled="true"] {
   opacity: 0.42;
   cursor: default;
   transform: none;
@@ -259,6 +277,12 @@
 }
 .set-name .set-input {
   max-width: 320px;
+}
+.set-field-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--set-t2);
 }
 
 /* ── switch: a real checkbox with role="switch" ─────────────────────────── */

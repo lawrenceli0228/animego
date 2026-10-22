@@ -1,15 +1,12 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useState } from "react";
 import toast from "react-hot-toast";
 import { useLang } from "@/lib/lang-client";
 import { fillTemplate } from "@/lib/home/time";
+import UsernameField from "./UsernameField";
 import { sendPasswordLink } from "./settingsApi";
-import { maskEmail } from "./settingsState";
-import type { UsernameEditor } from "./useUsernameEditor";
-
-/** The server's limit (go-api/internal/auth/account.go, maxUsernameLen). */
-const USERNAME_MAX = 50;
+import { maskEmail, type UsernameEditor } from "./settingsState";
 
 interface AccountSectionProps {
   editor: UsernameEditor;
@@ -23,17 +20,8 @@ type LinkState = "idle" | "sending" | "sent";
 
 export default function AccountSection({ editor, memberNo, email }: AccountSectionProps) {
   const { lang, t } = useLang();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const saveRef = useRef<HTMLButtonElement>(null);
   const [link, setLink] = useState<LinkState>("idle");
   const masked = maskEmail(email);
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    // 保存 goes away with a successful save; if it held focus, the field gets it.
-    const fromButton = document.activeElement === saveRef.current;
-    if ((await editor.save()) && fromButton) inputRef.current?.focus();
-  };
 
   // The same email link the login page's 忘记密码 sends: a password change
   // has to prove the inbox, so a hijacked session cannot do it on its own.
@@ -58,43 +46,7 @@ export default function AccountSection({ editor, memberNo, email }: AccountSecti
         </h2>
       </div>
       <div className="set-group">
-        <div className={editor.hidden ? "set-row set-row-top" : "set-row"}>
-          <label className="set-row-label" htmlFor="set-username">
-            {t("settings.usernameLabel")}
-          </label>
-          <div className="set-row-main">
-            <form className="set-name" onSubmit={(event) => void submit(event)}>
-              <input
-                ref={inputRef}
-                id="set-username"
-                className="set-input"
-                value={editor.draft}
-                maxLength={USERNAME_MAX}
-                // "nickname", not "username": sign-in is by email here, so a
-                // password manager's "username" for this site is the address.
-                autoComplete="nickname"
-                spellCheck={false}
-                onChange={(event) => editor.setDraft(event.target.value)}
-                aria-describedby={editor.hidden ? "set-username-hidden" : undefined}
-              />
-              {editor.canSave && (
-                <button ref={saveRef} type="submit" className="set-btn sm">
-                  {t("settings.save")}
-                </button>
-              )}
-            </form>
-            {editor.hidden && (
-              // Each run of copy is a single string expression rather than JSX
-              // text. JSX turns a newline + indent into a space, which is
-              // correct for English and wrong for Chinese.
-              <div id="set-username-hidden" className="set-warn">
-                <p className="set-warn-title">{t("settings.usernameHiddenTitle")}</p>
-                <p className="set-warn-body">{t("settings.usernameHiddenBody")}</p>
-                <code className="set-warn-code">{editor.saved}</code>
-              </div>
-            )}
-          </div>
-        </div>
+        <UsernameField editor={editor} />
 
         <div className="set-row">
           <span className="set-row-label">{t("settings.memberNoLabel")}</span>
@@ -110,7 +62,7 @@ export default function AccountSection({ editor, memberNo, email }: AccountSecti
           </div>
         </div>
 
-        <div className="set-row">
+        <div className="set-row" aria-busy={link === "sending" || undefined}>
           <span className="set-row-label">{t("settings.passwordLabel")}</span>
           <div className="set-row-main">
             {link === "sent" ? (
@@ -127,10 +79,13 @@ export default function AccountSection({ editor, memberNo, email }: AccountSecti
             )}
           </div>
           <div className="set-row-end">
+            {/* Disabled for good once sent; only held (aria-disabled, focus
+                kept) while the request is out. */}
             <button
               type="button"
               className="set-btn ghost sm"
               disabled={link === "sent" || !email}
+              aria-disabled={link === "sending" || undefined}
               onClick={() => void sendLink()}
             >
               {t("settings.sendPasswordLink")}

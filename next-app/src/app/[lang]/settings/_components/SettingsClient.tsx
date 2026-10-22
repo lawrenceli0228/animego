@@ -46,6 +46,8 @@ interface SettingsClientProps {
   topSeason: string | null;
   isPublic: boolean;
   sessions: DeviceSession[];
+  /** GET /api/auth/sessions failed (see readSessions): 登录设备 says so. */
+  sessionsFailed: boolean;
   /** The request's clock: every relative time on the page is measured from it. */
   serverNowMs: number;
 }
@@ -69,6 +71,7 @@ export default function SettingsClient({
   topSeason,
   isPublic,
   sessions,
+  sessionsFailed,
   serverNowMs,
 }: SettingsClientProps) {
   const { lang, t } = useLang();
@@ -161,7 +164,12 @@ export default function SettingsClient({
               onPhotoFile={crop.start}
             />
             <AccountSection editor={account} memberNo={memberNo} email={email} />
-            <DevicesSection sessions={devices} nowMs={serverNowMs} onSignedOut={markSignedOut} />
+            <DevicesSection
+              sessions={devices}
+              failed={sessionsFailed}
+              nowMs={serverNowMs}
+              onSignedOut={markSignedOut}
+            />
             <PrivacySection isPublic={isPublic} />
             <PlaybackSettings />
           </div>

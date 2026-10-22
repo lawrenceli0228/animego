@@ -5,12 +5,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
 import type { Lang } from "@/lib/i18n/lang";
 import { LanguageProvider } from "@/lib/lang-client";
+import BlockedUserRow from "./BlockedUserRow";
+import DeviceList from "./DeviceList";
 import DeviceTile from "./DeviceTile";
 import PassSection from "./PassSection";
 import SectionNav from "./SectionNav";
 import SettingSwitch from "./SettingSwitch";
+import UsernameField from "./UsernameField";
 import type { DeviceSession } from "./deviceSessions";
-import type { PassEditor } from "./settingsState";
+import type { PassEditor, UsernameEditor } from "./settingsState";
 
 // renderToStaticMarkup, as the other *.render.test.tsx files do: what is
 // pinned here is what assistive tech and the server render get — the marks
@@ -77,6 +80,15 @@ describe("SettingSwitch", () => {
     const html = render(<SettingSwitch id="set-x" title="t" description="d" checked={false} onChange={noop} />);
     expect(html).not.toContain('checked=""');
   });
+
+  test("stays usable while its save is out, marked busy", () => {
+    const html = render(<SettingSwitch id="set-x" title="t" description="d" checked busy onChange={noop} />);
+    expect(html).toContain('<div class="set-tg" aria-busy="true">');
+    expect(html).not.toContain("disabled");
+    expect(render(<SettingSwitch id="set-x" title="t" description="d" checked onChange={noop} />)).not.toContain(
+      "aria-busy",
+    );
+  });
 });
 
 describe("DeviceTile", () => {
@@ -91,8 +103,8 @@ describe("DeviceTile", () => {
     lastUsedAt: new Date(NOW - 2 * 3_600_000).toISOString(),
     createdAt: "2026-10-21T15:09:00Z",
   };
-  const tile = (session: DeviceSession, lang: Lang = "zh") =>
-    render(<DeviceTile session={session} nowMs={NOW} onEnd={noop} />, lang);
+  const tile = (session: DeviceSession, lang: Lang = "zh", busy = false) =>
+    render(<DeviceTile session={session} nowMs={NOW} busy={busy} onEnd={noop} />, lang);
 
   test("another device: a 退出 named after it, its place and time, its sign-in day", () => {
     const html = tile(base);
@@ -101,6 +113,14 @@ describe("DeviceTile", () => {
     expect(html).toContain("上海 · <span>2 小时前</span>");
     expect(html).toContain('<p class="set-dv-since">10月21日登录</p>');
     expect(html).not.toContain("本机");
+    expect(html).not.toContain("aria-busy");
+    expect(html).not.toContain("aria-disabled");
+  });
+
+  test("while its sign-out is out: held, and marked busy", () => {
+    const html = tile(base, "zh", true);
+    expect(html).toContain('<li class="set-dv" aria-busy="true">');
+    expect(html).toContain('aria-label="退出 iPhone · Safari" aria-disabled="true">退出</button>');
   });
 
   test("this device: marked 本机, in use, and nothing to press", () => {
@@ -125,6 +145,104 @@ describe("DeviceTile", () => {
   });
 });
 
+describe("DeviceList", () => {
+  const NOW = Date.parse("2026-10-22T10:30:00Z");
+  const session = (id: string, current = false): DeviceSession => ({
+    id,
+    current,
+    kind: "laptop",
+    os: "Mac",
+    browser: "Chrome",
+    place: "",
+    lastUsedAt: "2026-10-22T08:30:00Z",
+    createdAt: "2026-10-21T15:09:00Z",
+  });
+  const list = (sessions: DeviceSession[], failed: boolean, busy: string[] = [], lang: Lang = "zh") =>
+    render(
+      <DeviceList sessions={sessions} failed={failed} nowMs={NOW} busyIds={new Set(busy)} onEnd={noop} />,
+      lang,
+    );
+
+  test("says 加载失败 when the list could not be had, in each language", () => {
+    expect(list([], true)).toBe('<div class="set-group"><p class="set-empty">加载失败</p></div>');
+    expect(list([], true, [], "en")).toContain("Could not load");
+  });
+
+  test("lists the tiles, marking only the busy ones", () => {
+    const html = list([session("a", true), session("b"), session("c")], false, ["c"]);
+    expect(html.match(/<li /g)).toHaveLength(3);
+    expect(html.match(/aria-busy="true"/g)).toHaveLength(1);
+    expect(html.match(/aria-disabled="true"/g)).toHaveLength(1);
+    expect(html).not.toContain("加载失败");
+  });
+});
+
+describe("BlockedUserRow", () => {
+  const row = (busy: boolean) => render(<BlockedUserRow username="trollface" busy={busy} onUnblock={noop} />);
+
+  test("links the profile and names its button after the account", () => {
+    const html = row(false);
+    expect(html).toContain('href="/u/trollface"');
+    expect(html).toContain('aria-label="解除拉黑 @trollface">解除拉黑</button>');
+    expect(html).not.toContain("aria-busy");
+  });
+
+  test("while its unblock is out: held, and marked busy", () => {
+    const html = row(true);
+    expect(html).toContain('<li class="set-row" aria-busy="true">');
+    expect(html).toContain('aria-disabled="true">解除拉黑</button>');
+  });
+});
+
+describe("UsernameField", () => {
+  const editor = (over: Partial<UsernameEditor> = {}): UsernameEditor => ({
+    draft: "shironeko",
+    setDraft: noop,
+    saved: "shironeko",
+    hidden: false,
+    canSave: false,
+    tooShort: false,
+    saving: false,
+    save: async () => true,
+    ...over,
+  });
+  const field = (ed: UsernameEditor, lang: Lang = "zh") => render(<UsernameField editor={ed} />, lang);
+
+  test("no 保存 and no hint for the saved name", () => {
+    const html = field(editor());
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("set-field-hint");
+    expect(html).not.toContain("aria-describedby");
+  });
+
+  test("one or two characters: says why there is no 保存, tied to the field", () => {
+    const html = field(editor({ draft: "ab", tooShort: true }));
+    expect(html).toContain('<p id="set-username-hint" class="set-field-hint">用户名至少 3 个字符</p>');
+    expect(html).toContain('aria-describedby="set-username-hint"');
+    expect(html).toContain('<div aria-live="polite">');
+    expect(html).not.toContain("<button");
+    expect(field(editor({ draft: "ab", tooShort: true }), "en")).toContain("Username must be at least 3 characters");
+  });
+
+  test("a name worth saving offers 保存", () => {
+    const html = field(editor({ draft: "kuroneko", canSave: true }));
+    expect(html).toContain('<button type="submit" class="set-btn sm">保存</button>');
+  });
+
+  test("while the save is out: 保存中…, held, and the form marked busy", () => {
+    const html = field(editor({ draft: "kuroneko", canSave: true, saving: true }));
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('<button type="submit" class="set-btn sm" aria-disabled="true">保存中…</button>');
+  });
+
+  test("a masked name keeps its notice, described on the field", () => {
+    const html = field(editor({ hidden: true, saved: "user-7f3a9c", draft: "user-7f3a9c" }));
+    expect(html).toContain('id="set-username-hidden"');
+    expect(html).toContain('aria-describedby="set-username-hidden"');
+    expect(html).toContain('<code class="set-warn-code">user-7f3a9c</code>');
+  });
+});
+
 describe("PassSection", () => {
   const options: BackdropOption[] = Array.from({ length: 12 }, (_, i) => ({
     anilistId: 100 + i,
@@ -135,6 +253,7 @@ describe("PassSection", () => {
   const editor = (over: Partial<PassEditor> = {}): PassEditor => ({
     edited: { photo: null, backdrop: 101 },
     dirty: false,
+    saving: false,
     setPhoto: noop,
     setBackdrop: noop,
     revert: noop,
@@ -187,6 +306,22 @@ describe("PassSection", () => {
     expect(dirty).toContain("通行证有改动");
     expect(dirty).toContain(">还原</button>");
     expect(dirty).toContain(">保存</button>");
+  });
+
+  test("nothing is held while no save is out", () => {
+    const html = section(editor({ dirty: true, edited: { photo: "data:x", backdrop: 101 } }));
+    expect(html).not.toContain("aria-disabled");
+    expect(html).not.toContain("aria-busy");
+  });
+
+  test("while a save is out the pass holds still: every control held, 保存中…", () => {
+    const html = section(editor({ dirty: true, saving: true, edited: { photo: "data:x", backdrop: 101 } }));
+    expect(html).toContain('<div class="set-card" aria-busy="true">');
+    // 9 tiles, 上传照片, 移除照片, 还原, 保存 — and 显示全部, which saves nothing, stays.
+    expect(html.match(/aria-disabled="true"/g)).toHaveLength(13);
+    expect(html).toMatch(/aria-disabled="true">保存中…<\/button>/);
+    expect(html).toMatch(/aria-disabled="true">还原<\/button>/);
+    expect(html).toMatch(/class="set-btn quiet sm set-more">显示全部 12 部/);
   });
 
   test("移除照片 only when there is a photo to remove", () => {

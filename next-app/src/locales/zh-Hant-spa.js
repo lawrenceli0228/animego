@@ -836,6 +836,7 @@ const zhHant = {
     passDirty: '通行證有改動',
     revert: '還原',
     save: '儲存',
+    saving: '儲存中…',
     passSaved: '通行證已儲存',
     // 賬號與安全. The password link is the login page's own forgot-password
     // mail; 傳送, as that page writes it.
@@ -843,6 +844,7 @@ const zhHant = {
     usernameLabel: '使用者名稱',
     usernameHiddenTitle: '使用者名稱已隱藏',
     usernameHiddenBody: '你註冊時填的名字看起來是郵箱或手機號，所以沒有公開顯示。現在你和別人看到的都是：',
+    usernameTooShort: '使用者名稱至少 3 個字元',
     usernameSaved: '使用者名稱已儲存',
     memberNoLabel: '會員編號',
     emailLabel: '郵箱',
@@ -871,7 +873,9 @@ const zhHant = {
     publicProfileOn: '任何人都可以檢視你的追番列表與公開活動。',
     publicProfileOff: '只有你自己可以檢視追番列表與活動。',
     saved: '已儲存',
-    blockedUsers: '已拉黑使用者', noBlockedUsers: '暫無拉黑使用者', blockedLoadFailed: '載入失敗',
+    blockedUsers: '已拉黑使用者', noBlockedUsers: '暫無拉黑使用者',
+    // Either list on the page (登入裝置, 已拉黑使用者) when it could not be had.
+    loadFailed: '載入失敗',
     // 播放：只存在这台设备的 localStorage 里，切换即生效，没有保存按钮。
     playbackTitle: '播放',
     playbackSubtitle: '只影響這台裝置上的播放器',

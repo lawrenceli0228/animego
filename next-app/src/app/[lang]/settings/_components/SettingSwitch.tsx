@@ -9,6 +9,8 @@ interface SettingSwitchProps {
   /** Says what the current position means, so it changes with `checked`. */
   description: string;
   checked: boolean;
+  /** A save of this setting is out. */
+  busy?: boolean;
   onChange: (next: boolean) => void;
 }
 
@@ -20,9 +22,9 @@ interface SettingSwitchProps {
  * checked state reach assistive tech for free, and the track drawn after it
  * (settings.css .set-sw) is only what it looks like.
  */
-export default function SettingSwitch({ id, title, description, checked, onChange }: SettingSwitchProps) {
+export default function SettingSwitch({ id, title, description, checked, busy = false, onChange }: SettingSwitchProps) {
   return (
-    <div className="set-tg">
+    <div className="set-tg" aria-busy={busy || undefined}>
       <div className="set-tg-text">
         <p className="set-tg-title" id={`${id}-title`}>
           {title}

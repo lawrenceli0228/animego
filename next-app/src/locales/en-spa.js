@@ -779,6 +779,7 @@ const en = {
     passDirty: 'Unsaved pass changes',
     revert: 'Revert',
     save: 'Save',
+    saving: 'Saving…',
     passSaved: 'Pass saved',
     // Account & security. The password link is the login page's own
     // forgot-password mail.
@@ -786,6 +787,7 @@ const en = {
     usernameLabel: 'Username',
     usernameHiddenTitle: 'Username hidden',
     usernameHiddenBody: 'The name you registered with looks like an email address or a phone number, so it is not shown. You and everyone else now see:',
+    usernameTooShort: 'Username must be at least 3 characters',
     usernameSaved: 'Username saved',
     memberNoLabel: 'Member no.',
     emailLabel: 'Email',
@@ -815,7 +817,9 @@ const en = {
     publicProfileOn: 'Anyone can view your watchlist and public activity.',
     publicProfileOff: 'Only you can view your watchlist and activity.',
     saved: 'Saved',
-    blockedUsers: 'Blocked users', noBlockedUsers: 'No blocked users', blockedLoadFailed: 'Could not load',
+    blockedUsers: 'Blocked users', noBlockedUsers: 'No blocked users',
+    // Either list on the page (devices, blocked users) when it could not be had.
+    loadFailed: 'Could not load',
     // Playback: lives in this device's localStorage, applies the moment it is
     // toggled, so there is no Save button.
     playbackTitle: 'Playback',

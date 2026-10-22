@@ -7,7 +7,12 @@ import { buildAlternates } from "@/lib/seo/alternates";
 import { pickTitle } from "@/lib/formatters";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import SettingsClient from "./_components/SettingsClient";
-import { parseSessionList, toDeviceSessions, type ApiSession } from "./_components/deviceSessions";
+import {
+  SESSIONS_FAILED,
+  readSessions,
+  toDeviceSessions,
+  type SessionsLoad,
+} from "./_components/deviceSessions";
 import type { SubscriptionListItem } from "../profile/_components/types";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
 import { sinceLabel } from "@/components/profile/memberIdentity";
@@ -51,12 +56,14 @@ async function fetchSubs(): Promise<SubscriptionListItem[]> {
   }
 }
 
-async function fetchSessions(): Promise<ApiSession[]> {
+async function fetchSessions(): Promise<SessionsLoad> {
   try {
-    return parseSessionList(await apiGet<unknown>("/api/auth/sessions", { cache: "no-store" }));
+    return readSessions(await apiGet<unknown>("/api/auth/sessions", { cache: "no-store" }));
   } catch {
-    // An empty section rather than a failed page: nothing else here needs it.
-    return [];
+    // 5xx, a timeout, or 401 — go-api's answer when this device's own refresh
+    // session is not live, which /me (on the 15-minute access token) can
+    // outlast. The section says 加载失败; nothing else on the page needs it.
+    return SESSIONS_FAILED;
   }
 }
 
@@ -147,7 +154,8 @@ export default async function SettingsPage({
         isPublic={me.isPublic ?? true}
         // Places are resolved to words here, once: Intl.DisplayNames does not
         // name countries the same way in Node and in WebKit (deviceLabels.ts).
-        sessions={toDeviceSessions(sessions, lang)}
+        sessions={toDeviceSessions(sessions.items, lang)}
+        sessionsFailed={sessions.failed}
         serverNowMs={requestTime()}
       />
     </main>

@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   canSaveName,
   envelopeData,
+  isNameTooShort,
   maskEmail,
+  mergeSaved,
   passPatch,
   readSavedAccount,
   revokedCount,
@@ -52,6 +54,60 @@ describe("canSaveName", () => {
     expect(canSaveName("ab", "shironeko")).toBe(false);
     expect(canSaveName("   ", "shironeko")).toBe(false);
     expect(canSaveName(" a b ", "shironeko")).toBe(true);
+  });
+});
+
+describe("isNameTooShort", () => {
+  test("says so for a change of one or two characters", () => {
+    expect(isNameTooShort("a", "shironeko")).toBe(true);
+    expect(isNameTooShort(" ab ", "shironeko")).toBe(true);
+    expect(isNameTooShort("白猫", "shironeko")).toBe(true);
+  });
+
+  test("not for an empty field", () => {
+    expect(isNameTooShort("", "shironeko")).toBe(false);
+    expect(isNameTooShort("   ", "shironeko")).toBe(false);
+  });
+
+  test("not once the name is long enough", () => {
+    expect(isNameTooShort("abc", "shironeko")).toBe(false);
+  });
+
+  test("not for the saved name, however short", () => {
+    expect(isNameTooShort("ab", "ab")).toBe(false);
+  });
+
+  test("never together with 保存", () => {
+    for (const draft of ["", "a", "ab", "abc", "shironeko", " shironeko "]) {
+      expect(isNameTooShort(draft, "shironeko") && canSaveName(draft, "shironeko")).toBe(false);
+    }
+  });
+});
+
+describe("mergeSaved", () => {
+  const sent = { photo: "data:image/jpeg;base64,AAAA", backdrop: 20665 };
+  const now = { photo: "/api/avatars/u1.jpg?v=2", backdrop: 20665 };
+
+  test("a field still as sent takes what the server now holds", () => {
+    expect(mergeSaved(sent, sent, now)).toEqual(now);
+  });
+
+  test("the photo is not left as a data: URL when only the backdrop moved meanwhile", () => {
+    const current = { ...sent, backdrop: 127230 };
+    expect(mergeSaved(current, sent, now)).toEqual({ photo: now.photo, backdrop: 127230 });
+    // So the next save sends the backdrop alone, not the photo again.
+    expect(passPatch(mergeSaved(current, sent, now), now)).toEqual({ backdropAnilistId: 127230 });
+  });
+
+  test("a photo replaced meanwhile keeps the newer one", () => {
+    const current = { ...sent, photo: "data:image/jpeg;base64,BBBB" };
+    expect(mergeSaved(current, sent, now)).toEqual({ photo: "data:image/jpeg;base64,BBBB", backdrop: 20665 });
+  });
+
+  test("does not touch its arguments", () => {
+    const current = { ...sent };
+    mergeSaved(current, sent, now);
+    expect(current).toEqual(sent);
   });
 });
 

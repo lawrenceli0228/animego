@@ -7,6 +7,8 @@ import { fillTemplate } from "@/lib/home/time";
 interface SignOutOthersProps {
   /** How many other sessions the confirm is about. */
   count: number;
+  /** The sign-out is out: 全部退出 holds until it answers. */
+  busy: boolean;
   /** Ends them; resolves true when it worked (the caller reports either way). */
   onConfirm: () => Promise<boolean>;
 }
@@ -17,10 +19,9 @@ interface SignOutOthersProps {
  * and hand focus back to the button, and a press outside it (or Tab out of
  * it) closes it where the reader went.
  */
-export default function SignOutOthers({ count, onConfirm }: SignOutOthersProps) {
+export default function SignOutOthers({ count, busy, onConfirm }: SignOutOthersProps) {
   const { t } = useLang();
   const [open, setOpen] = useState(false);
-  const working = useRef(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -53,10 +54,8 @@ export default function SignOutOthers({ count, onConfirm }: SignOutOthersProps) 
   }, [open, dismiss]);
 
   const confirm = async () => {
-    if (working.current) return;
-    working.current = true;
+    if (busy) return;
     const ended = await onConfirm();
-    working.current = false;
     // On failure the dialog stays, so the reader can try again or cancel.
     if (ended) setOpen(false);
   };
@@ -94,6 +93,7 @@ export default function SignOutOthers({ count, onConfirm }: SignOutOthersProps) 
           role="dialog"
           aria-labelledby={titleId}
           aria-describedby={bodyId}
+          aria-busy={busy || undefined}
         >
           <p className="set-pop-title" id={titleId}>
             {title}
@@ -105,7 +105,13 @@ export default function SignOutOthers({ count, onConfirm }: SignOutOthersProps) 
             <button ref={cancelRef} type="button" className="set-btn quiet sm" onClick={dismiss}>
               {t("settings.cancel")}
             </button>
-            <button type="button" className="set-btn danger sm" onClick={() => void confirm()}>
+            {/* aria-disabled, not disabled, while it is out: focus stays on it. */}
+            <button
+              type="button"
+              className="set-btn danger sm"
+              aria-disabled={busy || undefined}
+              onClick={() => void confirm()}
+            >
               {t("settings.signOutAll")}
             </button>
           </div>

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "@/components/ui/LocaleLink";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { useLang } from "@/lib/lang-client";
+import BlockedUserRow from "./BlockedUserRow";
+import { shouldMoveFocus } from "./focusRule";
 
 interface BlockedUser {
   id: string;
@@ -13,13 +14,16 @@ interface BlockedUser {
 
 type ListState = "loading" | "ready" | "failed";
 
-/** 已拉黑用户: the heading and the list, under 隐私与社区. */
+/**
+ * 已拉黑用户: the heading and the list, under 隐私与社区. Rows can be unblocked
+ * side by side; each holds its own button until its request answers.
+ */
 export default function BlockedUsersList() {
   const { t } = useLang();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [items, setItems] = useState<BlockedUser[]>([]);
   const [state, setState] = useState<ListState>("loading");
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -44,23 +48,25 @@ export default function BlockedUsersList() {
     };
   }, []);
 
-  const unblock = async (username: string) => {
-    if (busy) return;
-    setBusy(username);
+  const unblock = async (username: string, row: HTMLElement | null) => {
+    setBusy((names) => new Set([...names, username]));
     try {
       const response = await authFetch(
         `/api/users/${encodeURIComponent(username)}/block`,
         { method: "DELETE" },
       );
       if (!response.ok) throw new Error("unblock failed");
-      // The row and its button go; focus goes to the heading, not to nowhere.
-      headingRef.current?.focus({ preventScroll: true });
+      // The row and its button go. Focus still in it (or already lost) goes
+      // to the heading; focus the reader has taken elsewhere stays there.
+      if (shouldMoveFocus(document.activeElement, document.body, [row])) {
+        headingRef.current?.focus({ preventScroll: true });
+      }
       setItems((before) => before.filter((item) => item.username !== username));
       toast.success(t("safety.unblocked"));
     } catch {
       toast.error(t("safety.blockFailed"));
     } finally {
-      setBusy(null);
+      setBusy((names) => new Set([...names].filter((name) => name !== username)));
     }
   };
 
@@ -68,7 +74,7 @@ export default function BlockedUsersList() {
   if (state === "loading") {
     body = <p className="set-empty">…</p>;
   } else if (state === "failed") {
-    body = <p className="set-empty">{t("settings.blockedLoadFailed")}</p>;
+    body = <p className="set-empty">{t("settings.loadFailed")}</p>;
   } else if (items.length === 0) {
     body = <p className="set-empty">{t("settings.noBlockedUsers")}</p>;
   } else {
@@ -76,23 +82,12 @@ export default function BlockedUsersList() {
       // role="list": Safari drops a styled-away <ul>'s list semantics otherwise.
       <ul className="set-list" role="list">
         {items.map((item) => (
-          <li key={item.id} className="set-row">
-            <div className="set-row-main">
-              <Link href={`/u/${encodeURIComponent(item.username)}`} className="set-link">
-                @{item.username}
-              </Link>
-            </div>
-            <div className="set-row-end">
-              <button
-                type="button"
-                className="set-btn ghost sm"
-                aria-label={`${t("safety.unblock")} @${item.username}`}
-                onClick={() => void unblock(item.username)}
-              >
-                {t("safety.unblock")}
-              </button>
-            </div>
-          </li>
+          <BlockedUserRow
+            key={item.id}
+            username={item.username}
+            busy={busy.has(item.username)}
+            onUnblock={(username, row) => void unblock(username, row)}
+          />
         ))}
       </ul>
     );

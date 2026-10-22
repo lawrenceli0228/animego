@@ -838,12 +838,14 @@ const zh = {
     passDirty: '通行证有改动',
     revert: '还原',
     save: '保存',
+    saving: '保存中…',
     passSaved: '通行证已保存',
     // 账号与安全. The password link is the login page's own forgot-password mail.
     accountTitle: '账号与安全',
     usernameLabel: '用户名',
     usernameHiddenTitle: '用户名已隐藏',
     usernameHiddenBody: '你注册时填的名字看起来是邮箱或手机号，所以没有公开显示。现在你和别人看到的都是：',
+    usernameTooShort: '用户名至少 3 个字符',
     usernameSaved: '用户名已保存',
     memberNoLabel: '会员编号',
     emailLabel: '邮箱',
@@ -872,7 +874,9 @@ const zh = {
     publicProfileOn: '任何人都可以查看你的追番列表与公开活动。',
     publicProfileOff: '只有你自己可以查看追番列表与活动。',
     saved: '已保存',
-    blockedUsers: '已拉黑用户', noBlockedUsers: '暂无拉黑用户', blockedLoadFailed: '加载失败',
+    blockedUsers: '已拉黑用户', noBlockedUsers: '暂无拉黑用户',
+    // Either list on the page (登录设备, 已拉黑用户) when it could not be had.
+    loadFailed: '加载失败',
     // 播放：只存在这台设备的 localStorage 里，切换即生效，没有保存按钮。
     playbackTitle: '播放',
     playbackSubtitle: '只影响这台设备上的播放器',
