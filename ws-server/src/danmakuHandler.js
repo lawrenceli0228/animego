@@ -25,6 +25,7 @@
 //   * 2 h LIVE_WINDOW once the first message of an episode is sent
 
 const pool = require('./db')
+const sessionLive = require('./sessionLive')
 
 const lastSent = new Map() // userId -> lastSentAt (in-memory rate limit)
 const RATE_LIMIT_MS = 5000
@@ -108,6 +109,15 @@ module.exports = function registerDanmakuHandlers(io, socket) {
         anilistIdNum <= 0 ||
         episodeNum <= 0
       ) {
+        return
+      }
+
+      // The socket outlives the session it was opened under: the device can
+      // be signed out from another device while connected.  Same answer as
+      // an expired token (index.js): tell the client and drop the socket.
+      if (!(await sessionLive(socket.user))) {
+        socket.emit('auth:expired')
+        socket.disconnect(true)
         return
       }
 

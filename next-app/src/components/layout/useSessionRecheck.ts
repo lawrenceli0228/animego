@@ -20,14 +20,21 @@ export function useSessionRecheck(signedIn: boolean, onEnded: () => void): void 
   // coming back to a page left open is exactly the moment that matters —
   // and then at most once per interval.
   const lastProbeAt = useRef(0);
+  // Bumped whenever the listeners come down (signed out, unmounted), so a
+  // probe still out at that moment cannot act on a state that has gone —
+  // e.g. turn a logout, which deliberately stays on the page, into a trip
+  // to /login.
+  const generation = useRef(0);
 
   const recheck = useEffectEvent(async () => {
     if (document.visibilityState !== "visible") return;
     const now = Date.now();
     if (!dueForRecheck(now, lastProbeAt.current)) return;
     lastProbeAt.current = now;
+    const asked = generation.current;
     try {
       const r = await authFetch("/api/auth/me", { skipRedirectOnFailure: true });
+      if (asked !== generation.current) return;
       if (sessionEnded(r.status, hasAuthHint())) onEnded();
     } catch {
       /* network blip — keep the last known state */
@@ -40,6 +47,7 @@ export function useSessionRecheck(signedIn: boolean, onEnded: () => void): void 
     document.addEventListener("visibilitychange", onShow);
     window.addEventListener("focus", onShow);
     return () => {
+      generation.current += 1;
       document.removeEventListener("visibilitychange", onShow);
       window.removeEventListener("focus", onShow);
     };

@@ -455,9 +455,9 @@ func (h *Handlers) answerRefresh(ctx context.Context, w http.ResponseWriter, uid
 	httpx.Data(w, http.StatusOK, RefreshData{AccessToken: access})
 }
 
-// rejectRefresh answers a refresh that can never succeed — no cookie, a
-// forged one, or a token whose session has ended, expired or been replayed —
-// and clears the cookies that carry it.  Left in place, a dead refresh
+// rejectRefresh answers a refresh whose token can never succeed — a forged
+// one, or one whose session has ended, expired or been replayed — and
+// clears the cookies that carry it.  Left in place, a dead refresh
 // cookie was presented again on every page: the Navbar's probe refreshed and
 // failed, next-app's server-side refresh did the same, for as long as the
 // cookie lived (30 days).  A failure on our side (failRefresh, 500) is not a

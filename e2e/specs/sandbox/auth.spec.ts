@@ -141,6 +141,11 @@ test.describe("auth journey", () => {
   // Deleting the `session` cookie stands in for the access token expiring —
   // proxy.ts then refreshes with the refresh cookie on the next navigation,
   // which is exactly the request that used to fail.
+  // The home page's cover art (dozens of images through `next dev`'s
+  // optimizer, now that AniList answers again) can hold its load event past
+  // this test's budget. It reads the navbar, which waits for itself.
+  const HOME_NAV = { waitUntil: "domcontentloaded" } as const;
+
   test("signing in on a second browser does not sign the first one out", async ({ browser }) => {
     const user = makeUser();
     await insertPgUser({
@@ -162,14 +167,14 @@ test.describe("auth journey", () => {
 
     // A's access token runs out after B signed in.
     await contextA.clearCookies({ name: "session" });
-    await pageA.goto("/");
+    await pageA.goto("/", HOME_NAV);
     await expectSignedIn(pageA, user.username);
 
     // B signs out; that ends B's session only.
     await logoutViaNavbar(pageB);
     await expectSignedOut(pageB);
     await contextA.clearCookies({ name: "session" });
-    await pageA.goto("/");
+    await pageA.goto("/", HOME_NAV);
     await expectSignedIn(pageA, user.username);
 
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);

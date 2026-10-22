@@ -12,6 +12,7 @@ package jwtx
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -55,7 +56,11 @@ func (s *Signer) checkSession(ctx context.Context, c *AccessClaims) sessionVerdi
 	live, err := s.sessions.SessionLive(ctx, c.SessionID, c.UserID)
 	switch {
 	case err != nil:
-		slog.WarnContext(ctx, "jwtx: session check failed", "err", err)
+		// A reader who closed the tab cancels the request; only a lookup
+		// that failed on our side (including this timeout) is worth a line.
+		if !errors.Is(err, context.Canceled) {
+			slog.WarnContext(ctx, "jwtx: session check failed", "err", err)
+		}
 		return sessionUnknown
 	case !live:
 		return sessionEnded

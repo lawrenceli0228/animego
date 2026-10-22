@@ -541,7 +541,7 @@ func TestRefresh_NoCookie_401_NoToken(t *testing.T) {
 	h.Refresh(rec, req)
 
 	assertError(t, rec, http.StatusUnauthorized, "NO_TOKEN", "Please log in again")
-	assertAuthCookiesCleared(t, rec)
+	assertAuthCookiesKept(t, rec)
 }
 
 func TestRefresh_BadToken_401_InvalidToken(t *testing.T) {

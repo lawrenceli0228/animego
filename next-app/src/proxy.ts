@@ -211,34 +211,89 @@ function clientAddressHeaders(req: NextRequest): Record<string, string> {
   return headers;
 }
 
-// Whether the session an access token names still stands. The gate's
-// jwt.verify only proves the token was signed and has not expired, and a
-// device signed out from another device's settings page — or by logout, or
-// a password change — holds a token that verifies for up to 15 more
-// minutes. go-api refuses such a token (jwtx.WithSessionCheck), so ask it.
-// "unknown" (unreachable, 5xx, rate-limited) lets the page through, as the
-// refresh step does: the page's own requests meet the same answer, and a
-// hiccup must not sign anyone out.
-async function sessionVerdict(
+// Bounds the one go-api call a personal page waits on before it renders.
+const SESSION_CHECK_TIMEOUT_MS = 2_000;
+
+// Whether go-api still accepts an access token. The gate's jwt.verify only
+// proves the token was signed and has not expired, and a device signed out
+// from another device's settings page — or by logout, or a password change —
+// holds a token that verifies for up to 15 more minutes; go-api refuses it
+// (jwtx.WithSessionCheck). "refused" is not yet "signed out": the caller
+// lets the refresh token decide (see the gate). "unknown" (unreachable,
+// slow, 5xx, rate-limited) lets the page through, as the refresh step does:
+// the page's own requests meet the same answer, and a hiccup must not sign
+// anyone out.
+async function accessVerdict(
   token: string,
   req: NextRequest,
-): Promise<"live" | "ended" | "unknown"> {
+): Promise<"accepted" | "refused" | "unknown"> {
   try {
     const r = await fetch(`${GO_API_INTERNAL_URL}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}`, ...clientAddressHeaders(req) },
       cache: "no-store",
+      signal: AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS),
     });
-    if (r.ok) return "live";
-    return r.status === 401 ? "ended" : "unknown";
+    // Only the status is wanted; do not hold the connection for the body.
+    void r.body?.cancel().catch(() => {});
+    if (r.ok) return "accepted";
+    return r.status === 401 ? "refused" : "unknown";
   } catch {
     return "unknown";
+  }
+}
+
+type RefreshOutcome =
+  | { kind: "refreshed"; setCookies: string[]; session: string | undefined }
+  | { kind: "refused" } // 401: go-api will never refresh this token
+  | { kind: "unavailable" }; // 5xx, network: says nothing about the token
+
+// Refresh the reader's session with go-api, as the reader's own browser
+// would. Only a 401 is a verdict on the refresh token; everything else keeps
+// the cookies for the next try.
+async function refreshWithGoApi(req: NextRequest): Promise<RefreshOutcome> {
+  try {
+    // The real client IP (clientAddressHeaders): the auth limiter is a
+    // 120-per-15-minutes bucket, about eight per minute for all users
+    // combined if every SSR refresh shared the container's address.
+    const headers: Record<string, string> = {
+      cookie: req.headers.get("cookie") ?? "",
+      ...clientAddressHeaders(req),
+    };
+    // The browser's own User-Agent and Cloudflare's location headers: a
+    // refresh rewrites the session's device columns (the settings page's
+    // device list), and this fetch otherwise reaches go-api as Node's
+    // "node" from nowhere, turning the reader's laptop into an unknown
+    // device on every server-side refresh.
+    for (const name of ["user-agent", "cf-ipcountry", "cf-ipcity"]) {
+      const value = req.headers.get(name);
+      if (value) headers[name] = value;
+    }
+    const r = await fetch(`${GO_API_INTERNAL_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers,
+    });
+    if (r.status === 401) return { kind: "refused" };
+    const cookies = r.ok ? r.headers.getSetCookie() : [];
+    if (!cookies.length) return { kind: "unavailable" };
+    return {
+      kind: "refreshed",
+      setCookies: cookies,
+      session: valueFromSetCookies(cookies, "session"),
+    };
+  } catch {
+    // Transient go-api hiccup — never block the page.
+    return { kind: "unavailable" };
   }
 }
 
 // A router prefetch renders no reader data, and a page prefetches every gated
 // link in view: asking go-api for each would spend the reader's own share of
 // the per-IP API limit on links they never open. The navigation that follows
-// is a real request and is checked.
+// is a real request and is checked. (A full prefetch — <Link prefetch={true}>
+// — carries neither header in Next 16 and is checked like a navigation; src
+// has none.) The headers are the client's to set, which is fine: this check
+// decides which page shell is shown, while every read and write behind it is
+// enforced by go-api.
 function isPrefetch(req: NextRequest): boolean {
   return (
     req.headers.has("next-router-prefetch") ||
@@ -246,12 +301,52 @@ function isPrefetch(req: NextRequest): boolean {
   );
 }
 
+// What this request knows about the reader's session, replaced (never edited)
+// as each go-api answer comes in.
+interface AuthState {
+  /** The access token this request renders with. */
+  session: string | undefined;
+  /** A refresh's Set-Cookie headers, forwarded to the browser. */
+  setCookies: string[] | null;
+  /** go-api refused the refresh token for good: the auth cookies are dead. */
+  refused: boolean;
+}
+
+function afterRefresh(state: AuthState, outcome: RefreshOutcome): AuthState {
+  switch (outcome.kind) {
+    case "refreshed":
+      return {
+        session: outcome.session ?? state.session,
+        setCookies: outcome.setCookies,
+        refused: false,
+      };
+    case "refused":
+      return { session: undefined, setCookies: null, refused: true };
+    case "unavailable":
+      // Fall through with the existing (stale) session. The gate bounces
+      // gated routes to /login; other routes render as logged-out.
+      return state;
+  }
+}
+
+// res.cookies.* rewrites every Set-Cookie header it did not write itself, so
+// never call this on a response that already carries forwarded go-api
+// cookies (headers.append): a refused refresh and a successful one never
+// meet on one response, and the emit step keeps it that way.
 function clearAuthCookies(res: NextResponse): void {
   for (const name of AUTH_COOKIES) res.cookies.delete(name);
 }
 
-// The Cookie header without the named cookies, so the render of this very
-// request sees what the browser will hold after it (signed out).
+// Sign-in pages skip the form for a reader who already holds a valid-looking
+// session; for those the token's session is checked too (see the gate).
+function isSignInPage(path: string): boolean {
+  return path === "/login" || path === "/register";
+}
+
+// The Cookie header without the named cookies, so the render of this request
+// reads as signed out, as the browser will after it. (Next folds the
+// response's deletions into cookies() as empty values, so a reader may still
+// see the names — every reader here checks `.get(name)?.value`.)
 function withoutCookies(original: string, names: readonly string[]): string {
   return original
     .split(/;\s*/)
@@ -284,82 +379,45 @@ export async function proxy(req: NextRequest) {
   const session = req.cookies.get("session")?.value;
   const refreshToken = req.cookies.get("refreshToken")?.value;
 
-  let effectiveSession = session;
-  let setCookies: string[] | null = null;
-  // go-api refused the refresh token for good (401: no session, ended,
-  // replayed). The browser's auth cookies are dead and are cleared below;
-  // left in place they were retried on every request for 30 days.
-  let refreshRefused = false;
+  // A refused refresh (401: no session, ended, replayed) leaves the
+  // browser's auth cookies dead; they are cleared below, where left in place
+  // they were retried on every request for 30 days.
+  let auth: AuthState = { session, setCookies: null, refused: false };
 
   // --- 1. Refresh step (all routes) ---
   if (needsRefresh(session) && refreshToken) {
-    try {
-      // The real client IP (clientAddressHeaders): the auth limiter is a
-      // 120-per-15-minutes bucket, about eight per minute for all users
-      // combined if every SSR refresh shared the container's address.
-      const refreshHeaders: Record<string, string> = {
-        cookie: req.headers.get("cookie") ?? "",
-        ...clientAddressHeaders(req),
-      };
-      // The browser's own User-Agent and Cloudflare's location headers: a
-      // refresh rewrites the session's device columns (the settings page's
-      // device list), and this fetch otherwise reaches go-api as Node's
-      // "node" from nowhere, turning the reader's laptop into an unknown
-      // device on every server-side refresh.
-      for (const name of ["user-agent", "cf-ipcountry", "cf-ipcity"]) {
-        const value = req.headers.get(name);
-        if (value) refreshHeaders[name] = value;
-      }
-
-      const r = await fetch(`${GO_API_INTERNAL_URL}/api/auth/refresh`, {
-        method: "POST",
-        headers: refreshHeaders,
-      });
-      if (r.ok) {
-        const cookies = r.headers.getSetCookie();
-        if (cookies.length) {
-          setCookies = cookies;
-          effectiveSession =
-            valueFromSetCookies(cookies, "session") ?? effectiveSession;
-        }
-      } else if (r.status === 401) {
-        refreshRefused = true;
-        effectiveSession = undefined;
-      }
-      // Non-ok: fall through. The gate will bounce gated routes to /login;
-      // non-gated routes render as logged-out, which is correct. Only a 401
-      // is a verdict on the token; a 5xx keeps the cookies for the next try.
-    } catch {
-      // Transient go-api hiccup — never block the page; fall through with
-      // the existing (stale) session.
-    }
+    auth = afterRefresh(auth, await refreshWithGoApi(req));
   }
 
-  // --- 2. Auth gate (only gated routes) ---
-  if (localize && isGated(path, req.nextUrl.searchParams)) {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      // Misconfig: fail closed.
-      return new NextResponse(
-        "Server misconfiguration: JWT_SECRET missing",
-        { status: 500 },
-      );
-    }
+  // --- 2. Auth gate (gated routes), and the session check sign-in pages
+  // need so that a device signed out elsewhere can reach the form ---
+  const gated = localize && isGated(path, req.nextUrl.searchParams);
+  const signIn = localize && isSignInPage(path);
+  const secret = process.env.JWT_SECRET;
+  if (gated && !secret) {
+    // Misconfig: fail closed. (Sign-in pages fail open: the login form is
+    // the only way out of a misconfigured deploy — see login/page.tsx.)
+    return new NextResponse(
+      "Server misconfiguration: JWT_SECRET missing",
+      { status: 500 },
+    );
+  }
 
+  if ((gated || signIn) && secret) {
     let decoded: SessionPayload | null = null;
-    if (effectiveSession) {
+    if (auth.session) {
       try {
-        decoded = jwt.verify(effectiveSession, secret) as SessionPayload;
+        decoded = jwt.verify(auth.session, secret) as SessionPayload;
       } catch {
         decoded = null;
       }
     }
 
-    if (!decoded) {
+    if (gated && !decoded) {
       // Expired/tampered and not refreshable — clear and bounce so the
       // browser stops replaying the bad cookie.
       const res = redirectToLogin(req, path, locale);
-      if (refreshRefused) clearAuthCookies(res);
+      if (auth.refused) clearAuthCookies(res);
       else res.cookies.delete("session");
       return res;
     }
@@ -368,16 +426,36 @@ export async function proxy(req: NextRequest) {
     // by the refresh above a moment ago or this is a prefetch. Tokens from
     // before access tokens named their session cannot be, and run out within
     // 15 minutes.
-    if (decoded.sid && !setCookies && effectiveSession && !isPrefetch(req)) {
-      if ((await sessionVerdict(effectiveSession, req)) === "ended") {
-        const res = redirectToLogin(req, path, locale);
-        clearAuthCookies(res);
-        return res;
+    //
+    // go-api refusing the access token is not yet a sign-out: the refresh
+    // token decides, exactly as the reader's own browser would (authFetch).
+    // A session that has ended refuses both. An access token go-api merely
+    // cannot verify — a JWT_SECRET rotation, the two services briefly
+    // disagreeing mid-deploy — refreshes fine, and deleting a live 30-day
+    // refresh cookie over it would sign every reader of a personal page out.
+    if (decoded?.sid && !auth.setCookies && auth.session && !isPrefetch(req)) {
+      if ((await accessVerdict(auth.session, req)) === "refused") {
+        auth = afterRefresh(
+          auth,
+          refreshToken ? await refreshWithGoApi(req) : { kind: "refused" },
+        );
+        if (auth.refused && gated) {
+          const res = redirectToLogin(req, path, locale);
+          clearAuthCookies(res);
+          return res;
+        }
+        // A sign-in page falls through: auth.refused strips the cookies
+        // below, so the page sees no session and shows the form.
       }
     }
 
-    if (path.startsWith("/admin") && decoded.role !== "admin") {
-      return new NextResponse("Forbidden", { status: 403 });
+    if (gated && decoded && path.startsWith("/admin") && decoded.role !== "admin") {
+      const res = new NextResponse("Forbidden", { status: 403 });
+      // A refresh above rotated the token. Dropping the new cookies here left
+      // the browser on the old one, which go-api reads as replay 30 seconds
+      // later and ends the session.
+      for (const c of auth.setCookies ?? []) res.headers.append("set-cookie", c);
+      return res;
     }
   }
 
@@ -402,17 +480,17 @@ export async function proxy(req: NextRequest) {
   // double-prefix guard fall out for free rather than needing its own check.
   const reqHeaders = new Headers(req.headers);
 
-  if (refreshRefused) {
+  if (auth.refused) {
     reqHeaders.set(
       "cookie",
       withoutCookies(req.headers.get("cookie") ?? "", AUTH_COOKIES),
     );
   }
 
-  if (setCookies) {
+  if (auth.setCookies) {
     const updates: Record<string, string> = {};
-    const newSession = valueFromSetCookies(setCookies, "session");
-    const newRefresh = valueFromSetCookies(setCookies, "refreshToken");
+    const newSession = valueFromSetCookies(auth.setCookies, "session");
+    const newRefresh = valueFromSetCookies(auth.setCookies, "refreshToken");
     if (newSession) updates.session = newSession;
     if (newRefresh) updates.refreshToken = newRefresh;
 
@@ -430,10 +508,10 @@ export async function proxy(req: NextRequest) {
         })
       : NextResponse.next({ request: { headers: reqHeaders } });
 
-  if (setCookies) {
-    for (const c of setCookies) res.headers.append("set-cookie", c);
+  if (auth.refused) clearAuthCookies(res);
+  else if (auth.setCookies) {
+    for (const c of auth.setCookies) res.headers.append("set-cookie", c);
   }
-  if (refreshRefused) clearAuthCookies(res);
   return res;
 }
 

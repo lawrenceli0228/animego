@@ -6,6 +6,11 @@ const jwt = require('jsonwebtoken')
 
 process.env.JWT_SECRET = 'test-secret'
 
+jest.mock('../src/db', () => ({
+  query: jest.fn(),
+}))
+
+const pool = require('../src/db')
 const socketAuth = require('../src/socketAuth')
 
 describe('socketAuth middleware', () => {
@@ -57,3 +62,56 @@ describe('socketAuth middleware', () => {
     expect(socket.user.exp).toBe(exp)
   })
 })
+
+// go-api refuses an access token whose session has ended — the device was
+// signed out from another device's settings page, logged out, or its
+// password changed. This channel writes as the user, so it must refuse the
+// same token instead of honouring it until it expires.
+describe('socketAuth: the session behind the token', () => {
+  const sign = (claims) =>
+    jwt.sign({ userId: 'u1', username: 'alice', ...claims }, process.env.JWT_SECRET)
+  const run = (token) =>
+    new Promise((resolve) => {
+      const socket = { handshake: { auth: { token } } }
+      socketAuth(socket, (err) => resolve({ socket, err }))
+    })
+
+  beforeEach(() => pool.query.mockReset())
+
+  it('lets a token in while its session is live', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ live: true }] })
+
+    const { socket, err } = await run(sign({ sid: 's-1' }))
+
+    expect(err).toBeUndefined()
+    expect(socket.user).toMatchObject({ userId: 'u1', sid: 's-1' })
+    expect(pool.query).toHaveBeenCalledWith(expect.stringMatching(/FROM user_sessions/), ['s-1', 'u1'])
+  })
+
+  it('refuses a token whose session has ended', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ live: false }] })
+
+    const { socket, err } = await run(sign({ sid: 's-1' }))
+
+    expect(err).toEqual(expect.objectContaining({ message: 'Invalid token' }))
+    expect(socket.user).toBeUndefined()
+  })
+
+  it('refuses when the session cannot be looked up', async () => {
+    pool.query.mockRejectedValueOnce(new Error('connection refused'))
+
+    const { socket, err } = await run(sign({ sid: 's-1' }))
+
+    expect(err).toBeInstanceOf(Error)
+    expect(socket.user).toBeUndefined()
+  })
+
+  it('does not look up a token minted before tokens named their session', async () => {
+    const { socket, err } = await run(sign({}))
+
+    expect(err).toBeUndefined()
+    expect(socket.user.username).toBe('alice')
+    expect(pool.query).not.toHaveBeenCalled()
+  })
+})
+
