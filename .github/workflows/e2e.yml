@@ -14,9 +14,12 @@ name: E2E (Playwright)
 #     stack. That workflow now exists: .github/workflows/e2e-sandbox.yml
 #     boots Postgres + go-api from docker compose and runs `next dev` on
 #     the runner, so nothing there touches prod data.
+# A change that touches only prose skips the run (the `paths` rule is
+# explained in unit-tests.yml).
 on:
   pull_request:
     branches: [main, feat/go-backend]
+    paths: ["**", "!**/*.md", "!docs/**", "DESIGN.md"]
   workflow_dispatch:
 
 # Only one suite per branch in flight — duplicate runs against live

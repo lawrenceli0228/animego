@@ -41,9 +41,24 @@ name: E2E Sandbox (Playwright + docker compose)
 # nginx routing. ws-server is skipped because no sandbox spec opens a
 # socket — player.spec.ts explicitly filters socket.io/websocket console
 # noise out of its assertions.
+#
+# ─── Sharded ────────────────────────────────────────────────────────────
+#
+# The suite (300-odd tests) is split across parallel jobs with
+# Playwright's --shard. Each shard boots its OWN stack — Postgres, go-api,
+# `next dev` — so a shard's tests never share a dev server with another
+# shard's, which is also where most of the old single job's slowness came
+# from (three workers queueing behind one on-demand compiler). The setup
+# (~2 min) is paid once per shard; the suite itself was ~9 of the old
+# job's ~11 minutes, so the wall time drops to roughly setup + a quarter.
+# `Playwright against a PR-local stack` is the one check that sums them up.
+#
+# A change that touches only prose skips the run (see unit-tests.yml for
+# the `paths` rule; DESIGN.md counts there and is harmless here).
 on:
   pull_request:
     branches: [main]
+    paths: ["**", "!**/*.md", "!docs/**", "DESIGN.md"]
   workflow_dispatch:
 
 # One run per branch in flight; a newer push supersedes an in-flight run.
@@ -53,17 +68,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  e2e-sandbox:
-    name: Playwright against a PR-local stack
+  shard:
+    name: Sandbox e2e (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    # Measured shape of a cold run: ~3 min building the Postgres image
-    # (pg_cron is compiled from source), ~3 min building go-api, ~2 min of
-    # bun/playwright installs, ~2 min for `next dev` to boot and compile
-    # the warmed routes, then the suite itself. 14 specs over 3 workers on
-    # a dev-mode server, with `retries: 1` on CI able to replay the slow
-    # ones, lands around 8 min. 30 leaves headroom for a cold Docker layer
-    # cache without letting a hung container burn a full hour.
-    timeout-minutes: 30
+    # Measured on 2026-10-22 with one job: ~2 min of setup (images,
+    # installs, `next dev` warming its routes) and ~9 min of suite. A shard
+    # runs about a quarter of the suite. 20 leaves headroom for a cold
+    # Docker layer cache without letting a hung container burn an hour.
+    timeout-minutes: 20
+    strategy:
+      # Every shard runs to the end: one failing must not cancel the
+      # others' evidence.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     env:
       # Both compose files, once. The --env-file flag is still passed
       # explicitly on every call rather than via COMPOSE_ENV_FILES: a
@@ -368,7 +386,7 @@ jobs:
         # all, so suppressing it would trade a visible flake for a permanently
         # blind assertion. If it turns into a regular failure, that is signal
         # about the rescan effect, not about this workflow.
-        run: bun run test:sandbox
+        run: bun run test:sandbox --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       - name: Dump service logs on failure
         if: failure()
@@ -394,7 +412,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-sandbox
+          name: playwright-report-sandbox-${{ matrix.shard }}
           path: e2e/playwright-report/
           retention-days: 14
 
@@ -406,3 +424,18 @@ jobs:
         run: |
           kill "$(cat /tmp/next-dev.pid)" 2>/dev/null || true
           docker compose --env-file .env.production down -v || true
+
+  # The single answer for the whole suite, under the name the check has
+  # always had: green only if every shard was.
+  e2e-sandbox:
+    name: Playwright against a PR-local stack
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard passed
+        run: |
+          echo "shards: ${{ needs.shard.result }}"
+          test "${{ needs.shard.result }}" = "success"
+
