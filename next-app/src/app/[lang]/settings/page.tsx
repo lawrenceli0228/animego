@@ -7,13 +7,16 @@ import { buildAlternates } from "@/lib/seo/alternates";
 import { pickTitle } from "@/lib/formatters";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import SettingsClient from "./_components/SettingsClient";
+import { parseSessionList, toDeviceSessions, type ApiSession } from "./_components/deviceSessions";
 import type { SubscriptionListItem } from "../profile/_components/types";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
+import { sinceLabel } from "@/components/profile/memberIdentity";
 import { seasonYearLabel } from "@/lib/contentLabels";
 
-// Auth-gated standard settings page: account (username), security (password),
-// and member-pass personalization (photo + backdrop). SSR-fetches the user +
-// their list so the backdrop picker and live preview render on first paint.
+// Auth-gated settings page: the member pass (photo + backdrop), the account
+// (username, password link), signed-in devices, privacy, playback. SSR-fetches
+// the user, their list and their sessions so every section renders on first
+// paint.
 export const dynamic = "force-dynamic";
 
 interface MeResp {
@@ -22,6 +25,7 @@ interface MeResp {
     username: string;
     /** True when `username` is a masked handle rather than a chosen name. */
     usernameHidden?: boolean;
+    email?: string | null;
     createdAt?: string | null;
     avatarUrl?: string | null;
     backdropAnilistId?: number | null;
@@ -47,6 +51,25 @@ async function fetchSubs(): Promise<SubscriptionListItem[]> {
   }
 }
 
+async function fetchSessions(): Promise<ApiSession[]> {
+  try {
+    return parseSessionList(await apiGet<unknown>("/api/auth/sessions", { cache: "no-store" }));
+  } catch {
+    // An empty section rather than a failed page: nothing else here needs it.
+    return [];
+  }
+}
+
+/**
+ * This request's render time — a helper rather than Date.now() in the
+ * component body, which react-hooks/purity rejects. The devices' "2 小时前"
+ * is measured from it on the server and again after hydration, so the two
+ * renders agree.
+ */
+function requestTime(): number {
+  return Date.now();
+}
+
 // generateMetadata rather than a static `metadata` object: the canonical
 // has to name the locale the visitor is actually in, and only the route
 // param knows that. The title stays hardcoded Chinese — this page is
@@ -66,10 +89,11 @@ export async function generateMetadata({
 export default async function SettingsPage({
   params,
 }: PageProps<"/[lang]/settings">) {
-  const [{ locale, lang }, me, subs] = await Promise.all([
+  const [{ locale, lang }, me, subs, sessions] = await Promise.all([
     resolveLocale(params),
     fetchMe(),
     fetchSubs(),
+    fetchSessions(),
   ]);
   // `from`, not `next`: /login reads ?from= (sanitizeFromParam) and has
   // never looked at ?next=. The old param was therefore inert — every
@@ -111,13 +135,20 @@ export default async function SettingsPage({
         username={me.username}
         usernameHidden={me.usernameHidden ?? false}
         userId={me.id ?? null}
-        createdAt={me.createdAt ?? null}
+        email={me.email ?? ""}
+        // Here and not in the client: it reads the clock's own time zone,
+        // which is the server's here and the reader's in a browser.
+        since={sinceLabel(me.createdAt)}
         avatarUrl={me.avatarUrl ?? null}
         backdropAnilistId={me.backdropAnilistId ?? null}
         backdropOptions={backdropOptions.slice(0, 80)}
         watchedCount={watchedCount}
         topSeason={topSeason}
         isPublic={me.isPublic ?? true}
+        // Places are resolved to words here, once: Intl.DisplayNames does not
+        // name countries the same way in Node and in WebKit (deviceLabels.ts).
+        sessions={toDeviceSessions(sessions, lang)}
+        serverNowMs={requestTime()}
       />
     </main>
   );

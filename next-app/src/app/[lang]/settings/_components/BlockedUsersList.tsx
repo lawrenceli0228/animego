@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "@/components/ui/LocaleLink";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
@@ -11,10 +11,14 @@ interface BlockedUser {
   username: string;
 }
 
+type ListState = "loading" | "ready" | "failed";
+
+/** 已拉黑用户: the heading and the list, under 隐私与社区. */
 export default function BlockedUsersList() {
   const { t } = useLang();
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [items, setItems] = useState<BlockedUser[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<ListState>("loading");
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
@@ -24,11 +28,14 @@ export default function BlockedUsersList() {
         const response = await authFetch("/api/blocks?limit=50", {
           skipRedirectOnFailure: true,
         });
-        if (!response.ok) return;
+        if (!response.ok) throw new Error(`blocks ${response.status}`);
         const json = (await response.json()) as { data?: { items?: BlockedUser[] } };
-        if (!cancelled) setItems(Array.isArray(json.data?.items) ? json.data.items : []);
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        setItems(Array.isArray(json.data?.items) ? json.data.items : []);
+        setState("ready");
+      } catch {
+        // Said, not shown as "暂无拉黑用户": an empty list here would be a claim.
+        if (!cancelled) setState("failed");
       }
     };
     void load();
@@ -38,6 +45,7 @@ export default function BlockedUsersList() {
   }, []);
 
   const unblock = async (username: string) => {
+    if (busy) return;
     setBusy(username);
     try {
       const response = await authFetch(
@@ -45,6 +53,8 @@ export default function BlockedUsersList() {
         { method: "DELETE" },
       );
       if (!response.ok) throw new Error("unblock failed");
+      // The row and its button go; focus goes to the heading, not to nowhere.
+      headingRef.current?.focus({ preventScroll: true });
       setItems((before) => before.filter((item) => item.username !== username));
       toast.success(t("safety.unblocked"));
     } catch {
@@ -54,40 +64,48 @@ export default function BlockedUsersList() {
     }
   };
 
-  return (
-    <div style={{ marginTop: 20, borderTop: "1px solid #38383a", paddingTop: 16 }}>
-      <b style={{ display: "block", color: "#fff", fontSize: 13.5 }}>
-        {t("settings.blockedUsers")}
-      </b>
-      {loading ? (
-        <p className="hint">…</p>
-      ) : items.length === 0 ? (
-        <p className="hint">{t("settings.noBlockedUsers")}</p>
-      ) : (
-        <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-          {items.map((item) => (
-            <div
-              key={item.id}
-              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
-            >
-              <Link
-                href={`/u/${encodeURIComponent(item.username)}`}
-                style={{ color: "#0a84ff", fontSize: 13, textDecoration: "none" }}
-              >
+  let body;
+  if (state === "loading") {
+    body = <p className="set-empty">…</p>;
+  } else if (state === "failed") {
+    body = <p className="set-empty">{t("settings.blockedLoadFailed")}</p>;
+  } else if (items.length === 0) {
+    body = <p className="set-empty">{t("settings.noBlockedUsers")}</p>;
+  } else {
+    body = (
+      // role="list": Safari drops a styled-away <ul>'s list semantics otherwise.
+      <ul className="set-list" role="list">
+        {items.map((item) => (
+          <li key={item.id} className="set-row">
+            <div className="set-row-main">
+              <Link href={`/u/${encodeURIComponent(item.username)}`} className="set-link">
                 @{item.username}
               </Link>
+            </div>
+            <div className="set-row-end">
               <button
                 type="button"
-                className="set-btn ghost"
-                disabled={busy === item.username}
+                className="set-btn ghost sm"
+                aria-label={`${t("safety.unblock")} @${item.username}`}
                 onClick={() => void unblock(item.username)}
               >
-                {busy === item.username ? "…" : t("safety.unblock")}
+                {t("safety.unblock")}
               </button>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <>
+      <h3 className="set-sub" ref={headingRef} tabIndex={-1}>
+        {t("settings.blockedUsers")}
+      </h3>
+      <div className="set-group" aria-busy={state === "loading"}>
+        {body}
+      </div>
+    </>
   );
 }

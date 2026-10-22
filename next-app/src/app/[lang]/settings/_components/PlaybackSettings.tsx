@@ -8,6 +8,7 @@ import {
   subscribeAutoMarkDone,
   writeAutoMarkDone,
 } from "@/lib/playerSettings";
+import SettingSwitch from "./SettingSwitch";
 
 // localStorage is a browser-only mutable store, which is exactly what
 // useSyncExternalStore is for: the server snapshot renders the default so
@@ -17,11 +18,11 @@ const getSnapshot = (): boolean => readAutoMarkDone();
 const getServerSnapshot = (): boolean => AUTO_MARK_DONE_DEFAULT;
 
 /**
- * Playback preferences card.
+ * 播放.
  *
- * Unlike every other card on this page, nothing here goes to the server — the
- * switch lives in this device's localStorage, so it applies the moment it is
- * flipped and there is no Save button to press and no dirty state to track.
+ * Unlike every other section on this page, nothing here goes to the server —
+ * the switch lives in this device's localStorage, so it applies the moment it
+ * is flipped and there is no Save button to press and no dirty state to track.
  */
 export default function PlaybackSettings() {
   const { t } = useLang();
@@ -33,37 +34,34 @@ export default function PlaybackSettings() {
   const [saveFailed, setSaveFailed] = useState(false);
 
   // A store that refuses the write leaves the player reading the old value, so
-  // the checkbox stays where it was — the snapshot never moved. Showing the
+  // the switch stays where it was — the snapshot never moved. Showing the
   // requested state would be a lie, and saying nothing is the §9 CG1 habit.
   const toggle = (next: boolean) => setSaveFailed(!writeAutoMarkDone(next));
 
   return (
-    <section className="set-card">
-      <h2>{t("settings.playbackTitle")}</h2>
-      <p className="sub">{t("settings.playbackSubtitle")}</p>
-
-      <label className="set-toggle" htmlFor="set-auto-mark-done">
-        <input
-          id="set-auto-mark-done"
-          type="checkbox"
+    <section className="set-sec" id="playback" aria-labelledby="set-playback-h">
+      <div className="set-sec-head">
+        <div>
+          <h2 className="set-sec-title" id="set-playback-h">
+            {t("settings.playbackTitle")}
+          </h2>
+          <p className="set-sec-sub">{t("settings.playbackSubtitle")}</p>
+        </div>
+      </div>
+      <div className="set-group">
+        <SettingSwitch
+          id="set-auto-mark"
+          title={t("settings.autoMarkDone")}
+          description={autoMarkDone ? t("settings.autoMarkDoneOn") : t("settings.autoMarkDoneOff")}
           checked={autoMarkDone}
-          onChange={(event) => toggle(event.target.checked)}
+          onChange={toggle}
         />
-        <span>
-          <b>{t("settings.autoMarkDone")}</b>
-          <span className="set-toggle-desc">
-            {autoMarkDone
-              ? t("settings.autoMarkDoneOn")
-              : t("settings.autoMarkDoneOff")}
-          </span>
-        </span>
-      </label>
-
-      {saveFailed && (
-        <p className="set-msg err" style={{ margin: "14px 0 0" }} role="alert">
-          {t("settings.autoMarkDoneSaveFailed")}
-        </p>
-      )}
+        {saveFailed && (
+          <p className="set-tg-err" role="alert">
+            {t("settings.autoMarkDoneSaveFailed")}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

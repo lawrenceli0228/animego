@@ -1,0 +1,146 @@
+/* settings-devices.css — the 登录设备 section: one tile per signed-in
+ * session, and the confirm for 退出其他设备. Option B of the settings canvas,
+ * like settings.css (which holds the page frame and the shared controls).
+ */
+
+.set-dv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.set-dv {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 152px;
+  padding: 18px;
+  border-radius: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator-opaque);
+}
+.set-dv.set-dv-cur {
+  border-color: rgba(10, 132, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.2);
+}
+.set-dv-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.set-dv-ico {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-elevated);
+  color: rgba(235, 235, 245, 0.84);
+}
+.set-dv-ico svg {
+  display: block;
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.set-dv-cur .set-dv-ico {
+  background: var(--set-accent-soft);
+  color: var(--set-accent-ink);
+}
+.set-dv-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fff;
+}
+.set-dv-name span:first-child {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.set-dv-tag {
+  flex: none;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--set-accent-soft);
+  color: var(--set-accent-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 19px;
+}
+.set-dv-meta {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--set-t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.set-dv-live {
+  color: var(--success);
+}
+.set-dv-since {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--set-t3);
+}
+
+/* The confirm for 退出其他设备, anchored under its button. */
+.set-pop-anchor {
+  position: relative;
+  flex: none;
+}
+.set-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 25;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 18px;
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.85);
+  text-align: left;
+}
+.set-pop-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+}
+.set-pop-text {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--set-t2);
+}
+.set-pop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+@media (max-width: 760px) {
+  .set-dv-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .set-dv {
+    min-height: 0;
+  }
+}
