@@ -11,12 +11,15 @@
 //
 // Token claims:
 //
-//	Access:  { userId, username, role?, exp, iat }
+//	Access:  { userId, sid, username, role?, exp, iat }
 //	Refresh: { userId, sid, exp, iat, jti }
 //
-// sid is the user_sessions row the refresh token belongs to (one per device,
-// migration 0052); jti is random per token.  Refresh tokens minted before
-// 0052 carry neither, and parse with SessionID == uuid.Nil.
+// sid is the user_sessions row the token belongs to (one per device,
+// migration 0052); jti is random per refresh token.  Refresh tokens minted
+// before 0052, and access tokens minted before they named their session,
+// carry no sid and parse with SessionID == uuid.Nil.  An access token's sid
+// is what lets the middleware refuse it once its session has ended
+// (WithSessionCheck), instead of honouring it until it expires.
 //
 // Role is OMITTED from the JSON payload when nil (Express:
 // `if (role) payload.role = role`).  We model it as *string so the
@@ -35,9 +38,10 @@ import (
 // AccessClaims is the JWT payload for short-lived access tokens.  Embeds
 // jwt.RegisteredClaims so exp/iat/nbf are validated by the library.
 type AccessClaims struct {
-	UserID   uuid.UUID `json:"userId"`
-	Username string    `json:"username"`
-	Role     *string   `json:"role,omitempty"`
+	UserID    uuid.UUID `json:"userId"`
+	SessionID uuid.UUID `json:"sid"`
+	Username  string    `json:"username"`
+	Role      *string   `json:"role,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -67,10 +71,11 @@ type IssuedRefresh struct {
 	ExpiresAt time.Time
 }
 
-// ErrNoSession is returned by SignRefresh for a nil session id: a refresh
-// token without a sid is the pre-0052 shape, and minting new ones would put
-// them on the legacy path forever.
-var ErrNoSession = errors.New("jwtx: refresh token needs a session id")
+// ErrNoSession is returned by SignRefresh and SignAccess for a nil session
+// id.  A refresh token without a sid is the pre-0052 shape, and minting new
+// ones would put them on the legacy path forever; an access token without
+// one could not be refused when its session ends.
+var ErrNoSession = errors.New("jwtx: token needs a session id")
 
 // Signer holds the two HS256 secrets + TTLs.  Construct once at startup
 // from env vars (or test fixtures) and inject into handlers.
@@ -79,6 +84,7 @@ type Signer struct {
 	refreshSecret []byte
 	accessTTL     time.Duration
 	refreshTTL    time.Duration
+	sessions      SessionChecker // nil: the middleware looks nothing up
 }
 
 // ErrEmptySecret is returned by NewSigner when either secret is the
@@ -101,15 +107,19 @@ func NewSigner(accessSecret, refreshSecret string, accessTTL, refreshTTL time.Du
 	}, nil
 }
 
-// SignAccess produces a short-lived access token.  role may be nil; when
-// nil it's omitted from the JSON payload entirely (matches Express's
-// `if (role) payload.role = role`).
-func (s *Signer) SignAccess(userID uuid.UUID, username string, role *string) (string, error) {
+// SignAccess produces a short-lived access token for one session.  role may
+// be nil; when nil it's omitted from the JSON payload entirely (matches
+// Express's `if (role) payload.role = role`).
+func (s *Signer) SignAccess(userID, sessionID uuid.UUID, username string, role *string) (string, error) {
+	if sessionID == uuid.Nil {
+		return "", ErrNoSession
+	}
 	now := time.Now()
 	claims := AccessClaims{
-		UserID:   userID,
-		Username: username,
-		Role:     role,
+		UserID:    userID,
+		SessionID: sessionID,
+		Username:  username,
+		Role:      role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.accessTTL)),

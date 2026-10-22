@@ -4,15 +4,17 @@ package auth
 // sessions, and ending one of them or every other one.
 //
 // Which session is "this device" comes from the refresh cookie, not the
-// access token: the access token carries no session id, and the refresh
-// cookie (path "/") travels with every request, including the SSR fetch
-// next-app makes with the reader's cookies.
+// access token: the refresh cookie (path "/") travels with every request,
+// including the SSR fetch next-app makes with the reader's cookies, and it
+// is what the device list's current-or-grace check (GetHeldUserSession)
+// compares against.  The access token's own sid is checked for liveness by
+// jwtx (WithSessionCheck) before these handlers run.
 //
 // All three endpoints require that session to be live, not just signed.
-// An access token outlives a revoke by up to 15 minutes, and so does the
-// signature on a revoked refresh token: a device the owner has just signed
-// out could otherwise come back with both and sign the owner's devices out
-// in turn, and an access token on its own could list and end every session.
+// The signature on a revoked refresh token outlives the revoke: a device the
+// owner has just signed out could otherwise come back with it and sign the
+// owner's devices out in turn, and an access token on its own could list and
+// end every session.
 
 import (
 	"context"

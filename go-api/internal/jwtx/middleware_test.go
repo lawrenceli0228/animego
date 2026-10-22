@@ -38,7 +38,7 @@ func newMwSigner(t *testing.T) *Signer {
 func TestRequireAuth_HeaderValid(t *testing.T) {
 	s := newMwSigner(t)
 	userID := uuid.New()
-	tok, err := s.SignAccess(userID, "alice", nil)
+	tok, err := s.SignAccess(userID, uuid.New(), "alice", nil)
 	require.NoError(t, err)
 
 	handler := RequireAuth(s)(newProtectedHandler(t))
@@ -53,7 +53,7 @@ func TestRequireAuth_HeaderValid(t *testing.T) {
 
 func TestRequireAuth_HeaderWins_OverBadCookie(t *testing.T) {
 	s := newMwSigner(t)
-	tok, err := s.SignAccess(uuid.New(), "bob", nil)
+	tok, err := s.SignAccess(uuid.New(), uuid.New(), "bob", nil)
 	require.NoError(t, err)
 
 	handler := RequireAuth(s)(newProtectedHandler(t))
@@ -69,7 +69,7 @@ func TestRequireAuth_HeaderWins_OverBadCookie(t *testing.T) {
 func TestRequireAuth_CookieValid(t *testing.T) {
 	s := newMwSigner(t)
 	userID := uuid.New()
-	tok, err := s.SignAccess(userID, "carol", nil)
+	tok, err := s.SignAccess(userID, uuid.New(), "carol", nil)
 	require.NoError(t, err)
 
 	handler := RequireAuth(s)(newProtectedHandler(t))
@@ -132,7 +132,7 @@ func TestRequireAuth_BadCookie_401_InvalidToken(t *testing.T) {
 
 func TestRequireAuth_HeaderNotBearer_FallsThroughToCookie(t *testing.T) {
 	s := newMwSigner(t)
-	tok, err := s.SignAccess(uuid.New(), "fallthrough", nil)
+	tok, err := s.SignAccess(uuid.New(), uuid.New(), "fallthrough", nil)
 	require.NoError(t, err)
 
 	handler := RequireAuth(s)(newProtectedHandler(t))
@@ -187,7 +187,7 @@ func TestRequireAuth_ExpiredToken_InvalidToken(t *testing.T) {
 	// don't surface "expired" separately so attackers can't probe.
 	expiredSigner, err := NewSigner("mw-access-secret", "mw-refresh-secret", -1*time.Second, time.Hour)
 	require.NoError(t, err)
-	tok, err := expiredSigner.SignAccess(uuid.New(), "expired", nil)
+	tok, err := expiredSigner.SignAccess(uuid.New(), uuid.New(), "expired", nil)
 	require.NoError(t, err)
 
 	verifier := newMwSigner(t) // same secret, so signature is valid but exp < now

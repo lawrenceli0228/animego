@@ -91,7 +91,7 @@ func withClaims(t *testing.T, req *http.Request, userID uuid.UUID, role *string)
 	t.Helper()
 	signer, err := jwtx.NewSigner("safety-access", "safety-refresh", time.Hour, time.Hour)
 	require.NoError(t, err)
-	token, err := signer.SignAccess(userID, "viewer", role)
+	token, err := signer.SignAccess(userID, uuid.New(), "viewer", role)
 	require.NoError(t, err)
 	var captured *http.Request
 	middleware := jwtx.RequireAuth(signer)

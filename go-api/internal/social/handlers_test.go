@@ -165,7 +165,7 @@ func withAuth(t *testing.T, r *http.Request, userID uuid.UUID, username string) 
 	t.Helper()
 	signer, err := jwtx.NewSigner("test-access", "test-refresh", 15*time.Minute, time.Hour)
 	require.NoError(t, err)
-	tok, err := signer.SignAccess(userID, username, nil)
+	tok, err := signer.SignAccess(userID, uuid.New(), username, nil)
 	require.NoError(t, err)
 
 	mw := jwtx.RequireAuth(signer)
@@ -187,7 +187,7 @@ func withOptionalAuth(t *testing.T, r *http.Request, userID uuid.UUID, username 
 	t.Helper()
 	signer, err := jwtx.NewSigner("test-access", "test-refresh", 15*time.Minute, time.Hour)
 	require.NoError(t, err)
-	tok, err := signer.SignAccess(userID, username, nil)
+	tok, err := signer.SignAccess(userID, uuid.New(), username, nil)
 	require.NoError(t, err)
 
 	mw := jwtx.OptionalAuth(signer)

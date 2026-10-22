@@ -261,3 +261,79 @@ func TestDevices_RevokeOtherSessionsCatchesARacingAdoption(t *testing.T) {
 	assert.NoError(t, err, "this device's session was ended")
 }
 
+// The report this guards: signing a device out from the settings page left
+// it signed in.  Its session row was gone, but its access token still
+// verified for the rest of its 15 minutes, so the device kept working until
+// its next refresh.  With the session check attached to the signer (as
+// cmd/server does), the device is refused on its very next request, its
+// refresh clears its cookies, and the device that did the signing-out is
+// untouched — until it logs out, which ends its own token the same way.
+func TestDevices_ASignedOutDeviceIsRefusedOnItsNextRequest(t *testing.T) {
+	ctx, pool, q := freshSessionDB(t)
+	store := auth.NewStore(pool)
+	signer := sessionSigner(t).WithSessionCheck(store)
+	h := auth.NewHandlers(store, signer, nil, "http://localhost:3000", 15*time.Minute, 30*24*time.Hour, false)
+	hash, err := jwtx.HashPassword("correct-horse")
+	require.NoError(t, err)
+	_, err = q.CreateUser(ctx, "signedout", "signedout@example.com", hash)
+	require.NoError(t, err)
+
+	login := func() (refresh, access string) {
+		body := bytes.NewBufferString(`{"email":"signedout@example.com","password":"correct-horse"}`)
+		rec := httptest.NewRecorder()
+		h.Login(rec, httptest.NewRequest(http.MethodPost, "/api/auth/login", body))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return cookieValue(t, rec, auth.RefreshCookieName), cookieValue(t, rec, "session")
+	}
+	macRefresh, macAccess := login()
+	phoneRefresh, phoneAccess := login()
+	phone, err := signer.VerifyRefresh(phoneRefresh)
+	require.NoError(t, err)
+
+	router := chi.NewRouter()
+	router.With(jwtx.RequireAuth(signer)).Get("/api/auth/me", h.Me)
+	router.With(jwtx.RequireAuth(signer)).Delete("/api/auth/sessions/{id}", h.RevokeSession)
+	router.Post("/api/auth/refresh", h.Refresh)
+	router.Post("/api/auth/logout", h.Logout)
+	call := func(method, path, access, refresh string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		if access != "" {
+			req.Header.Set("Authorization", "Bearer "+access)
+		}
+		if refresh != "" {
+			req.AddCookie(&http.Cookie{Name: auth.RefreshCookieName, Value: refresh})
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	require.Equal(t, http.StatusOK, call(http.MethodGet, "/api/auth/me", phoneAccess, "").Code, "the phone starts signed in")
+
+	revoke := call(http.MethodDelete, "/api/auth/sessions/"+phone.SessionID.String(), macAccess, macRefresh)
+	require.Equal(t, http.StatusOK, revoke.Code, revoke.Body.String())
+	require.Contains(t, revoke.Body.String(), `"revoked":1`)
+
+	me := call(http.MethodGet, "/api/auth/me", phoneAccess, "")
+	assert.Equal(t, http.StatusUnauthorized, me.Code, "the phone's unexpired access token must stop working at once")
+	assert.Contains(t, me.Body.String(), `"code":"INVALID_TOKEN"`)
+
+	refresh := call(http.MethodPost, "/api/auth/refresh", "", phoneRefresh)
+	assert.Equal(t, http.StatusUnauthorized, refresh.Code)
+	for _, name := range []string{auth.RefreshCookieName, "session", auth.AuthHintCookieName} {
+		var cleared bool
+		for _, c := range refresh.Result().Cookies() {
+			if c.Name == name && c.MaxAge < 0 {
+				cleared = true
+			}
+		}
+		assert.True(t, cleared, "the phone's refresh must clear its %s cookie", name)
+	}
+
+	assert.Equal(t, http.StatusOK, call(http.MethodGet, "/api/auth/me", macAccess, "").Code, "the Mac that signed the phone out stays signed in")
+
+	logout := call(http.MethodPost, "/api/auth/logout", "", macRefresh)
+	require.Equal(t, http.StatusOK, logout.Code, logout.Body.String())
+	assert.Equal(t, http.StatusUnauthorized, call(http.MethodGet, "/api/auth/me", macAccess, "").Code, "logging out ends the Mac's own access token too")
+	assert.Equal(t, 0, countSessionsByEmail(t, ctx, pool, "signedout@example.com"))
+}

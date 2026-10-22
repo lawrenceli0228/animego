@@ -385,6 +385,12 @@ func main() {
 		slog.Error("jwt signer init failed", "err", err)
 		os.Exit(1)
 	}
+	// Every RequireAuth / OptionalAuth below asks whether the token's session
+	// still stands, so a device signed out from the settings page (or by
+	// logout, or a password change) is refused on its next request rather
+	// than when its access token runs out.
+	authStore := auth.NewStore(pool)
+	signer = signer.WithSessionCheck(authStore)
 	isProd := os.Getenv("GO_ENV") == "production"
 
 	// Transactional email, in order of preference.  When none is
@@ -418,7 +424,7 @@ func main() {
 
 	// auth.NewStore rather than q: adopting a pre-0052 refresh token into a
 	// per-device session is a two-statement transaction, so it needs the pool.
-	authHandlers := auth.NewHandlers(auth.NewStore(pool), signer, emailSender, cfg.ClientOrigin, cfg.JWTExpiresIn, cfg.JWTRefreshExpiresIn, isProd)
+	authHandlers := auth.NewHandlers(authStore, signer, emailSender, cfg.ClientOrigin, cfg.JWTExpiresIn, cfg.JWTRefreshExpiresIn, isProd)
 	avatarDir := os.Getenv("AVATAR_DIR")
 	if avatarDir == "" {
 		avatarDir = "/data/avatars"

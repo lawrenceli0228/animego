@@ -965,7 +965,7 @@
 
 ## 多设备会话上线满 14 天后，删掉 users 上的旧会话列和过渡代码
 
-**What** — 删 `users.refresh_token` / `previous_refresh_token` / `refresh_rotated_at` 三列，以及只为它们存在的过渡代码：旧格式 refresh token（不带 `sid`）的认领事务、认领后的宽限与重用判断、旧式登出分支、`user_sessions.legacy_hash` 列、`ClearRefreshTokenIfMatches` 查询、「退出其他设备」事务里顺带清旧 token 的 `ClearLegacyRefreshTokens` 查询、`internal/db/session_columns_test.go` 扫描测试，以及 `test/integration/user_session_columns_test.go` 里剩下的旧列测试。
+**What** — 删 `users.refresh_token` / `previous_refresh_token` / `refresh_rotated_at` 三列，以及只为它们存在的过渡代码：旧格式 refresh token（不带 `sid`）的认领事务、认领后的宽限与重用判断、旧式登出分支、`user_sessions.legacy_hash` 列、`ClearRefreshTokenIfMatches` 查询、「退出其他设备」事务里顺带清旧 token 的 `ClearLegacyRefreshTokens` 查询、`internal/db/session_columns_test.go` 扫描测试，以及 `test/integration/user_session_columns_test.go` 里剩下的旧列测试。同一批还有对不带 `sid` 的访问令牌的放行：go-api `jwtx/session.go` 的 `checkSession` 里 `SessionID == uuid.Nil` 那一支、next-app `proxy.ts` 的 `decoded?.sid` 判断、ws-server `sessionLive.js` 的 `!user.sid`——这些只为会话检查上线前签发的访问令牌存在，那批令牌 15 分钟内就过期了；之后再放行，等于让将来某处漏签 `sid` 的令牌悄悄绕过「退出设备」。
 
 **Why** — 多设备会话上线前签发的 refresh token 有效期是 14 天，过期后这些代码和列不会再被任何请求走到；留着的话，读代码的人要同时理解两套会话机制，`users` 表里也一直留着旧的 token 原文。
 

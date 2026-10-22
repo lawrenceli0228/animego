@@ -41,6 +41,17 @@ func postRefresh(h *Handlers, cookie string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// assertAuthCookiesKept: a refresh that failed on our side (500) says
+// nothing about the token, so it must leave the browser's cookies alone.
+func assertAuthCookiesKept(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	for _, name := range []string{RefreshCookieName, sessionCookieName, AuthHintCookieName} {
+		if c := getSetCookie(rec, name); c != nil {
+			t.Errorf("cookie %q was set (MaxAge %d) by a refresh that failed server-side", name, c.MaxAge)
+		}
+	}
+}
+
 func postLogout(h *Handlers, cookie string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookie})
@@ -358,6 +369,7 @@ func TestRefresh_ReuseAfterGraceRevokesOnlyThatSession(t *testing.T) {
 		t.Error("reuse on one device ended another device's session")
 	}
 	logs.assertOutcome(t, eventRefresh, outcomeReuseRevoked, "WARN")
+	assertAuthCookiesCleared(t, rec)
 }
 
 // A token two rotations old matches neither slot: also reuse.
@@ -377,6 +389,7 @@ func TestRefresh_TokenTwoRotationsOldIsReuse(t *testing.T) {
 		t.Error("session survived a replay of a token two rotations old")
 	}
 	logs.assertOutcome(t, eventRefresh, outcomeReuseRevoked, "WARN")
+	assertAuthCookiesCleared(t, rec)
 }
 
 func TestRefresh_SessionGone401(t *testing.T) {
@@ -392,6 +405,7 @@ func TestRefresh_SessionGone401(t *testing.T) {
 
 	assertError(t, rec, http.StatusUnauthorized, codeInvalidToken, msgInvalidToken)
 	logs.assertOutcome(t, eventRefresh, outcomeNotFound, "INFO")
+	assertAuthCookiesCleared(t, rec)
 }
 
 // A session past expires_at refuses its own current token (the CAS checks
@@ -412,6 +426,7 @@ func TestRefresh_ExpiredSessionIsNotReuse(t *testing.T) {
 		t.Error("an expired session was deleted as if its token had been stolen")
 	}
 	logs.assertOutcome(t, eventRefresh, outcomeNotFound, "INFO")
+	assertAuthCookiesCleared(t, rec)
 }
 
 func TestRefresh_RotateDBError500(t *testing.T) {
@@ -427,6 +442,7 @@ func TestRefresh_RotateDBError500(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 	logs.assertOutcome(t, eventRefresh, outcomeError, "ERROR")
+	assertAuthCookiesKept(t, rec)
 }
 
 func TestRefresh_ReadAfterMissDBError500(t *testing.T) {
@@ -442,6 +458,7 @@ func TestRefresh_ReadAfterMissDBError500(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 	logs.assertOutcome(t, eventRefresh, outcomeError, "ERROR")
+	assertAuthCookiesKept(t, rec)
 }
 
 // A failed revocation is still a 401 — the token is refused either way —
@@ -463,6 +480,7 @@ func TestRefresh_ReuseDeleteFailureStill401(t *testing.T) {
 	if len(lines) != 2 || lines[0]["outcome"] != outcomeError || lines[1]["outcome"] != outcomeReuseRevoked {
 		t.Errorf("want error then reuse_revoked, got %v", lines)
 	}
+	assertAuthCookiesCleared(t, rec)
 }
 
 // -----------------------------------------------------------------------------
@@ -552,6 +570,7 @@ func TestRefresh_LegacyTokenReplayRevokes(t *testing.T) {
 	if line["legacy"] != true {
 		t.Error("reuse line does not say the token was a legacy one")
 	}
+	assertAuthCookiesCleared(t, rec)
 }
 
 // A pre-0052 token the users row no longer holds (logged out, password
@@ -565,6 +584,7 @@ func TestRefresh_LegacyTokenUnmatched401(t *testing.T) {
 
 	assertError(t, rec, http.StatusUnauthorized, codeInvalidToken, msgInvalidToken)
 	logs.assertOutcome(t, eventRefresh, outcomeLegacyUnmatched, "INFO")
+	assertAuthCookiesCleared(t, rec)
 }
 
 func TestRefresh_LegacyAdoptionError500(t *testing.T) {
@@ -585,6 +605,7 @@ func TestRefresh_LegacyAdoptionError500(t *testing.T) {
 		t.Error("a failed adoption lost the old token")
 	}
 	logs.assertOutcome(t, eventRefresh, outcomeError, "ERROR")
+	assertAuthCookiesKept(t, rec)
 }
 
 // -----------------------------------------------------------------------------
@@ -705,4 +726,92 @@ func TestLogout_DBErrorStillClearsCookies(t *testing.T) {
 	}
 	assertAuthCookiesCleared(t, rec)
 	logs.assertOutcome(t, eventLogout, outcomeError, "ERROR")
+}
+
+// -----------------------------------------------------------------------------
+// The access token names its session
+// -----------------------------------------------------------------------------
+
+// accessSession is the session id the response's access cookie names.
+func accessSession(t *testing.T, signer *jwtx.Signer, rec *httptest.ResponseRecorder) uuid.UUID {
+	t.Helper()
+	c := getSetCookie(rec, sessionCookieName)
+	if c == nil || c.Value == "" {
+		t.Fatalf("no access cookie set; body=%s", rec.Body.String())
+	}
+	claims, err := signer.VerifyAccess(c.Value)
+	if err != nil {
+		t.Fatalf("access cookie does not verify: %v", err)
+	}
+	return claims.SessionID
+}
+
+// jwtx refuses an access token once the session it names has ended, so every
+// path that issues one must name the session the device now holds: the new
+// row on login, the rotated row on refresh, the adopted row for a pre-0052
+// token, and the same row from the grace slot.
+func TestAccessToken_NamesTheDevicesSession(t *testing.T) {
+	t.Parallel()
+
+	t.Run("login", func(t *testing.T) {
+		t.Parallel()
+		db, _ := loginDB(t)
+		h, signer, _ := newSessionHandlers(t, db)
+
+		rec := postLogin(t, h)
+
+		refresh, err := signer.VerifyRefresh(refreshCookie(t, rec))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := accessSession(t, signer, rec); got == uuid.Nil || got != refresh.SessionID {
+			t.Errorf("access token names %v, want the new session %v", got, refresh.SessionID)
+		}
+	})
+
+	t.Run("refresh", func(t *testing.T) {
+		t.Parallel()
+		db := &fakeAuthDB{}
+		h, signer, _ := newSessionHandlers(t, db)
+		cookie, sid := seedSession(t, db, signer, fixtureUser(t))
+
+		rec := postRefresh(h, cookie)
+
+		if got := accessSession(t, signer, rec); got != sid {
+			t.Errorf("access token names %v, want %v", got, sid)
+		}
+	})
+
+	t.Run("grace", func(t *testing.T) {
+		t.Parallel()
+		db := &fakeAuthDB{}
+		h, signer, _ := newSessionHandlers(t, db)
+		cookie, sid := seedSession(t, db, signer, fixtureUser(t))
+		postRefresh(h, cookie)
+
+		rec := postRefresh(h, cookie) // the losing side of a concurrent pair
+
+		if got := accessSession(t, signer, rec); got != sid {
+			t.Errorf("access token names %v, want %v", got, sid)
+		}
+	})
+
+	t.Run("legacy adoption", func(t *testing.T) {
+		t.Parallel()
+		db := &fakeAuthDB{}
+		h, signer, _ := newSessionHandlers(t, db)
+		user := fixtureUser(t)
+		legacy := legacyRefreshToken(t, user.ID)
+		db.model().legacy[user.ID] = legacy
+
+		rec := postRefresh(h, legacy)
+
+		adopted, err := signer.VerifyRefresh(refreshCookie(t, rec))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := accessSession(t, signer, rec); got == uuid.Nil || got != adopted.SessionID {
+			t.Errorf("access token names %v, want the adopted session %v", got, adopted.SessionID)
+		}
+	})
 }

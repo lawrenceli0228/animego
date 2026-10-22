@@ -443,14 +443,13 @@ type setPasswordReq struct {
 //     refresh-session columns, so the target's refresh cookie stops working.
 //  6. 200 { success: true }.
 //
-// What this does NOT do, spelled out because an admin reaching for this
-// endpoint is usually reacting to a suspected compromise: it does not end the
-// target's current session. Access tokens are stateless JWTs — one already
-// issued keeps authenticating for up to accessTTL (JWT_EXPIRES_IN, 15m by
-// default), and nothing here can recall it. The target loses access when that
-// token expires, not when this returns 200. Genuine immediate lockout would
-// need an access-token denylist or a token-version column; neither exists.
-// Do not let the response's `success: true` be read as "they are out now".
+// Changing the password also ends every one of the target's sessions (the
+// users_password_ends_sessions trigger, migration 0052), and an access token
+// names its session and is refused once that session is gone
+// (jwtx.WithSessionCheck), so the target is signed out everywhere on their
+// next request. The one exception is an access token minted before tokens
+// named their session: it is not looked up, and lasts until it expires
+// (accessTTL, 15m by default) — relevant only around that deploy.
 func (h *UserHandlers) SetUserPassword(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), userQueryTimeout)
 	defer cancel()

@@ -118,6 +118,12 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{Queries: dbgen.New(pool), pool: pool}
 }
 
+// SessionLive makes Store the jwtx.SessionChecker: an access token is only
+// as good as the session it names.
+func (s *Store) SessionLive(ctx context.Context, sessionID, userID uuid.UUID) (bool, error) {
+	return s.UserSessionLive(ctx, sessionID, userID)
+}
+
 // StartUserSession writes a login's session while holding the users row
 // FOR SHARE, and only if the password is still verifiedPassword — the hash
 // the login just checked (LockUserForNewSession explains the race this
@@ -245,7 +251,7 @@ func (h *Handlers) startSession(ctx context.Context, user dbgen.User, event stri
 	if err != nil {
 		return "", "", fmt.Errorf("sign refresh: %w", err)
 	}
-	access, err := h.signer.SignAccess(user.ID, user.Username, user.Role)
+	access, err := h.signer.SignAccess(user.ID, sid, user.Username, user.Role)
 	if err != nil {
 		return "", "", fmt.Errorf("sign access: %w", err)
 	}
@@ -319,7 +325,7 @@ func (h *Handlers) refreshSession(ctx context.Context, w http.ResponseWriter, cl
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		h.logSession(ctx, eventRefresh, outcomeNotFound, uid, sid)
-		httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidToken, msgInvalidToken))
+		h.rejectRefresh(w, codeInvalidToken, msgInvalidToken)
 	case err != nil:
 		h.failRefresh(ctx, w, sid, uid, err, "session lookup failed")
 	default:
@@ -367,7 +373,7 @@ func (h *Handlers) refreshLegacy(ctx context.Context, w http.ResponseWriter, uid
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		h.logSession(ctx, eventRefresh, outcomeLegacyUnmatched, uid, uuid.Nil)
-		httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidToken, msgInvalidToken))
+		h.rejectRefresh(w, codeInvalidToken, msgInvalidToken)
 	case err != nil:
 		h.failRefresh(ctx, w, uuid.Nil, uid, err, "session lookup failed")
 	default:
@@ -385,7 +391,7 @@ func (h *Handlers) resolveMiss(ctx context.Context, w http.ResponseWriter, sess 
 	if sess.TokenHash == presented {
 		// The current token, refused by the CAS's expiry check.
 		h.logSession(ctx, eventRefresh, outcomeNotFound, sess.UserID, sess.ID)
-		httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidToken, msgInvalidToken))
+		h.rejectRefresh(w, codeInvalidToken, msgInvalidToken)
 		return
 	}
 
@@ -397,7 +403,7 @@ func (h *Handlers) resolveMiss(ctx context.Context, w http.ResponseWriter, sess 
 		h.logSession(ctx, eventRefresh, outcomeError, sess.UserID, sess.ID, "err", err)
 	}
 	h.logSession(ctx, eventRefresh, outcomeReuseRevoked, sess.UserID, sess.ID, "legacy", legacy)
-	httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidToken, msgInvalidToken))
+	h.rejectRefresh(w, codeInvalidToken, msgInvalidToken)
 }
 
 // inGraceWindow: the presented token was this session's current one until a
@@ -435,7 +441,7 @@ func (h *Handlers) serveGrace(ctx context.Context, w http.ResponseWriter, sess d
 // answerRefresh signs the access token and writes the 200.  An empty
 // refreshToken leaves the client's refresh cookie as it is.
 func (h *Handlers) answerRefresh(ctx context.Context, w http.ResponseWriter, uid, sid uuid.UUID, username string, role *string, refreshToken, outcome string) {
-	access, err := h.signer.SignAccess(uid, username, role)
+	access, err := h.signer.SignAccess(uid, sid, username, role)
 	if err != nil {
 		h.failRefresh(ctx, w, sid, uid, err, "sign token failed")
 		return
@@ -447,6 +453,20 @@ func (h *Handlers) answerRefresh(ctx context.Context, w http.ResponseWriter, uid
 	SetAuthHintCookie(w, h.refreshTTL, h.isProd)
 	h.logSession(ctx, eventRefresh, outcome, uid, sid)
 	httpx.Data(w, http.StatusOK, RefreshData{AccessToken: access})
+}
+
+// rejectRefresh answers a refresh whose token can never succeed — a forged
+// one, or one whose session has ended, expired or been replayed — and
+// clears the cookies that carry it.  Left in place, a dead refresh
+// cookie was presented again on every page: the Navbar's probe refreshed and
+// failed, next-app's server-side refresh did the same, for as long as the
+// cookie lived (30 days).  A failure on our side (failRefresh, 500) is not a
+// verdict on the token and leaves the cookies alone.
+func (h *Handlers) rejectRefresh(w http.ResponseWriter, code, msg string) {
+	ClearRefreshCookie(w, h.isProd)
+	ClearSessionCookie(w, h.isProd)
+	ClearAuthHintCookie(w, h.isProd)
+	httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, code, msg))
 }
 
 func (h *Handlers) failRefresh(ctx context.Context, w http.ResponseWriter, sid, uid uuid.UUID, err error, msg string) {

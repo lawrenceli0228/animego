@@ -312,7 +312,7 @@ func withUserClaims(t *testing.T, ctx context.Context, userID uuid.UUID, usernam
 	t.Helper()
 	signer, err := jwtx.NewSigner("test-access-secret", "test-refresh-secret", 15*time.Minute, time.Hour)
 	require.NoError(t, err, "NewSigner")
-	tok, err := signer.SignAccess(userID, username, nil)
+	tok, err := signer.SignAccess(userID, uuid.New(), username, nil)
 	require.NoError(t, err, "SignAccess")
 
 	var captured context.Context

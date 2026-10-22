@@ -21,6 +21,9 @@ package jwtx
 // frontend i18n layer maps these to localized strings):
 //   - No token at all → 401 { error: { code: NO_TOKEN, message: Authentication required } }
 //   - Token present but invalid → 401 { error: { code: INVALID_TOKEN, message: Invalid token } }
+//   - Token whose session has ended → the same INVALID_TOKEN 401 (session.go)
+//   - Session lookup failed → 500 { error: { code: SERVER_ERROR, message: internal error } },
+//     never a 401: a database hiccup is not a reason to sign anyone out
 //
 // We deliberately collapse expired / malformed / wrong-signature into a
 // single INVALID_TOKEN to avoid leaking the specific failure reason.
@@ -49,9 +52,11 @@ const SessionCookieName = "session"
 const (
 	codeNoToken      = "NO_TOKEN"
 	codeInvalidToken = "INVALID_TOKEN"
+	codeServerError  = "SERVER_ERROR"
 
 	msgNoToken      = "Authentication required"
 	msgInvalidToken = "Invalid token"
+	msgServerError  = "internal error" // httpx's own 500 message
 )
 
 // Pre-marshaled 401 bodies.  json.Marshal is deterministic for these
@@ -61,6 +66,7 @@ const (
 var (
 	noTokenBody      = mustMarshalEnvelope(codeNoToken, msgNoToken)
 	invalidTokenBody = mustMarshalEnvelope(codeInvalidToken, msgInvalidToken)
+	serverErrorBody  = mustMarshalEnvelope(codeServerError, msgServerError)
 )
 
 func mustMarshalEnvelope(code, message string) []byte {
@@ -99,6 +105,14 @@ func RequireAuth(s *Signer) func(http.Handler) http.Handler {
 			claims, err := s.VerifyAccess(token)
 			if err != nil {
 				writeUnauthorized(w, invalidTokenBody)
+				return
+			}
+			switch s.checkSession(r.Context(), claims) {
+			case sessionEnded:
+				writeUnauthorized(w, invalidTokenBody)
+				return
+			case sessionUnknown:
+				writeEnvelope(w, http.StatusInternalServerError, serverErrorBody)
 				return
 			}
 			ctx := withClaims(r.Context(), claims)
@@ -144,9 +158,13 @@ func extractToken(r *http.Request) (string, bool) {
 // Content-Type matches internal/httpx exactly so the response is
 // indistinguishable from a httpx.Fail call.
 func writeUnauthorized(w http.ResponseWriter, body []byte) {
+	writeEnvelope(w, http.StatusUnauthorized, body)
+}
+
+func writeEnvelope(w http.ResponseWriter, status int, body []byte) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusUnauthorized)
+	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
-		slog.Warn("jwtx: write 401 envelope", "err", err)
+		slog.Warn("jwtx: write error envelope", "status", status, "err", err)
 	}
 }

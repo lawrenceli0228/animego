@@ -279,3 +279,52 @@ describe('danmakuHandler', () => {
     })
   })
 })
+
+describe('danmaku:send and the session behind the token', () => {
+  const futureDate = new Date(Date.now() + 3600_000)
+  let io, socket
+
+  beforeEach(() => {
+    pool.query.mockReset()
+    registerDanmakuHandlers._clearRateLimitState()
+    io = createMockIo()
+    socket = createMockSocket({
+      userId: 'u-session',
+      sid: 's-1',
+      username: 'alice',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    })
+    socket.disconnect = jest.fn()
+    registerDanmakuHandlers(io, socket)
+  })
+
+  // A socket outlives the session it was opened under: the device can be
+  // signed out from another device while connected.
+  it('a device whose session has ended is disconnected and writes nothing', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ live: false }] })
+
+    await socket._trigger('danmaku:send', { anilistId: 101, episode: 1, content: 'Hello' })
+
+    expect(pool.query).toHaveBeenCalledTimes(1)
+    expect(pool.query.mock.calls[0][0]).toMatch(/FROM user_sessions/)
+    expect(socket.emit).toHaveBeenCalledWith('auth:expired')
+    expect(socket.disconnect).toHaveBeenCalledWith(true)
+    expect(io._emitFn).not.toHaveBeenCalled()
+  })
+
+  it('a live session sends as before', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ live: true }] })
+      .mockResolvedValueOnce({ rows: [{ live_ends_at: futureDate }] })
+      .mockResolvedValueOnce({ rows: [{ id: '7', created_at: new Date() }] })
+
+    await socket._trigger('danmaku:send', { anilistId: 101, episode: 1, content: 'Hello' })
+
+    expect(pool.query).toHaveBeenCalledTimes(3)
+    expect(pool.query.mock.calls[0][1]).toEqual(['s-1', 'u-session'])
+    expectWindowUpsert(pool.query.mock.calls[1], 101, 1)
+    expect(socket.disconnect).not.toHaveBeenCalled()
+    expect(io._emitFn).toHaveBeenCalledWith('danmaku:new', expect.objectContaining({ _id: '7' }))
+  })
+})
+
