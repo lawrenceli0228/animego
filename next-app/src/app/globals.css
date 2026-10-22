@@ -86,8 +86,9 @@
   --score-scrim-bg: rgba(0, 0, 0, 0.75);
 
   /* ── Typography ─────────────────────────────────────────────────────── */
-  /* Sora, DM Sans and JetBrains Mono are all loaded `subsets: ["latin"]`
-   * (layout.tsx), so none of them contains a single CJK glyph. Every Chinese
+  /* Sora, DM Sans and JetBrains Mono carry Latin (and for the mono, Greek
+   * and Cyrillic) subsets only (fonts.css), so none of them contains a
+   * single CJK glyph. Every Chinese
    * character on this site is therefore rendered by whatever the next entry
    * in the stack resolves to — and until now that entry was `system-ui`,
    * which is PingFang on macOS, Segoe UI on Windows (whose CJK coverage is
