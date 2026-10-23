@@ -1366,6 +1366,12 @@ type Querier interface {
 	// watching-only is preserved (the Mongo agg counts everything; the
 	// Postgres replacement scopes to status='watching' to match the
 	// frontend's "X watchers" semantic).
+	//
+	// Adult rows are dropped here, as in every other listing: a show gets in
+	// by being subscribed to, which never passes the isAdult:false filter on
+	// the AniList list queries.  The Hentai genre is checked too, as the
+	// seasonal listing does.  The filter sits before the LIMIT so a dropped
+	// row does not take a place.
 	GetTrendingWithCounts(ctx context.Context, limit int32) ([]GetTrendingWithCountsRow, error)
 	// Login lookup.  Returns the row including the password hash so the
 	// handler can bcrypt.CompareHashAndPassword.  pgx.ErrNoRows → 401
