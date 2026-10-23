@@ -3,6 +3,7 @@ package anime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -217,6 +218,58 @@ func TestListingsExcludeAdultRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, top, 1)
 	assert.Equal(t, int32(1), top[0].AnilistID)
+}
+
+// TestTrendingExcludesAdultRows — 大家都在追 is the fifth such listing.  A
+// show reaches it by being subscribed to, which the adult filter on the
+// AniList list queries never sees, so the trending query has to drop it
+// itself: by is_adult, and by the Hentai genre the seasonal listing also
+// checks.  The dropped rows must not take places either — with a limit of
+// two, the two watched shows still both come back.
+func TestTrendingExcludesAdultRows(t *testing.T) {
+	ctx := context.Background()
+	uri := testutil.SetupPG(t)
+	pool := testutil.NewWebPool(t, ctx, uri)
+	q := dbgen.New(pool)
+
+	for _, r := range []struct {
+		id    int32
+		adult bool
+	}{{1, false}, {2, true}, {3, false}, {4, false}} {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO anime_cache (anilist_id, title_romaji, is_adult)
+			VALUES ($1, 'row', $2)`, r.id, r.adult)
+		require.NoError(t, err)
+	}
+	_, err := pool.Exec(ctx, `INSERT INTO anime_genres (anime_id, genre) VALUES (3, 'Hentai')`)
+	require.NoError(t, err)
+
+	// Watchers: 2 → 3, 3 → 3, 1 → 2, 4 → 1.  The two adult rows lead.
+	watching := map[int32]int{2: 3, 3: 3, 1: 2, 4: 1}
+	for u := 0; u < 3; u++ {
+		var uid pgtype.UUID
+		require.NoError(t, pool.QueryRow(ctx, `
+			INSERT INTO users (username, email, password)
+			VALUES ($1, $2, 'bcrypt-placeholder') RETURNING id`,
+			fmt.Sprintf("watcher%d", u), fmt.Sprintf("watcher%d@example.com", u)).Scan(&uid))
+		for id, n := range watching {
+			if u >= n {
+				continue
+			}
+			_, err := pool.Exec(ctx, `
+				INSERT INTO subscriptions (user_id, anilist_id, status)
+				VALUES ($1, $2, 'watching')`, uid, id)
+			require.NoError(t, err)
+		}
+	}
+
+	rows, err := q.GetTrendingWithCounts(ctx, 2)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, int32(1), rows[0].AnilistID)
+	assert.Equal(t, int64(2), rows[0].WatcherCount)
+	assert.Equal(t, int32(4), rows[1].AnilistID)
+	assert.Equal(t, int64(1), rows[1].WatcherCount)
 }
 
 // TestCharacterAndStaffIDs_PG — the 0037 columns round-trip through the

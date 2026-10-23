@@ -244,6 +244,12 @@ WHERE
 -- watching-only is preserved (the Mongo agg counts everything; the
 -- Postgres replacement scopes to status='watching' to match the
 -- frontend's "X watchers" semantic).
+--
+-- Adult rows are dropped here, as in every other listing: a show gets in
+-- by being subscribed to, which never passes the isAdult:false filter on
+-- the AniList list queries.  The Hentai genre is checked too, as the
+-- seasonal listing does.  The filter sits before the LIMIT so a dropped
+-- row does not take a place.
 SELECT
     a.anilist_id,
     a.title_romaji,
@@ -271,9 +277,13 @@ JOIN (
     FROM subscriptions
     WHERE status = 'watching'
     GROUP BY anilist_id
-    ORDER BY count(*) DESC
-    LIMIT 20
 ) s ON s.anilist_id = a.anilist_id
+WHERE NOT a.is_adult
+  AND NOT EXISTS (
+      SELECT 1 FROM anime_genres g
+      WHERE g.anime_id = a.anilist_id
+        AND g.genre = 'Hentai'
+  )
 ORDER BY s.watcher_count DESC
 LIMIT $1;
 
