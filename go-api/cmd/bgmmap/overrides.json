@@ -5,6 +5,21 @@
     "note": "Xiao Qian (1997 film). Fribb links AniList 315 to MAL 60451, the 2024 re-release (bgm 448690); AniList itself lists idMal 315, and the AniDB id reaches 15174."
   },
   {
+    "anilist_id": 552,
+    "bgm_id": 3128,
+    "note": "Digimon Adventure, the TV series (AniList TV 1999-03, 54 eps; bgm 3128 TV 1999-03-07, 54 eps). BangumiExtLinker moved bgm 3128's mal_id from 552 to 2961, so nothing claims MAL 552 any more and the join falls back to AniDB 234 -- which bgm 3133, the one-episode film, claims. bgm 3128 and 3133 have their MAL and AniDB links crossed upstream; see the note on AniList 2961."
+  },
+  {
+    "anilist_id": 2961,
+    "bgm_id": 3133,
+    "note": "Digimon Adventure, the 1999 film (AniList MOVIE 1999-03, 1 ep; bgm 3133 film 1999-03-06, 1 ep). The other half of the crossed pair in the note on AniList 552: both bgm 3128 and bgm 3133 now claim MAL 2961, and the AniDB tiebreak picks 3128, the 54-episode TV series."
+  },
+  {
+    "anilist_id": 101966,
+    "bgm_id": 234449,
+    "note": "Wo Jia Da Shixiong Naozi You Keng (AniList ONA 2018-04, 26 eps; bgm 234449 WEB 2018-04-04, 26 eps). Fribb maps this id to MAL 37293, claimed only by bgm 555631 -- a near-empty duplicate subject with no date, no name_cn and no episode count. The real subject carries MAL 37177."
+  },
+  {
     "anilist_id": 139986,
     "bgm_id": 360077,
     "note": "Yao Shen Ji season 5, aired 2021-10-30 like bgm 360077. BangumiExtLinker puts MAL 50274 on season 6 (bgm 405302); the AniDB id reaches season 5."
