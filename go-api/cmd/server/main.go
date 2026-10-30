@@ -691,7 +691,7 @@ func main() {
 	adminUserHandlers := admin.NewUserHandlers(admin.NewUserStore(pool), enqueuer)
 	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
 	adminHantHandlers := admin.NewHantHandlers(q, enqueuer)
-	adminActivityHandlers := admin.NewActivityHandlers(q, slog.Default())
+	adminActivityHandlers := admin.NewActivityHandlers(pool)
 
 	// Presence recording (migration 0025).  The recorder buffers in memory and
 	// flushes on a ticker; nothing it does touches the database on a request
