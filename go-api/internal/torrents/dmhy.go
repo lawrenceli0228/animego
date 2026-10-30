@@ -32,8 +32,8 @@
 // Mapping:
 //   - title  → item.title
 //   - magnet → item.enclosure.url (must start with "magnet:", else drop)
-//   - size   → FormatBytes(item.enclosure.length); dmhy often sends
-//     length="0" → FormatBytes returns "" (no size), which is fine.
+//   - size   → FormatBinaryBytes(item.enclosure.length); dmhy often
+//     sends length="0" → FormatBinaryBytes returns "" (no size).
 //   - fansub → ParseFansub(title)
 //   - date   → item.pubDate
 //   - source → SourceDmhy
@@ -109,9 +109,9 @@ func dmhyMagnet(it rssItem) string {
 }
 
 // dmhySize formats the enclosure @length byte count.  dmhy commonly
-// sends length="0", in which case FormatBytes returns "" — an empty
-// Size string, the same "no size available" signal the other fetchers
-// produce.
+// sends length="0", in which case FormatBinaryBytes returns "" — an
+// empty Size string, the same "no size available" signal the other
+// fetchers produce.
 func dmhySize(it rssItem) string {
-	return FormatBytes(it.Enclosure.Length)
+	return FormatBinaryBytes(it.Enclosure.Length)
 }

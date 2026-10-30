@@ -44,7 +44,7 @@
 // Mapping:
 //   - title  → item.title
 //   - magnet → buildNyaaMagnet(hashFrom(enclosure.url|link), title, link)
-//   - size   → FormatBytes(torrent.contentLength)  (bytes → "X.X GB")
+//   - size   → FormatBinaryBytes(torrent.contentLength)  (bytes → "X.X GiB")
 //   - fansub → ParseFansub(title)
 //   - date   → item.pubDate (channel-level; falls back to namespaced
 //     torrent pubDate when the channel one is absent)
@@ -300,7 +300,7 @@ func mapMikanItems(items []mikanItem) []TorrentItem {
 		out = append(out, TorrentItem{
 			Title:  it.Title,
 			Magnet: magnet,
-			Size:   FormatBytes(it.Torrent.ContentLength),
+			Size:   FormatBinaryBytes(it.Torrent.ContentLength),
 			Fansub: ParseFansub(it.Title),
 			Date:   mikanDate(it),
 			Source: SourceMikan,

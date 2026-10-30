@@ -100,7 +100,7 @@ func TestFetchAnimeTosho_HappyPath(t *testing.T) {
 	assert.Equal(t, "[SubsPlease] Frieren - 01 (1080p) [ABCD].mkv", it.Title)
 	assert.Equal(t, "magnet:?xt=urn:btih:AAAA1111&dn=Frieren&tr=udp://tracker.example:80", it.Magnet)
 	assert.Equal(t, SourceTosho, it.Source)
-	assert.Equal(t, "1.5 GB", it.Size, "total_size bytes → FormatBytes")
+	assert.Equal(t, "1.4 GiB", it.Size, "total_size bytes → FormatBinaryBytes (1500000000 / 1024^3)")
 	assert.Equal(t, "aaaa1111", it.Infohash, "info_hash normalised to lowercase")
 	require.NotNil(t, it.Seeders, "tosho reports seeders")
 	assert.Equal(t, 42, *it.Seeders)

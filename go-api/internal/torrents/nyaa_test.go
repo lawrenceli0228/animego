@@ -4,7 +4,7 @@
 //   - happy path: valid RSS with custom nyaa: namespace → parsed items
 //   - magnet construction includes hash + url-encoded title + 2 trackers
 //   - title with special chars (#, &, spaces, CJK) URL-encoded in &dn=
-//   - size pass-through (no FormatBytes — nyaa returns "1.5 GiB" already)
+//   - size pass-through (no formatting — nyaa returns "1.5 GiB" already)
 //   - empty infoHash + non-magnet link → item dropped
 //   - error paths: non-2xx, transport error, malformed XML
 //   - request includes the four expected query params
@@ -72,7 +72,7 @@ func TestFetchNyaa_HappyPath(t *testing.T) {
 	it := items[0]
 	assert.Equal(t, "[SomeGroup] Anime - 01", it.Title)
 	assert.Equal(t, SourceNyaa, it.Source)
-	assert.Equal(t, "1.5 GiB", it.Size, "Nyaa size is passed through verbatim — no FormatBytes")
+	assert.Equal(t, "1.5 GiB", it.Size, "Nyaa size is passed through verbatim — no reformatting")
 	require.NotNil(t, it.Fansub)
 	assert.Equal(t, "SomeGroup", *it.Fansub)
 

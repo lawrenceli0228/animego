@@ -37,7 +37,7 @@
 //     without a "magnet:" scheme are dropped, same filter as every source)
 //   - infohash → info_hash
 //   - seeders  → &seeders (the one source that populates this)
-//   - size     → FormatBytes(total_size)   (bytes → "X.X GB")
+//   - size     → FormatBinaryBytes(total_size)   (bytes → "X.X GiB")
 //   - date     → RFC3339(timestamp)         (so rank.go's RFC3339 layout
 //     parses it for date ordering; 0 / negative → nil)
 //   - source   → SourceTosho
@@ -249,7 +249,7 @@ func mapToshoEntries(entries []toshoEntry) []TorrentItem {
 		out = append(out, TorrentItem{
 			Title:    e.Title,
 			Magnet:   e.MagnetURI,
-			Size:     FormatBytes(strconv.FormatInt(e.TotalSize, 10)),
+			Size:     FormatBinaryBytes(strconv.FormatInt(e.TotalSize, 10)),
 			Date:     toshoDate(e.Timestamp),
 			Source:   SourceTosho,
 			Seeders:  copySeeders(e.Seeders),

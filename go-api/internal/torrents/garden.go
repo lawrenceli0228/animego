@@ -205,7 +205,7 @@ func mapGardenResources(rs []gardenResource) []TorrentItem {
 			// "595.6 GB".  Checked 2026-10-31 against Nyaa by infohash:
 			// garden 595591168 is Nyaa's "568.0 MiB", garden 28239409152
 			// is Nyaa's "26.3 GiB" (TestMapGardenResources_SizeIsBytes).
-			Size:     FormatBytes(string(r.Size)),
+			Size:     FormatBinaryBytes(string(r.Size)),
 			Fansub:   fansub,
 			Date:     date,
 			Source:   SourceGarden,

@@ -7,7 +7,7 @@
 //   - transport / network error → empty slice + error
 //   - fansub fallback to ParseFansub when r.fansub is missing
 //   - non-magnet protocol items dropped from result
-//   - FormatBytes / FormatKb / ParseFansub helpers (bundled here per
+//   - FormatBinaryBytes / ParseFansub helpers (bundled here per
 //     task brief — separate format_test.go would also be fine; keeping
 //     them together so the test file is self-contained)
 package torrents
@@ -122,14 +122,14 @@ func TestFetchGarden_HappyPath(t *testing.T) {
 	assert.Equal(t, "SubsPlease", *items[0].Fansub)
 	require.NotNil(t, items[0].Provider)
 	assert.Equal(t, "dmhy", *items[0].Provider)
-	assert.Equal(t, "3.5 GB", items[0].Size) // 3460300800 bytes → 3.46e9 → 3.5 GB
+	assert.Equal(t, "3.2 GiB", items[0].Size) // 3460300800 / 1024^3 = 3.22
 	require.NotNil(t, items[0].Date)
 	assert.Equal(t, "2026-01-01T00:00:00Z", *items[0].Date)
 
 	// Second item: fansub missing in upstream → falls back to bracket parse.
 	require.NotNil(t, items[1].Fansub)
 	assert.Equal(t, "喵萌奶茶屋", *items[1].Fansub)
-	assert.Equal(t, "40 MB", items[1].Size) // 40448000 bytes → 40.448e6 → 40 MB
+	assert.Equal(t, "38.6 MiB", items[1].Size) // 40448000 / 1024^2 = 38.57
 
 	assert.Equal(t, 0, log.count(), "no warnings on happy path with results")
 }
@@ -319,7 +319,8 @@ func TestFetchGarden_EmptyFansubObjectFallsBackToBracket(t *testing.T) {
 // api.animes.garden/resources?search=Sousou+no+Frieren+2nd+Season and from
 // Nyaa's RSS for the same search.  Garden's raw number is the byte count —
 // Nyaa's GiB/MiB figure times 1024^3 / 1024^2 — so formatting it as KB
-// printed a 568 MiB episode as "595.6 GB".
+// printed a 568 MiB episode as "595.6 GB".  Formatted in binary units, the
+// garden row now reads exactly like Nyaa's row for the same infohash.
 func TestMapGardenResources_SizeIsBytes(t *testing.T) {
 	t.Parallel()
 
@@ -327,11 +328,10 @@ func TestMapGardenResources_SizeIsBytes(t *testing.T) {
 		name    string
 		rawSize string // garden's size field, verbatim
 		nyaa    string // Nyaa's <nyaa:size> for the same infohash
-		want    string
 	}{
-		{"BDRip batch", "28239409152", "26.3 GiB", "28.2 GB"},
-		{"1080p HEVC episode", "595591168", "568.0 MiB", "596 MB"},
-		{"1080p HEVC episode, other group", "673710080", "642.5 MiB", "674 MB"},
+		{"BDRip batch", "28239409152", "26.3 GiB"},
+		{"1080p HEVC episode", "595591168", "568.0 MiB"},
+		{"1080p HEVC episode, other group", "673710080", "642.5 MiB"},
 	}
 	for _, tc := range tests {
 		tc := tc
@@ -343,7 +343,7 @@ func TestMapGardenResources_SizeIsBytes(t *testing.T) {
 				Size:   []byte(tc.rawSize),
 			}})
 			require.Len(t, items, 1)
-			assert.Equal(t, tc.want, items[0].Size, "garden %s bytes is Nyaa's %s", tc.rawSize, tc.nyaa)
+			assert.Equal(t, tc.nyaa, items[0].Size, "garden %s bytes must read as Nyaa's %s", tc.rawSize, tc.nyaa)
 		})
 	}
 }
@@ -352,7 +352,7 @@ func TestMapGardenResources_SizeIsBytes(t *testing.T) {
 // Format helpers + ParseFansub — bundled here per task brief
 // ---------------------------------------------------------------------------
 
-func TestFormatBytes(t *testing.T) {
+func TestFormatBinaryBytes(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -364,45 +364,22 @@ func TestFormatBytes(t *testing.T) {
 		{"zero", "0", ""},
 		{"negative", "-100", ""},
 		{"non-numeric", "abc", ""},
-		{"small KB", "5000", "5 KB"},
-		{"500 bytes → 1 KB rounded", "500", "1 KB"},
-		{"exactly 1MB", "1000000", "1 MB"},
-		{"1.5 MB → 2 MB rounded", "1500000", "2 MB"}, // toFixed(0) rounds half-to-even-ish; JS Math.round + toFixed(0)
-		{"1 GB", "1000000000", "1.0 GB"},
-		{"1.5 GB", "1500000000", "1.5 GB"},
-		{"1234abc parses as 1234", "1234abc", "1 KB"},
+		{"exactly 1 KiB", "1024", "1.0 KiB"},
+		{"KiB with a decimal", "5000", "4.9 KiB"},
+		{"just under 1 MiB stays KiB", "1048575", "1024.0 KiB"},
+		{"exactly 1 MiB", "1048576", "1.0 MiB"},
+		{"Nyaa 568.0 MiB", "595591168", "568.0 MiB"},
+		{"exactly 1 GiB", "1073741824", "1.0 GiB"},
+		{"Nyaa 26.3 GiB", "28239409152", "26.3 GiB"},
+		{"exactly 1 TiB", "1099511627776", "1.0 TiB"},
+		{"TiB is the last unit", "1125899906842624", "1024.0 TiB"},
+		{"1234567abc parses as 1234567", "1234567abc", "1.2 MiB"},
 	}
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.want, FormatBytes(tc.in))
-		})
-	}
-}
-
-func TestFormatKb(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"empty", "", ""},
-		{"zero", "0", ""},
-		{"negative", "-100", ""},
-		{"500 raw KB", "500", "500 KB"},
-		{"exactly 1000 KB → 1 MB", "1000", "1 MB"},
-		{"40448 KB → 40 MB (AOT clip case)", "40448", "40 MB"},
-		{"3460300 KB → 3.5 GB (AOT movie case)", "3460300", "3.5 GB"},
-		{"1000000 KB → 1.0 GB", "1000000", "1.0 GB"},
-	}
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, FormatKb(tc.in))
+			assert.Equal(t, tc.want, FormatBinaryBytes(tc.in))
 		})
 	}
 }

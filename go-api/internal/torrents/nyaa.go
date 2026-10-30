@@ -27,8 +27,9 @@
 //	  &tr=http%3A%2F%2Fnyaa.tracker.wf%3A7777%2Fannounce
 //	  &tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce
 //
-// Size is the upstream string as-is (no FormatBytes — Nyaa already
-// gives human-readable "1.5 GiB").  Source = SourceNyaa.
+// Size is the upstream string as-is (Nyaa already gives human-readable
+// "1.5 GiB"; FormatBinaryBytes copies that layout for the byte-count
+// sources).  Source = SourceNyaa.
 package torrents
 
 import (
@@ -175,7 +176,8 @@ func mapNyaaItems(items []nyaaItem) []TorrentItem {
 			Title:  it.Title,
 			Magnet: magnet,
 			// Nyaa's size is already a human-readable string ("1.5
-			// GiB"); we pass it through unchanged to match Express.
+			// GiB"); it is passed through unchanged, and the byte-count
+			// sources format theirs to match (FormatBinaryBytes).
 			Size:   it.Size,
 			Fansub: ParseFansub(it.Title),
 			Date:   stringPtr(it.PubDate),

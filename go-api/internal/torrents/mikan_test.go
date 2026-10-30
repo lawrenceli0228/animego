@@ -4,7 +4,7 @@
 //   - happy path: .torrent enclosure URL → 40-hex infohash → magnet via
 //     buildNyaaMagnet (hash + url-encoded title + both nyaa trackers)
 //   - size from the namespaced <torrent><contentLength> (bytes →
-//     FormatBytes), NOT the enclosure @length (which Mikan sends as 0)
+//     FormatBinaryBytes), NOT the enclosure @length (which Mikan sends as 0)
 //   - infohash fallback: when the enclosure URL lacks a hash, recover it
 //     from the episode <link>
 //   - no hash anywhere → item dropped (buildNyaaMagnet returns the
@@ -102,7 +102,7 @@ func TestFetchMikan_HappyPath(t *testing.T) {
 
 	// Size comes from the namespaced contentLength (bytes), not the
 	// enclosure length="0".
-	assert.Equal(t, "1.5 GB", it.Size, "size must come from <torrent><contentLength>, not enclosure length=0")
+	assert.Equal(t, "1.4 GiB", it.Size, "size must come from <torrent><contentLength>, not enclosure length=0")
 
 	// Magnet must be synthesised via buildNyaaMagnet: hash + url-encoded
 	// title + BOTH nyaa trackers.
@@ -153,7 +153,7 @@ func TestFetchMikan_InfoHashFallbackToLink(t *testing.T) {
 	require.Len(t, items, 1)
 	assert.True(t, strings.HasPrefix(items[0].Magnet, "magnet:?xt=urn:btih:"+mikanHashB),
 		"infohash must be recovered from <link> when the enclosure URL has none")
-	assert.Equal(t, "800 MB", items[0].Size)
+	assert.Equal(t, "762.9 MiB", items[0].Size) // 800000000 / 1024^2
 }
 
 // ---------------------------------------------------------------------------
