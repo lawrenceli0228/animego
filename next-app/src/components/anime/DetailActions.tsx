@@ -6,32 +6,32 @@
 //      counter that used to live here moved into the episode grid itself,
 //      which now records watched episodes one by one — see EpisodesGrid.tsx.
 //   2. ShareButton         — Web Share API / clipboard fallback
-//   3. MagnetButton        — opens TorrentModal (always; torrent search is
-//      title-based, needs no episode count)
+//   3. MagnetButton        — opens the magnet panel (always; torrent search
+//      is title-based, needs no episode count)
 //   4. PlayButton          — explains the local-file flow, then hands off to
-//      torrent search or /library
-//   5. TorrentModal        — rendered when state.torrentOpen is true
+//      the magnet panel or /library
+//   5. MagnetPanel         — rendered while open, in the page's hue
 //
 // Labels arrive flat from page.tsx and we shape them per child here so
 // each child component stays decoupled from the parent dict layout.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import SubscriptionButton from "./SubscriptionButton";
 import ShareButton from "./ShareButton";
 import MagnetButton from "./MagnetButton";
 import PlayButton from "./PlayButton";
 import TrailerPreview, { type TrailerPreviewLabels } from "./TrailerPreview";
-import type { Lang } from "@/lib/i18n";
+import { parseHue } from "@/lib/magnet/titles";
 import styles from "./DetailActions.module.css";
 
-const TorrentModal = dynamic(() => import("./TorrentModal"), {
+const MagnetPanel = dynamic(() => import("./magnet/MagnetPanel"), {
   ssr: false,
 });
 
 interface DetailActionsProps {
   anilistId: number;
-  /** AniList's count. The torrent modal's, and nothing inferred. */
+  /** AniList's count. The magnet panel's, and nothing inferred. */
   episodes: number | null;
   /**
    * The total the episode grid draws (`gridTotal`), for the subscription
@@ -45,7 +45,6 @@ interface DetailActionsProps {
   titleNative: string | null;
   coverImageUrl: string | null;
   shareTitle: string;
-  lang: Lang;
   trailerId: string | null;
   trailerLabels: TrailerPreviewLabels;
   labels: {
@@ -63,20 +62,8 @@ interface DetailActionsProps {
     share: string;
     shareCopied: string;
     shareCopyFailed: string;
-    // MagnetButton + TorrentModal
+    // MagnetButton (the panel reads its own copy from the client dictionary)
     torrents: string;
-    torrentsTitle: string;
-    torrentsSearchBtn: string;
-    torrentsPlaceholder: string;
-    torrentsGroupAll: string;
-    torrentsEpAll: string;
-    torrentsLoading: string;
-    torrentsNoResults: string;
-    torrentsClose: string;
-    torrentsCopy: string;
-    torrentsCopied: string;
-    torrentsOpenMagnet: string;
-    torrentsSeeders: string;
     // PlayButton
     play: string;
     playAria: string;
@@ -93,16 +80,24 @@ export default function DetailActions({
   titleNative,
   coverImageUrl,
   shareTitle,
-  lang,
   trailerId,
   trailerLabels,
   labels,
 }: DetailActionsProps) {
-  const [torrentOpen, setTorrentOpen] = useState(false);
+  // The panel is portaled out of the page's `.poster-scope`, so it cannot
+  // inherit the hue: it is read here, off the action row, at the moment of
+  // opening — the colour the reader is looking at, sampled cover included.
+  const [panel, setPanel] = useState<{ hue: number | null } | null>(null);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const magnetRef = useRef<HTMLButtonElement | null>(null);
+  const openPanel = () => {
+    const row = rowRef.current;
+    setPanel({ hue: row ? parseHue(getComputedStyle(row).getPropertyValue("--poster-hue")) : null });
+  };
 
   return (
     <>
-      <div className={styles.row}>
+      <div ref={rowRef} className={styles.row}>
         {/* Compact layouts do not render the cinematic card, so the trailer
             becomes the first stable action. Keep it before the auth-dependent
             subscription control in both DOM and visual order: a subscribed
@@ -144,19 +139,16 @@ export default function DetailActions({
             needed) and the player selects episodes itself. Gating these on
             AniList's `episodes` total hid them for every currently-airing show,
             where AniList returns episodes=null until the run finishes. */}
-        <MagnetButton
-          onOpen={() => setTorrentOpen(true)}
-          label={labels.torrents}
-        />
+        <MagnetButton ref={magnetRef} onOpen={openPanel} label={labels.torrents} />
         <PlayButton
           ariaLabel={labels.playAria}
-          onOpenDownloads={() => setTorrentOpen(true)}
+          onOpenDownloads={openPanel}
         >
           {labels.play}
         </PlayButton>
       </div>
-      {torrentOpen && (
-        <TorrentModal
+      {panel ? (
+        <MagnetPanel
           anime={{
             anilistId,
             episodes,
@@ -166,24 +158,12 @@ export default function DetailActions({
             titleNative,
             coverImageUrl,
           }}
-          labels={{
-            title: labels.torrentsTitle,
-            searchBtn: labels.torrentsSearchBtn,
-            placeholder: labels.torrentsPlaceholder,
-            groupAll: labels.torrentsGroupAll,
-            epAll: labels.torrentsEpAll,
-            loading: labels.torrentsLoading,
-            noResults: labels.torrentsNoResults,
-            close: labels.torrentsClose,
-            copy: labels.torrentsCopy,
-            copied: labels.torrentsCopied,
-            openMagnet: labels.torrentsOpenMagnet,
-            seeders: labels.torrentsSeeders,
-          }}
-          onClose={() => setTorrentOpen(false)}
-          lang={lang}
+          heading={shareTitle}
+          hue={panel.hue}
+          onClose={() => setPanel(null)}
+          returnFocusRef={magnetRef}
         />
-      )}
+      ) : null}
     </>
   );
 }

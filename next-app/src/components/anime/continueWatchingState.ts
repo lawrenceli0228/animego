@@ -1,6 +1,6 @@
 // Pure logic behind ContinueWatching.tsx, split out so bun:test can reach it
 // without rendering the RSC (next-app tests lib-style modules, not JSX —
-// same split as torrentModalLogic.ts next door).
+// same split as episodeGridSkeleton.ts next door).
 
 import type { SubscriptionChangeDetail } from "@/lib/subscriptionBus";
 import type { WatchingItem } from "@/lib/types";

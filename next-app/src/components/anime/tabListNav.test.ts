@@ -5,7 +5,7 @@ import { isTabListKey, nextTabIndex } from "./tabListNav";
 // seven tab stops, no relationship between them. This is the arithmetic that
 // replaced that, and it is tested here rather than through the component
 // because the repo has no DOM testing library — the same reason
-// episodeGridSkeleton and torrentModalLogic are their own modules.
+// episodeGridSkeleton and lib/magnet are their own modules.
 
 const COUNT = 7; // a week
 

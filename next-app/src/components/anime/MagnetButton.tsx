@@ -1,6 +1,6 @@
 "use client";
 
-// Outline button that opens the TorrentModal. Pulled out of
+// Outline button that opens the magnet panel. Pulled out of
 // DetailActions so the modal trigger has its own hover state without
 // re-rendering the rest of the row.
 //
@@ -9,16 +9,19 @@
 // components/ui/Button. Identical to what ShareButton held, character for
 // character, which is why both moved at once.
 
+import type { Ref } from "react";
 import Button from "@/components/ui/Button";
 
 interface MagnetButtonProps {
   onOpen: () => void;
   label: string;
+  /** Where the panel returns focus when it closes (React 19 passes `ref` as a prop). */
+  ref?: Ref<HTMLButtonElement>;
 }
 
-export default function MagnetButton({ onOpen, label }: MagnetButtonProps) {
+export default function MagnetButton({ onOpen, label, ref }: MagnetButtonProps) {
   return (
-    <Button variant="outline" onClick={onOpen}>
+    <Button ref={ref} variant="outline" onClick={onOpen}>
       {label}
     </Button>
   );

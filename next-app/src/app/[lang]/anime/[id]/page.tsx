@@ -2,7 +2,7 @@
 //
 // Design notes (vs legacy AnimeDetailPage.jsx):
 //   - SEO-critical surfaces only (hero + relations + characters + staff +
-//     recommendations). Subscription / Watchers / EpisodeList / TorrentModal
+//     recommendations). Subscription / Watchers / EpisodeList / MagnetPanel
 //     / PlayButton are interactive and ride client routes in Phase 6.
 //   - JSON-LD TVSeries schema injected for Google Rich Results
 //     (plan Phase 5 acceptance gate).
