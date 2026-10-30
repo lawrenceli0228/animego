@@ -6,7 +6,7 @@
  * It exists because the drift block has two cards whose whole job is to be
  * read as a verdict rather than a measurement: a non-zero "synopses behind"
  * means rows are currently serving Simplified prose to Traditional readers.
- * Rendering that in the same grey as "users: 802" is what makes a dashboard
+ * Rendering that in the same grey as the user count is what makes a dashboard
  * something people stop looking at.
  */
 type StatTone = "default" | "warn";

@@ -1039,8 +1039,9 @@ func main() {
 		// Removing a reported review, thread or reply (soft; deleted_by is
 		// the admin).
 		communityHandlers.MountAdmin(r)
-		// The user-activity panel: DAU/WAU/MAU, the daily trend, retention
-		// cohorts and the surface breakdown.
+		// The user-activity panel: today against the same moment of earlier
+		// days, returning vs signup-day-only people per window, the daily
+		// trend, how many days people came back, and weekly signup cohorts.
 		r.Get("/activity", adminActivityHandlers.GetActivity)
 
 		// Enrichment writes — static paths first to keep chi happy.

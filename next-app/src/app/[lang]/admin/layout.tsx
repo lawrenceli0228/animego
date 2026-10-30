@@ -51,7 +51,7 @@ export default async function AdminLayout({ children, params }: LayoutProps<"/[l
         <div style={styles.headerInner}>
           <h1 style={styles.title}>{dict.admin.title}</h1>
           {/* Four sections live on /admin -- #overview (stats grid +
-              EnrichmentBar), #activity (DAU/WAU/MAU, trend, retention),
+              EnrichmentBar), #activity (returning people, trend, cohorts),
               #enrichment (data review table), #users (CRUD) -- reached by
               anchor; the anchors carry the /admin path so they also work
               from /admin/edits, the review queue for readers' edits. */}

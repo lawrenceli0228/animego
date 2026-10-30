@@ -24,6 +24,7 @@ import type {
   AdminCohortWeek,
   AdminDepthBucket,
 } from "@/app/[lang]/admin/_types/activity";
+import { ADMIN_USERS_DEPTH_EVENT, type AdminUsersDepthDetail } from "@/lib/adminUsers";
 
 const DAY_MS = 86_400_000;
 /** Asia/Shanghai: a fixed +08, no daylight saving. */
@@ -370,18 +371,8 @@ export function cohortShade(rate: number): number {
 // listens for it, applies the filter and resets to page 1. Nothing touches the
 // URL: Next's router owns history.
 //
-// The name and the detail type belong with the user list (src/lib/adminUsers.ts
-// is being created alongside this panel); they live here until that file
-// exists, and should move there when it does.
-
-export const ADMIN_USERS_DEPTH_EVENT = "admin:users-depth";
-
-export interface AdminUsersDepthDetail {
-  /** The window the bucket was counted in: 7, 30 or 90. */
-  days: number;
-  min: number;
-  max: number;
-}
+// The event's name and detail type belong to the user list and are defined in
+// src/lib/adminUsers.ts, so the sender and the listener cannot drift apart.
 
 interface DepthEventEnv {
   target: Pick<EventTarget, "dispatchEvent">;

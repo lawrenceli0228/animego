@@ -702,10 +702,11 @@ type Querier interface {
 	// DISTINCT ON keeps the first row per root, and the ORDER BY makes that the
 	// deepest one — the end of that chain, which is where completeness is decided.
 	GetAbsoluteEpisodeOffsets(ctx context.Context, ids []int32) ([]GetAbsoluteEpisodeOffsetsRow, error)
-	// The reads behind GET /api/admin/activity (internal/admin/activity.go), plus
-	// the per-user batch the admin user table needs.  The wire contract and the
-	// definitions every number uses (person, signup day, returning, signup-only,
-	// reconstructed) are in next-app/src/app/[lang]/admin/_types/activity.ts.
+	// The reads behind GET /api/admin/activity (internal/admin/activity.go).  The
+	// admin user table's per-account reads live in admin_users.sql.  The wire
+	// contract and the definitions every number uses (person, signup day,
+	// returning, signup-only, reconstructed) are in
+	// next-app/src/app/[lang]/admin/_types/activity.ts.
 	//
 	// THE DAY BOUNDARY IS DEFINED ONCE, HERE, AND IT IS +08.
 	// Every query in this file buckets on `AT TIME ZONE 'Asia/Shanghai'` and every
@@ -836,24 +837,6 @@ type Querier interface {
 	// Replaces Promise.all() of 10 Mongo countDocuments calls.  All counts
 	// run as correlated subqueries so we get one row, one fetch.
 	GetAdminStats(ctx context.Context) (GetAdminStatsRow, error)
-	// Last-seen, visit days, and logins for one page of the admin user table.
-	//
-	// Same batch shape as GetAdminUserSubFollowCounts in admin.sql, and for the
-	// same reason: thirty ids in, one round-trip, LEFT JOIN so an account with no
-	// recorded activity comes back as a row of zeroes instead of vanishing from
-	// the page.  (A missing row would silently drop the user from the table --
-	// the exact failure mode a LEFT JOIN exists to prevent.)
-	//
-	// last_seen_at is nullable and the NULL is meaningful: it says nothing has
-	// ever been recorded for this account, which for an account created before
-	// instrumentation began is a statement about our records and not about the
-	// person.  The handler passes it through as null rather than substituting an
-	// epoch or the signup date.
-	//
-	// active_days counts rows, so before the seam it is interaction days and after
-	// it, visit days -- the same caveat that applies to the chart.  It is the
-	// honest ceiling on "how many days do we know this account was here".
-	GetAdminUserActivityCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]GetAdminUserActivityCountsRow, error)
 	// Every scalar the detail drawer shows, in one round-trip.  pgx.ErrNoRows
 	// means the account does not exist (404).
 	//

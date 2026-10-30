@@ -1598,18 +1598,11 @@ const zh = {
     // User management
     usersTitle: '用户管理',
     userSearchPlaceholder: '搜索用户名或邮箱...',
-    colUsername: '用户名',
-    colEmail: '邮箱',
-    colRole: '角色',
-    colSubs: '订阅',
-    colFollowers: '粉丝',
-    colJoined: '注册时间',
     password: '密码',
     createUser: '+ 创建用户',
     edit: '编辑',
     save: '保存',
     cancel: '取消',
-    delete: '删除',
     confirmDelete: '确认删除',
     createSuccess: '用户已创建',
     createFailed: '创建失败',
@@ -1618,9 +1611,7 @@ const zh = {
     deleteSuccess: '用户已删除',
     deleteFailed: '删除失败',
     // User management — inline form & row actions
-    changePassword: '改密码',
     savePassword: '保存密码',
-    clickToConfirmDelete: '再次点击确认删除',
     usernamePlaceholder: '用户名 (3-50 字符)',
     emailPlaceholder: '邮箱',
     passwordPlaceholder: '密码 (至少 6 位)',
@@ -1838,12 +1829,9 @@ const zh = {
     },
     // 繁体中文漂移 —— HantDriftSection。
     //
-    // 用户表新增的三列。lastSeenNever 是那个破折号的 title，写出来是因为
+    // lastSeenNever 是用户表「最近活跃」那一格破折号的 title，写出来是因为
     // 「从没记录过」和「从没来过」不是一回事 —— 对埋点上线之前注册的账号，
     // 空值说的是我们的记录，不是那个人。
-    colLastSeen: '最近活跃',
-    colActiveDays: '活跃天数',
-    colLogins: '登录次数',
     lastSeenNever: '没有任何活跃记录。注意这说的是我们的记录，不是这个人没来过。',
     // 用户活跃度面板：ActivitySection 和 _components/activity/ 下的四块。
     //

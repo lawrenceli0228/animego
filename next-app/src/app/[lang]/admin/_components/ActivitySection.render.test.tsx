@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { ADMIN_USERS_DEPTH_EVENT, type AdminUsersDepthDetail } from "@/lib/activityChart";
+import { ADMIN_USERS_DEPTH_EVENT, type AdminUsersDepthDetail } from "@/lib/adminUsers";
 import { LanguageProvider } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n/lang";
 import { ActivitySection } from "./ActivitySection";

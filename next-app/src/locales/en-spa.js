@@ -1539,18 +1539,11 @@ const en = {
     // User management
     usersTitle: 'User Management',
     userSearchPlaceholder: 'Search username or email...',
-    colUsername: 'Username',
-    colEmail: 'Email',
-    colRole: 'Role',
-    colSubs: 'Subscriptions',
-    colFollowers: 'Followers',
-    colJoined: 'Joined',
     password: 'Password',
     createUser: '+ Create User',
     edit: 'Edit',
     save: 'Save',
     cancel: 'Cancel',
-    delete: 'Delete',
     confirmDelete: 'Confirm',
     createSuccess: 'User created',
     createFailed: 'Create failed',
@@ -1559,9 +1552,7 @@ const en = {
     deleteSuccess: 'User deleted',
     deleteFailed: 'Delete failed',
     // User management — inline form & row actions
-    changePassword: 'Change password',
     savePassword: 'Save password',
-    clickToConfirmDelete: 'Click again to confirm delete',
     usernamePlaceholder: 'Username (3–50 chars)',
     emailPlaceholder: 'Email',
     passwordPlaceholder: 'Password (min. 6 chars)',
@@ -1785,13 +1776,10 @@ const en = {
       queueLabel: 'Translation queue',
     },
     // Traditional-Chinese drift — HantDriftSection.
-    // The three activity columns on the user table. lastSeenNever is the dash
-    // cell's tooltip, spelled out because "never recorded" and "never came
+    // lastSeenNever is the tooltip on the user table's empty "last seen"
+    // cell, spelled out because "never recorded" and "never came
     // back" are different claims — for an account created before
     // instrumentation began, the blank is about our records, not the person.
-    colLastSeen: 'Last seen',
-    colActiveDays: 'Active days',
-    colLogins: 'Logins',
     lastSeenNever: 'Nothing has ever been recorded for this account. That is a statement about our records, not about the person.',
     // The user-activity panel: ActivitySection and the four parts under
     // _components/activity/. Definitions are in the header of

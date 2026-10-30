@@ -101,7 +101,7 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
       <Overview stats={stats} dict={dict} />
       <hr style={styles.divider} />
       {/* Directly under the overview because it answers the question the
-          overview's own "注册用户 802" invites and cannot answer: how many of
+          overview's registered-users card invites and cannot answer: how many of
           them are still here. Everything below this line is about the
           catalogue rather than the audience. */}
       <ActivitySection initial={activity} />

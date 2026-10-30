@@ -1597,18 +1597,11 @@ const zhHant = {
     // User management
     usersTitle: '使用者管理',
     userSearchPlaceholder: '搜尋使用者名稱或郵箱...',
-    colUsername: '使用者名稱',
-    colEmail: '郵箱',
-    colRole: '角色',
-    colSubs: '訂閱',
-    colFollowers: '粉絲',
-    colJoined: '註冊時間',
     password: '密碼',
     createUser: '+ 建立使用者',
     edit: '編輯',
     save: '儲存',
     cancel: '取消',
-    delete: '刪除',
     confirmDelete: '確認刪除',
     createSuccess: '使用者已建立',
     createFailed: '建立失敗',
@@ -1617,9 +1610,7 @@ const zhHant = {
     deleteSuccess: '使用者已刪除',
     deleteFailed: '刪除失敗',
     // User management — inline form & row actions
-    changePassword: '改密碼',
     savePassword: '儲存密碼',
-    clickToConfirmDelete: '再次點選確認刪除',
     usernamePlaceholder: '使用者名稱 (3-50 字元)',
     emailPlaceholder: '郵箱',
     passwordPlaceholder: '密碼 (至少 6 位)',
@@ -1833,12 +1824,9 @@ const zhHant = {
       rejected: '已拒(未過校驗)',
       queueLabel: '翻譯佇列',
     },
-    // 用户表新增的三列。lastSeenNever 是那个破折号的 title，写出来是因为
+    // lastSeenNever 是用户表「最近活跃」那一格破折号的 title，写出来是因为
     // 「从没记录过」和「从没来过」不是一回事 —— 对埋点上线之前注册的账号，
     // 空值说的是我们的记录，不是那个人。
-    colLastSeen: '最近活躍',
-    colActiveDays: '活躍天數',
-    colLogins: '登入次數',
     lastSeenNever: '沒有任何活躍記錄。注意這說的是我們的記錄，不是這個人沒來過。',
     // 用户活跃度面板：ActivitySection 和 _components/activity/ 下的四块。
     // 口径见 admin/_types/activity.ts 的文件头；埋点上线日之前的数字是回推的，

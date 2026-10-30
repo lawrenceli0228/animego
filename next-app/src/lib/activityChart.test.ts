@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
-  ADMIN_USERS_DEPTH_EVENT,
   addDays,
   calendarDay,
   clock08,
@@ -22,8 +21,8 @@ import {
   showUsersAtDepth,
   xAxisLabels,
   yScale,
-  type AdminUsersDepthDetail,
 } from "@/lib/activityChart";
+import { ADMIN_USERS_DEPTH_EVENT, type AdminUsersDepthDetail } from "@/lib/adminUsers";
 import type {
   AdminActivityDay,
   AdminActivityDepth,

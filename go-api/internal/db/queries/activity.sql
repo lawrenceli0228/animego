@@ -1,7 +1,8 @@
--- The reads behind GET /api/admin/activity (internal/admin/activity.go), plus
--- the per-user batch the admin user table needs.  The wire contract and the
--- definitions every number uses (person, signup day, returning, signup-only,
--- reconstructed) are in next-app/src/app/[lang]/admin/_types/activity.ts.
+-- The reads behind GET /api/admin/activity (internal/admin/activity.go).  The
+-- admin user table's per-account reads live in admin_users.sql.  The wire
+-- contract and the definitions every number uses (person, signup day,
+-- returning, signup-only, reconstructed) are in
+-- next-app/src/app/[lang]/admin/_types/activity.ts.
 --
 -- THE DAY BOUNDARY IS DEFINED ONCE, HERE, AND IT IS +08.
 -- Every query in this file buckets on `AT TIME ZONE 'Asia/Shanghai'` and every
@@ -324,36 +325,3 @@ FROM weeks w
 LEFT JOIN members m ON m.signup_day BETWEEN w.week_start AND w.week_start + 6
 GROUP BY w.week_start
 ORDER BY w.week_start DESC;
-
--- name: GetAdminUserActivityCounts :many
--- Last-seen, visit days, and logins for one page of the admin user table.
---
--- Same batch shape as GetAdminUserSubFollowCounts in admin.sql, and for the
--- same reason: thirty ids in, one round-trip, LEFT JOIN so an account with no
--- recorded activity comes back as a row of zeroes instead of vanishing from
--- the page.  (A missing row would silently drop the user from the table --
--- the exact failure mode a LEFT JOIN exists to prevent.)
---
--- last_seen_at is nullable and the NULL is meaningful: it says nothing has
--- ever been recorded for this account, which for an account created before
--- instrumentation began is a statement about our records and not about the
--- person.  The handler passes it through as null rather than substituting an
--- epoch or the signup date.
---
--- active_days counts rows, so before the seam it is interaction days and after
--- it, visit days -- the same caveat that applies to the chart.  It is the
--- honest ceiling on "how many days do we know this account was here".
-SELECT
-    u.id                                          AS user_id,
-    -- The ::timestamptz is load-bearing.  u.id comes from an unnest, so sqlc
-    -- loses the column types of this derived table and emits interface{} for
-    -- anything it cannot pin down -- which would push a runtime type
-    -- assertion into the handler for a value that is plainly a timestamp.
-    -- (user_id keeps that fate; admin.sql's GetAdminUserSubFollowCounts has
-    -- the same shape and list_users.go's asUUID already exists to absorb it.)
-    max(a.last_seen_at)::timestamptz              AS last_seen_at,
-    count(a.activity_date)::bigint                AS active_days,
-    COALESCE(sum(a.login_count), 0)::bigint       AS logins
-FROM unnest($1::uuid[]) AS u(id)
-LEFT JOIN user_activity_daily a ON a.user_id = u.id
-GROUP BY u.id;
