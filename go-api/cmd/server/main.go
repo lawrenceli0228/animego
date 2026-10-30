@@ -688,7 +688,7 @@ func main() {
 		return snap, nil
 	}
 	adminReadHandlers := admin.NewHandlers(pool, q, queueStatusFn, nil)
-	adminUserHandlers := admin.NewUserHandlers(q, enqueuer)
+	adminUserHandlers := admin.NewUserHandlers(admin.NewUserStore(pool), enqueuer)
 	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
 	adminHantHandlers := admin.NewHantHandlers(q, enqueuer)
 	adminActivityHandlers := admin.NewActivityHandlers(q, slog.Default())

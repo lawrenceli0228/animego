@@ -80,13 +80,16 @@ const (
 // into the test setup.
 //
 // GetUserByID is included even though sqlc only generates one method by
-// that name on the Querier — DeleteUser needs an existence check before
-// calling AdminDeleteUser so it can return 404 (the DELETE statement
-// alone returns no error on a no-op match).
+// that name on the Querier — DeleteUser looks the account up first so it can
+// return 404 and log the username.
+//
+// ArchiveAndDeleteUser is not a sqlc method: it is the one transactional
+// operation here, implemented by UserStore (user_store.go).  It reports false
+// when the account was already gone.
 type UserDB interface {
 	AdminCreateUser(ctx context.Context, username, email, password string) (dbgen.AdminCreateUserRow, error)
 	AdminUpdateUser(ctx context.Context, username, email *string, userID uuid.UUID) (dbgen.AdminUpdateUserRow, error)
-	AdminDeleteUser(ctx context.Context, id uuid.UUID) error
+	ArchiveAndDeleteUser(ctx context.Context, id uuid.UUID) (bool, error)
 	AdminSetUserPassword(ctx context.Context, id uuid.UUID, password string) error
 	AdminFindUserByUsernameOrEmail(ctx context.Context, username, email *string) (dbgen.AdminFindUserByUsernameOrEmailRow, error)
 	AdminFindUserByUsernameOrEmailExcluding(ctx context.Context, username, email *string, excludeID uuid.UUID) (dbgen.AdminFindUserByUsernameOrEmailExcludingRow, error)
@@ -108,9 +111,8 @@ type UserHandlers struct {
 	enq queue.Enqueuer
 }
 
-// NewUserHandlers constructs a UserHandlers bundle.  Pass the live
-// dbgen.Queries (which satisfies UserDB) and the application's
-// Enqueuer.  Both are required at boot — a nil dependency would crash
+// NewUserHandlers constructs a UserHandlers bundle.  Pass a UserStore
+// (which satisfies UserDB) and the application's Enqueuer.  Both are required at boot — a nil dependency would crash
 // on the first request, so we fail fast with a panic here to flag
 // the misconfiguration during startup smoke tests rather than at
 // request time.
@@ -370,10 +372,12 @@ type deleteUserResp struct {
 //  3. GetUserByID — if pgx.ErrNoRows → 404 NOT_FOUND.  Express does
 //     this same lookup so it can echo the deleted username in the
 //     response; we keep the read to preserve that affordance.
-//  4. AdminDeleteUser — Postgres ON DELETE CASCADE removes
-//     subscriptions / follows / comments / danmakus in one statement
-//     (Express had to run four parallel deleteMany calls; PG schema
-//     made that unnecessary, see migrations/0001_init.up.sql).
+//  4. ArchiveAndDeleteUser — one transaction: the signup instant and every
+//     activity day are copied into the anonymous archive (migration 0054),
+//     then the account is deleted and Postgres ON DELETE CASCADE removes
+//     subscriptions / follows / comments / danmakus with it.  Without the
+//     archive the activity statistics would lose this person from every
+//     past day.  An account gone by the time the row is locked → 404.
 //  5. 200 with { deleted: true, username }.
 func (h *UserHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), userQueryTimeout)
@@ -410,8 +414,16 @@ func (h *UserHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.AdminDeleteUser(ctx, userID); err != nil {
+	// Archives the account's signup and activity days before removing it, so
+	// the history the activity panel draws keeps this person in it.
+	deleted, err := h.db.ArchiveAndDeleteUser(ctx, userID)
+	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "delete user failed"))
+		return
+	}
+	if !deleted {
+		// Deleted by someone else between the lookup above and the lock.
+		httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
 		return
 	}
 
