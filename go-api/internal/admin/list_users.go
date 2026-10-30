@@ -28,9 +28,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/auth"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
@@ -285,58 +285,67 @@ type userBatchQuerier interface {
 	ListAdminUserLastDevices(ctx context.Context, userIds []uuid.UUID) ([]dbgen.ListAdminUserLastDevicesRow, error)
 }
 
-// runUsersList runs the page, the count and the segment counts in parallel,
-// then the two batches for the page's accounts: the 30-day strips and the
-// last devices.
+// runUsersList runs the page, the count, the segment counts and the two
+// batches for the page's accounts (the 30-day strips and the last devices)
+// in one REPEATABLE READ READ ONLY transaction, the activity panel's
+// snapshot options.
+//
+// One snapshot is what makes the numbers on a page agree with each other.
+// Run on separate connections, each statement read its own instant, so a
+// signup or an activity flush landing between two of them put a chip's
+// count one away from the total under it, or a row's strip a day away from
+// the segment it was listed under.  The statements run one after another on
+// the transaction's connection; each is a few milliseconds at this scale.
 func runUsersList(ctx context.Context, pool *pgxpool.Pool, p usersListParams) (usersListResult, error) {
 	stmts := buildUsersListSQL(p)
 
-	var (
-		items    []userItem
-		res      usersListResult
-		segments [6]int64
-	)
-	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		var err error
-		items, err = queryUserRows(gctx, pool, stmts.List, stmts.ListArgs)
-		return err
-	})
-	g.Go(func() error {
-		if err := pool.QueryRow(gctx, stmts.Count, stmts.CountArgs...).Scan(&res.Total); err != nil {
-			return fmt.Errorf("users list count: %w", err)
-		}
-		return nil
-	})
-	g.Go(func() error {
-		dest := make([]any, len(segments))
-		for i := range segments {
-			dest[i] = &segments[i]
-		}
-		if err := pool.QueryRow(gctx, userSegmentsSQL, reportingDate(p.Today)).Scan(dest...); err != nil {
-			return fmt.Errorf("users segment counts: %w", err)
-		}
-		return nil
-	})
-	if err := g.Wait(); err != nil {
+	tx, err := pool.BeginTx(ctx, activitySnapshotOptions)
+	if err != nil {
+		return usersListResult{}, fmt.Errorf("users list: begin snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	items, err := queryUserRows(ctx, tx, stmts.List, stmts.ListArgs)
+	if err != nil {
 		return usersListResult{}, err
+	}
+	var res usersListResult
+	if err := tx.QueryRow(ctx, stmts.Count, stmts.CountArgs...).Scan(&res.Total); err != nil {
+		return usersListResult{}, fmt.Errorf("users list count: %w", err)
+	}
+	var segments [6]int64
+	dest := make([]any, len(segments))
+	for i := range segments {
+		dest[i] = &segments[i]
+	}
+	if err := tx.QueryRow(ctx, userSegmentsSQL, reportingDate(p.Today)).Scan(dest...); err != nil {
+		return usersListResult{}, fmt.Errorf("users segment counts: %w", err)
 	}
 	res.Segments = userSegmentCounts{
 		All: segments[0], Active7: segments[1], Returned: segments[2],
 		NeverReturned: segments[3], Subscribed: segments[4], Admin: segments[5],
 	}
 
-	if err := attachUserBatches(ctx, dbgen.New(pool), items, p.Today); err != nil {
+	if err := attachUserBatches(ctx, dbgen.New(tx), items, p.Today); err != nil {
 		return usersListResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return usersListResult{}, fmt.Errorf("users list: end snapshot: %w", err)
 	}
 	res.Items = items
 	return res, nil
 }
 
+// userRowsQuerier is what queryUserRows reads through: the snapshot
+// transaction in production.
+type userRowsQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // queryUserRows runs the page statement.  Every account starts with an
 // empty strip and no device; attachUserBatches fills them in.
-func queryUserRows(ctx context.Context, pool *pgxpool.Pool, sql string, args []any) ([]userItem, error) {
-	rows, err := pool.Query(ctx, sql, args...)
+func queryUserRows(ctx context.Context, q userRowsQuerier, sql string, args []any) ([]userItem, error) {
+	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("users list query: %w", err)
 	}
