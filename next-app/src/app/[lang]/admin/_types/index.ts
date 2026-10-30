@@ -255,39 +255,6 @@ export type EnrichmentSort =
   | "anilist_id"
   | "bgm_match_source";
 
-export interface AdminUser {
-  _id: string;
-  username: string;
-  email: string;
-  role: string | null;
-  createdAt: string;
-  subscriptions: number;
-  followers: number;
-  /**
-   * Newest recorded presence, or null when nothing has ever been recorded.
-   *
-   * Null is a statement about our records, not about the person: for an
-   * account created before instrumentation began it means "no interaction
-   * happened to leave a trace", not "never came back". Render it as an em
-   * dash, never as a date.
-   */
-  lastSeenAt: string | null;
-  /**
-   * Distinct days this account has been recorded on. Before the
-   * instrumentation date these are interaction days (what the historical
-   * reconstruction could see) and after it, visit days — a floor on old
-   * accounts and a measurement on new ones.
-   */
-  activeDays: number;
-  /**
-   * Successful password logins. NOT a session count, and near zero is the
-   * healthy state: the refresh token lives seven days, so a daily reader logs
-   * in about monthly. A high value next to a low `activeDays` is the
-   * interesting shape — it usually means sessions are failing to persist.
-   */
-  logins: number;
-}
-
 /**
  * One bar of the activity trend.
  *
