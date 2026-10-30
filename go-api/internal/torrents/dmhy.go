@@ -32,10 +32,12 @@
 // Mapping:
 //   - title  → item.title
 //   - magnet → item.enclosure.url (must start with "magnet:", else drop)
-//   - size   → FormatBytes(item.enclosure.length); dmhy often sends
-//     length="0" → FormatBytes returns "" (no size), which is fine.
+//   - size   → FormatBinaryBytes(item.enclosure.length).  dmhy does not
+//     report a real size here: a live feed checked 2026-10-31 had
+//     length="1" on every item, which FormatBinaryBytes treats as
+//     unknown ("" — the frontend hides it) rather than "0 KB".
 //   - fansub → ParseFansub(title)
-//   - date   → item.pubDate
+//   - date   → normalizeDate(item.pubDate)  (RFC 3339 UTC)
 //   - source → SourceDmhy
 //
 // No seeders (RSS gives none) and no provider.  Does NOT implement
@@ -108,10 +110,11 @@ func dmhyMagnet(it rssItem) string {
 	return it.Enclosure.URL
 }
 
-// dmhySize formats the enclosure @length byte count.  dmhy commonly
-// sends length="0", in which case FormatBytes returns "" — an empty
-// Size string, the same "no size available" signal the other fetchers
+// dmhySize formats the enclosure @length byte count.  dmhy sends a
+// placeholder there (length="1" on every item of a live feed, 2026-10-31;
+// "0" in older captures), and FormatBinaryBytes maps anything under a
+// KiB to "" — the same "no size available" signal the other fetchers
 // produce.
 func dmhySize(it rssItem) string {
-	return FormatBytes(it.Enclosure.Length)
+	return FormatBinaryBytes(it.Enclosure.Length)
 }

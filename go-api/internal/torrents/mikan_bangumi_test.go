@@ -107,11 +107,11 @@ func TestFetchMikanByBangumi_ParsesTheFeed(t *testing.T) {
 	assert.Equal(t, SourceMikan, first.Source, "per-bangumi rows are Mikan rows, ranked and deduped as such")
 	assert.True(t, strings.HasPrefix(first.Magnet, "magnet:?xt=urn:btih:f7f11b17b95b00313ededdeb0d2c2057c13309e9&dn="),
 		"magnet synthesised from the hash in the .torrent URL, as for the keyword feed")
-	// Size from <torrent><contentLength> through FormatBytes, which counts
-	// in decimal units (Mikan's own <description> says "26.3 GB", binary).
-	assert.Equal(t, "28.2 GB", first.Size)
+	// Size from <torrent><contentLength> through FormatBinaryBytes — the
+	// same figure Mikan's own <description> prints ("26.3 GB", binary).
+	assert.Equal(t, "26.3 GiB", first.Size)
 	require.NotNil(t, first.Date)
-	assert.Equal(t, "2026-08-12T06:12:15.638227", *first.Date, "no channel pubDate → the namespaced torrent pubDate")
+	assert.Equal(t, "2026-08-11T22:12:15Z", *first.Date, "no channel pubDate → the namespaced torrent pubDate, UTC+8 to UTC, fraction dropped")
 	require.NotNil(t, first.Fansub)
 	assert.Equal(t, "H-Enc", *first.Fansub)
 	assert.Nil(t, first.Seeders)
@@ -119,7 +119,7 @@ func TestFetchMikanByBangumi_ParsesTheFeed(t *testing.T) {
 
 	require.NotNil(t, items[1].Fansub)
 	assert.Equal(t, "Zzz睡不醒", *items[1].Fansub)
-	assert.Equal(t, "495 MB", items[2].Size)
+	assert.Equal(t, "472.0 MiB", items[2].Size)
 	assert.True(t, strings.HasPrefix(items[2].Magnet, "magnet:?xt=urn:btih:7030548894099d9e0de029090ddc5921c1e0fe9a"))
 }
 

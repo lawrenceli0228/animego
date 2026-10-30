@@ -22,9 +22,9 @@
 // Mapping (verbatim from Express):
 //   - title       → item.title
 //   - magnet      → item.enclosure.url, fallback item.link
-//   - size        → FormatBytes(item.enclosure.length)
+//   - size        → FormatBinaryBytes(item.enclosure.length)
 //   - fansub      → ParseFansub(title)
-//   - date        → item.pubDate
+//   - date        → normalizeDate(item.pubDate)  (RFC 3339 UTC)
 //   - source      → SourceAcg
 //
 // Filter: drop items whose magnet doesn't start with "magnet:".
@@ -159,9 +159,9 @@ func mapAcgItems(items []acgItem) []TorrentItem {
 		out = append(out, TorrentItem{
 			Title:  it.Title,
 			Magnet: magnet,
-			Size:   FormatBytes(it.Enclosure.Length),
+			Size:   FormatBinaryBytes(it.Enclosure.Length),
 			Fansub: ParseFansub(it.Title),
-			Date:   stringPtr(it.PubDate),
+			Date:   normalizeDate(it.PubDate),
 			Source: SourceAcg,
 		})
 	}

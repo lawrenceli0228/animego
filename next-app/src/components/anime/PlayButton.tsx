@@ -54,6 +54,9 @@ export default function PlayButton({
   }, [close, open]);
 
   const openDownloads = () => {
+    // Hand focus back to the trigger before the guide goes: the panel opening
+    // next takes what holds focus as the place to return it to on close.
+    triggerRef.current?.focus({ preventScroll: true });
     setOpen(false);
     onOpenDownloads();
   };
@@ -74,7 +77,7 @@ export default function PlayButton({
       {/* Portaled to <body>: this button lives inside the hero, which is
        * `isolation: isolate`, so an inline backdrop's z-index is capped
        * there and later positioned content (the trailer card) paints over
-       * the guide. See TorrentModal for the same fix. */}
+       * the guide. See magnet/MagnetPanel for the same fix. */}
       {open
         ? createPortal(
             <div

@@ -1,7 +1,7 @@
 // Arrow-key movement across a tablist, as arithmetic.
 //
 // Split out for the reason every other pure helper next door is split out
-// (episodeGridSkeleton, continueWatchingState, torrentModalLogic): this repo
+// (episodeGridSkeleton, continueWatchingState, lib/magnet): this repo
 // has no DOM testing library, so behaviour that lives inside a component's
 // event handler cannot be asserted. Index arithmetic in a module can.
 //

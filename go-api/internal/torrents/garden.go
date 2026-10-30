@@ -18,7 +18,7 @@
 //	      "provider": "dmhy",
 //	      "title": "[SubsPlease] ...",
 //	      "magnet": "magnet:?xt=...",
-//	      "size": 1234567,        // KB (verified upstream behaviour)
+//	      "size": 595591168,      // bytes (see mapGardenResources)
 //	      "createdAt": "2026-01-01T00:00:00Z",
 //	      "fansub": { "name": "SubsPlease" }
 //	    }
@@ -194,13 +194,18 @@ func mapGardenResources(rs []gardenResource) []TorrentItem {
 		}
 
 		fansub := pickGardenFansub(r)
-		date := stringPtr(r.CreatedAt)
+		date := normalizeDate(r.CreatedAt)
 		provider := stringPtr(r.Provider)
 
 		out = append(out, TorrentItem{
-			Title:    r.Title,
-			Magnet:   r.Magnet,
-			Size:     FormatKb(string(r.Size)),
+			Title:  r.Title,
+			Magnet: r.Magnet,
+			// size is a byte count.  It was once read as KB (the Express
+			// port's formatKb), which printed a 568 MiB episode as
+			// "595.6 GB".  Checked 2026-10-31 against Nyaa by infohash:
+			// garden 595591168 is Nyaa's "568.0 MiB", garden 28239409152
+			// is Nyaa's "26.3 GiB" (TestMapGardenResources_SizeIsBytes).
+			Size:     FormatBinaryBytes(string(r.Size)),
 			Fansub:   fansub,
 			Date:     date,
 			Source:   SourceGarden,

@@ -2524,6 +2524,7 @@ SELECT
     a.title_native,
     a.title_english,
     a.title_chinese,
+    a.title_hant,
     d.anidb_id,
     a.bgm_id
 FROM anime_cache a
@@ -2536,14 +2537,17 @@ type GetTorrentQueryInputsByAnilistIDRow struct {
 	TitleNative  *string `json:"titleNative"`
 	TitleEnglish *string `json:"titleEnglish"`
 	TitleChinese *string `json:"titleChinese"`
+	TitleHant    *string `json:"titleHant"`
 	AnidbID      *int32  `json:"anidbId"`
 	BgmID        *int32  `json:"bgmId"`
 }
 
 // Resolves the inputs the magnet aggregator needs to search by AniList id
 // instead of a raw keyword.  Backs the /api/anime/torrents?anilistId=N path:
-// the handler turns the four titles into deduped search variants, uses
-// anidb_id (when present) to pull AnimeTosho's complete aid feed, and falls
+// the handler turns the four titles into deduped search variants, checks
+// keyword hits against those four plus title_hant (Traditional Chinese,
+// used only for that check, never searched) to drop other shows' releases,
+// uses anidb_id (when present) to pull AnimeTosho's complete aid feed, and falls
 // back to bgm_id when the AniList id alone does not name the show's Mikan
 // bangumi page (internal/mikanidmap).
 //
@@ -2562,6 +2566,7 @@ func (q *Queries) GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistI
 		&i.TitleNative,
 		&i.TitleEnglish,
 		&i.TitleChinese,
+		&i.TitleHant,
 		&i.AnidbID,
 		&i.BgmID,
 	)

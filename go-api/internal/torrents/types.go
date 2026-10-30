@@ -14,13 +14,10 @@
 //   - aggregator.go : parallel fan-out + cache + partial-tolerance
 //
 // types.go owns the wire-level result struct and the helpers shared by
-// the three fetchers (FormatBytes / FormatKb / ParseFansub).  Each helper
-// preserves Express's JS-quirky number-formatting verbatim — see
-// docstrings for the parity rules.
+// the fetchers (FormatBinaryBytes / ParseFansub).
 package torrents
 
 import (
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -101,62 +98,47 @@ func hasMagnetScheme(s string) bool {
 	return strings.HasPrefix(s, magnetScheme)
 }
 
-// FormatBytes mirrors server/controllers/anime.controller.js:158
-// formatBytes.  Input is a raw byte count (e.g. acg.rip RSS
-// enclosure[@length]).  Empty / zero / negative / non-numeric prefix →
-// returns the empty string, matching JS `if (!n || n <= 0) return ”;`.
-//
-// Output format (Express parity):
-//   - n >= 1e9 → "X.X GB" via toFixed(1)
-//   - n >= 1e6 → "X MB"   via toFixed(0)
-//   - else     → "X KB"   via Math.round(n / 1e3)
-//
-// JS quirks honoured:
-//   - parseInt is permissive — "1234abc" parses as 1234.  We mimic
-//     this by stripping any non-digit suffix.
-//   - parseInt("") and parseInt("abc") return NaN, which JS coerces
-//     to falsy → ” is returned.
-//   - Negative inputs (parseInt("-5") = -5) are also caught by the
-//     <= 0 guard and return ”.
-func FormatBytes(raw string) string {
-	n, ok := parseIntJSLike(raw)
-	if !ok || n <= 0 {
-		return ""
-	}
-	f := float64(n)
-	switch {
-	case f >= 1e9:
-		return strconv.FormatFloat(f/1e9, 'f', 1, 64) + " GB"
-	case f >= 1e6:
-		return strconv.Itoa(int(math.Round(f/1e6))) + " MB"
-	default:
-		return strconv.Itoa(int(math.Round(f/1e3))) + " KB"
-	}
-}
+// minRealSizeBytes is the smallest byte count FormatBinaryBytes treats as
+// a real size; anything below it is a placeholder (see FormatBinaryBytes).
+const minRealSizeBytes = 1024
 
-// FormatKb mirrors formatKb (anime.controller.js:170).  Input is a raw
-// KB count (animes.garden returns `size` already in KB — verified
-// against known 1080p movies and post-credit clips).  Same parsing
-// quirks as FormatBytes; the only difference is the bucket thresholds
-// are 1000x lower because the input unit is KB not B.
+// binaryUnits are the size units FormatBinaryBytes steps through, each
+// 1024x the previous.  They are the units Nyaa prints in <nyaa:size>.
+var binaryUnits = []string{"KiB", "MiB", "GiB", "TiB"}
+
+// FormatBinaryBytes renders a raw byte count the way Nyaa renders sizes
+// ("568.0 MiB", "26.3 GiB"): divide by 1024 until the value is below
+// 1024 or the units run out, then print one decimal.
 //
-//   - n >= 1e6 → "X.X GB" via toFixed(1)
-//   - n >= 1e3 → "X MB"   via toFixed(0)
-//   - else     → "X KB"   (raw number, no conversion)
-func FormatKb(raw string) string {
+// Nyaa passes its size through as a ready-made string, while garden,
+// dmhy, Mikan, acg.rip and AnimeTosho hand over byte counts.  Formatting
+// those in decimal units (the old FormatBytes) printed the same file as
+// "596 MB" from garden and "568.0 MiB" from Nyaa, so one release showed
+// two different sizes in one list.  Using Nyaa's binary layout makes the
+// same infohash read identically whichever source surfaced it.
+//
+// Input parsing keeps the parseIntJSLike leniency ("1234abc" is 1234).
+// Empty, non-numeric and sub-KiB inputs yield "" — the "no size" signal
+// the frontend hides.  The sub-KiB cut exists because dmhy's RSS puts a
+// placeholder in <enclosure length>: on 2026-10-31 all 500 items of a
+// live feed carried length="1", which the decimal formatter printed as
+// "0 KB".  No real torrent payload is under a kibibyte, so a number that
+// small is a placeholder, not a size.
+func FormatBinaryBytes(raw string) string {
 	n, ok := parseIntJSLike(raw)
-	if !ok || n <= 0 {
+	if !ok || n < minRealSizeBytes {
 		return ""
 	}
-	f := float64(n)
-	switch {
-	case f >= 1e6:
-		return strconv.FormatFloat(f/1e6, 'f', 1, 64) + " GB"
-	case f >= 1e3:
-		return strconv.Itoa(int(math.Round(f/1e3))) + " MB"
-	default:
-		return strconv.Itoa(n) + " KB"
+	v := float64(n) / 1024
+	unit := binaryUnits[0]
+	for _, u := range binaryUnits[1:] {
+		if v < 1024 {
+			break
+		}
+		v /= 1024
+		unit = u
 	}
+	return strconv.FormatFloat(v, 'f', 1, 64) + " " + unit
 }
 
 // fansubBracketRE matches a leading bracketed group at the start of a
@@ -213,9 +195,9 @@ func stringPtr(s string) *string {
 //   - No digits → returns (0, false).
 //
 // Returns (n, true) on a valid parse.  The bool lets callers distinguish
-// "0 parsed" from "no number" — currently both code paths return ”
-// from Format{Bytes,Kb} so it's a defensive distinction, but it keeps
-// the helper honest if a future call site cares.
+// "0 parsed" from "no number" — currently both return "" from
+// FormatBinaryBytes so it's a defensive distinction, but it keeps the
+// helper honest if a future call site cares.
 func parseIntJSLike(raw string) (int, bool) {
 	s := strings.TrimLeft(raw, " \t\n\r\f\v")
 	if s == "" {
@@ -242,10 +224,9 @@ func parseIntJSLike(raw string) (int, bool) {
 	n, err := strconv.Atoi(s[:end])
 	if err != nil {
 		// Overflow — fall back to "no parse" so the caller returns "".
-		// JS parseInt would return a float here, but the comparison
-		// `n >= 1e9` is still correct at the bucket level; preserving
-		// the JS quirk for arbitrarily-huge integers isn't worth the
-		// big.Int dance.
+		// JS parseInt would return a float here; an int64 overflow is
+		// 8 EiB, far past any real torrent, so "no size" is the honest
+		// answer and not worth a big.Int dance.
 		return 0, false
 	}
 	if neg {

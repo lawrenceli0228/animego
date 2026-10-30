@@ -67,13 +67,13 @@ func TestFetchAcgRip_HappyPath(t *testing.T) {
 
 	assert.Equal(t, "[SubsPlease] Show - 01 [1080p]", items[0].Title)
 	assert.Equal(t, "magnet:?xt=urn:btih:aaa", items[0].Magnet)
-	assert.Equal(t, "1.2 GB", items[0].Size) // 1234567890 → 1.234... → 1.2 GB
+	assert.Equal(t, "1.1 GiB", items[0].Size) // 1234567890 / 1024^3 = 1.15
 	require.NotNil(t, items[0].Fansub)
 	assert.Equal(t, "SubsPlease", *items[0].Fansub)
 	assert.Equal(t, SourceAcg, items[0].Source)
 	assert.Nil(t, items[0].Provider, "acg never sets provider")
 
-	assert.Equal(t, "500 KB", items[1].Size) // 500000 → 500 KB (round down)
+	assert.Equal(t, "488.3 KiB", items[1].Size) // 500000 / 1024 = 488.28
 }
 
 // ---------------------------------------------------------------------------

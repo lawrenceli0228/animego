@@ -1,6 +1,6 @@
 // Pure logic behind SubscriptionButton's toasts, split out so bun:test can
 // exercise it without rendering the panel (next-app tests lib-style modules,
-// not JSX — same split as torrentModalLogic.ts next door).
+// not JSX — same split as episodeGridSkeleton.ts next door).
 
 /** "This browser has already been shown where the list lives." */
 export const LIST_HINT_KEY = "animego:subListHintShown";

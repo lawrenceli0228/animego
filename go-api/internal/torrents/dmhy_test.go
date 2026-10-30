@@ -4,7 +4,7 @@
 //   - happy path: enclosure-magnet parsing, with the wire-level &amp;
 //     in the magnet URL auto-decoded back to & by encoding/xml
 //   - fansub bracket parse + CJK title survival
-//   - length="0" → empty Size (FormatBytes returns "")
+//   - length="0" → empty Size (FormatBinaryBytes returns "")
 //   - non-magnet enclosure / missing title → item dropped
 //   - empty channel → empty slice, no error
 //   - error paths: non-2xx, transport error, malformed XML
@@ -92,17 +92,32 @@ func TestFetchDmhy_HappyPath(t *testing.T) {
 	// The &amp; entities must be decoded to literal & in the magnet.
 	assert.Equal(t, "magnet:?xt=urn:btih:aaaa1111&dn=Frieren&tr=udp://tracker.example:80", it.Magnet)
 	assert.NotContains(t, it.Magnet, "&amp;", "XML entity must be decoded, not left as &amp;")
-	assert.Equal(t, "1.5 GB", it.Size)
+	assert.Equal(t, "1.4 GiB", it.Size) // 1500000000 / 1024^3 = 1.397
 	require.NotNil(t, it.Fansub)
 	assert.Equal(t, "喵萌奶茶屋", *it.Fansub)
 	assert.Equal(t, SourceDmhy, it.Source)
 	assert.Nil(t, it.Provider, "dmhy never sets provider")
 	require.NotNil(t, it.Date)
-	assert.Equal(t, "Sat, 01 Jan 2026 00:00:00 +0800", *it.Date)
+	assert.Equal(t, "2025-12-31T16:00:00Z", *it.Date, "+0800 pubDate normalised to RFC 3339 UTC")
 
-	// Second item: length="0" → FormatBytes returns "" (no size).
+	// Second item: length="0" → FormatBinaryBytes returns "" (no size).
 	assert.Equal(t, "magnet:?xt=urn:btih:bbbb2222", items[1].Magnet)
 	assert.Equal(t, "", items[1].Size, `length="0" yields an empty Size`)
+}
+
+// TestDmhySize_PlaceholderLengthIsUnknown: on 2026-10-31 every item of a
+// live dmhy feed (500 of 500) carried <enclosure length="1">.  That is a
+// placeholder, not a size, and must come out as "" (hidden by the
+// frontend) instead of the "0 KB" the old formatter printed.
+func TestDmhySize_PlaceholderLengthIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	for _, length := range []string{"1", "0", "", "1023"} {
+		got := dmhySize(rssItem{Enclosure: rssEnclosure{Length: length}})
+		assert.Equal(t, "", got, "length=%q", length)
+	}
+	assert.Equal(t, "1.4 GiB", dmhySize(rssItem{Enclosure: rssEnclosure{Length: "1500000000"}}),
+		"a real byte count still formats")
 }
 
 // ---------------------------------------------------------------------------

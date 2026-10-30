@@ -44,10 +44,11 @@
 // Mapping:
 //   - title  → item.title
 //   - magnet → buildNyaaMagnet(hashFrom(enclosure.url|link), title, link)
-//   - size   → FormatBytes(torrent.contentLength)  (bytes → "X.X GB")
+//   - size   → FormatBinaryBytes(torrent.contentLength)  (bytes → "X.X GiB")
 //   - fansub → ParseFansub(title)
 //   - date   → item.pubDate (channel-level; falls back to namespaced
-//     torrent pubDate when the channel one is absent)
+//     torrent pubDate when the channel one is absent), read as UTC+8
+//     when zone-less and emitted as RFC 3339 UTC (normalizeMikanDate)
 //   - source → SourceMikan
 //
 // No seeders, no provider; does NOT implement Capable.
@@ -300,7 +301,7 @@ func mapMikanItems(items []mikanItem) []TorrentItem {
 		out = append(out, TorrentItem{
 			Title:  it.Title,
 			Magnet: magnet,
-			Size:   FormatBytes(it.Torrent.ContentLength),
+			Size:   FormatBinaryBytes(it.Torrent.ContentLength),
 			Fansub: ParseFansub(it.Title),
 			Date:   mikanDate(it),
 			Source: SourceMikan,
@@ -323,11 +324,12 @@ func mikanInfoHash(it mikanItem) string {
 
 // mikanDate prefers the channel-level <pubDate> and falls back to the
 // namespaced <torrent><pubDate> when the channel one is absent, so a
-// missing top-level date still yields a usable timestamp.  stringPtr
-// maps "" → nil (JSON null), matching the other sources.
+// missing top-level date still yields a usable timestamp.  The namespaced
+// one has no zone; normalizeMikanDate reads it as UTC+8.  "" or an
+// unparseable value maps to nil (JSON null), matching the other sources.
 func mikanDate(it mikanItem) *string {
 	if it.PubDate != "" {
-		return stringPtr(it.PubDate)
+		return normalizeMikanDate(it.PubDate)
 	}
-	return stringPtr(it.Torrent.PubDate)
+	return normalizeMikanDate(it.Torrent.PubDate)
 }

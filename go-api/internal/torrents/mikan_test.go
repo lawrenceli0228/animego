@@ -4,7 +4,7 @@
 //   - happy path: .torrent enclosure URL → 40-hex infohash → magnet via
 //     buildNyaaMagnet (hash + url-encoded title + both nyaa trackers)
 //   - size from the namespaced <torrent><contentLength> (bytes →
-//     FormatBytes), NOT the enclosure @length (which Mikan sends as 0)
+//     FormatBinaryBytes), NOT the enclosure @length (which Mikan sends as 0)
 //   - infohash fallback: when the enclosure URL lacks a hash, recover it
 //     from the episode <link>
 //   - no hash anywhere → item dropped (buildNyaaMagnet returns the
@@ -102,7 +102,7 @@ func TestFetchMikan_HappyPath(t *testing.T) {
 
 	// Size comes from the namespaced contentLength (bytes), not the
 	// enclosure length="0".
-	assert.Equal(t, "1.5 GB", it.Size, "size must come from <torrent><contentLength>, not enclosure length=0")
+	assert.Equal(t, "1.4 GiB", it.Size, "size must come from <torrent><contentLength>, not enclosure length=0")
 
 	// Magnet must be synthesised via buildNyaaMagnet: hash + url-encoded
 	// title + BOTH nyaa trackers.
@@ -119,7 +119,7 @@ func TestFetchMikan_HappyPath(t *testing.T) {
 	require.NotNil(t, it.Fansub)
 	assert.Equal(t, "喵萌奶茶屋", *it.Fansub)
 	require.NotNil(t, it.Date)
-	assert.Equal(t, "2026-01-01T12:00:00", *it.Date, "channel pubDate absent → falls back to torrent pubDate")
+	assert.Equal(t, "2026-01-01T04:00:00Z", *it.Date, "channel pubDate absent → torrent pubDate, read as UTC+8")
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ func TestFetchMikan_InfoHashFallbackToLink(t *testing.T) {
 	require.Len(t, items, 1)
 	assert.True(t, strings.HasPrefix(items[0].Magnet, "magnet:?xt=urn:btih:"+mikanHashB),
 		"infohash must be recovered from <link> when the enclosure URL has none")
-	assert.Equal(t, "800 MB", items[0].Size)
+	assert.Equal(t, "762.9 MiB", items[0].Size) // 800000000 / 1024^2
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ func TestFetchMikan_ChannelPubDatePreferred(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.NotNil(t, items[0].Date)
-	assert.Equal(t, "Sat, 03 Jan 2026 09:00:00 GMT", *items[0].Date,
+	assert.Equal(t, "2026-01-03T09:00:00Z", *items[0].Date,
 		"channel-level pubDate wins over the namespaced torrent pubDate")
 }
 

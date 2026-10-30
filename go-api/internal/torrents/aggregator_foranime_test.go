@@ -255,7 +255,7 @@ func TestFetch_KeySpaceIsDisjointFromFetchForAnime(t *testing.T) {
 
 	aid, mikanID := int32(7), int32(3141)
 	query := AnimeQuery{Variants: []string{"naruto"}, AnidbID: &aid, MikanID: &mikanID}
-	lookalike := animeCacheKey([]string{"naruto"}, &aid, &mikanID)
+	lookalike := animeCacheKey([]string{"naruto"}, &aid, &mikanID, nil)
 
 	for name, calls := range map[string][]func(*Aggregator) error{
 		"anime first": {
@@ -378,11 +378,11 @@ func TestCleanVariants_TrimsAndDropsEmpties(t *testing.T) {
 func TestAnimeCacheKey_OrderAndCaseInsensitive(t *testing.T) {
 	t.Parallel()
 
-	k1 := animeCacheKey([]string{"Alpha", "Beta"}, nil, nil)
-	k2 := animeCacheKey([]string{"beta", "ALPHA"}, nil, nil)
+	k1 := animeCacheKey([]string{"Alpha", "Beta"}, nil, nil, nil)
+	k2 := animeCacheKey([]string{"beta", "ALPHA"}, nil, nil, nil)
 	assert.Equal(t, k1, k2, "key is sorted + lowercased so order/case don't matter")
 
 	aid := int32(7)
-	withAid := animeCacheKey([]string{"Alpha", "Beta"}, &aid, nil)
+	withAid := animeCacheKey([]string{"Alpha", "Beta"}, &aid, nil, nil)
 	assert.NotEqual(t, k1, withAid, "adding an aid changes the key")
 }

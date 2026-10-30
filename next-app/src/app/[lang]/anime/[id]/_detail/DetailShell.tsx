@@ -96,7 +96,6 @@ export default function DetailShell({
               titleNative={detail.titleNative}
               coverImageUrl={detail.coverImageUrl}
               shareTitle={pickTitle(detail, lang)}
-              lang={lang}
               trailerId={trailer?.id ?? null}
               trailerLabels={detailTrailerLabels(dict)}
               labels={{
@@ -113,18 +112,6 @@ export default function DetailShell({
                 shareCopied: dict.detail.linkCopied,
                 shareCopyFailed: dict.detail.linkCopyFailed,
                 torrents: dict.torrent.download,
-                torrentsTitle: dict.torrent.title,
-                torrentsSearchBtn: dict.torrent.searchBtn,
-                torrentsPlaceholder: dict.torrent.placeholder,
-                torrentsGroupAll: dict.torrent.groupAll,
-                torrentsEpAll: dict.torrent.epAll,
-                torrentsLoading: dict.torrent.loading,
-                torrentsNoResults: dict.torrent.noResults,
-                torrentsClose: dict.torrent.close,
-                torrentsCopy: dict.torrent.copy,
-                torrentsCopied: dict.torrent.copied,
-                torrentsOpenMagnet: dict.torrent.openMagnet,
-                torrentsSeeders: dict.torrent.seeders,
                 play: dict.detail.openPlayer,
                 playAria: dict.detail.openPlayerAria,
               }}

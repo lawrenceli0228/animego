@@ -44,19 +44,19 @@ func TestMapRSSItems_FilterAndMapping(t *testing.T) {
 	}
 
 	out := mapRSSItems(items, SourceDmhy, identityMagnet, func(it rssItem) string {
-		return FormatBytes(it.Enclosure.Length)
+		return FormatBinaryBytes(it.Enclosure.Length)
 	})
 
 	require.Len(t, out, 1, "only the titled magnet item survives")
 	it := out[0]
 	assert.Equal(t, "[GroupA] Show - 01", it.Title)
 	assert.Equal(t, "magnet:?xt=urn:btih:aaa", it.Magnet)
-	assert.Equal(t, "1.5 GB", it.Size)
+	assert.Equal(t, "1.4 GiB", it.Size) // 1500000000 / 1024^3 = 1.397
 	assert.Equal(t, SourceDmhy, it.Source)
 	require.NotNil(t, it.Fansub)
 	assert.Equal(t, "GroupA", *it.Fansub)
 	require.NotNil(t, it.Date)
-	assert.Equal(t, "Sat, 01 Jan 2026 00:00:00 GMT", *it.Date)
+	assert.Equal(t, "2026-01-01T00:00:00Z", *it.Date, "pubDate normalised to RFC 3339 UTC")
 	assert.Nil(t, it.Provider, "RSS sources never set provider")
 }
 
