@@ -1643,61 +1643,82 @@ const en = {
     colActiveDays: 'Active days',
     colLogins: 'Logins',
     lastSeenNever: 'Nothing has ever been recorded for this account. That is a statement about our records, not about the person.',
-    // Answers the question the overview's own "802 users" invites and cannot
-    // answer: how many of them are still here.
+    // The user-activity panel: ActivitySection and the four parts under
+    // _components/activity/. Definitions are in the header of
+    // admin/_types/activity.ts. Numbers from before per-request recording were
+    // reconstructed and are floors; the panel marks them ("incl.
+    // reconstructed", or a hatch) and never presents them as measurements.
     //
-    // Two reliability tiers, and they must not blur together:
-    //   after the seam   server-side, from a signed token on a real request.
-    //                    Unforgeable — decide on these.
-    //   before the seam  reconstructed from traces other tables happen to
-    //                    hold: interaction days, a strict and small subset of
-    //                    real visits.
-    // Neither covers logged-out readers, who are most of this site's traffic.
+    // Suffixes that are appended to a sentence (barToday, barReconstructed,
+    // cohortCellReconstructed*) carry their own leading separator.
     activity: {
       title: 'User activity',
       loadError: 'Could not load activity data',
-      // The lede is not decoration. Without it "DAU 41" reads as a complete
-      // measurement of the site, when every number keyed on a user id is blind
-      // to the logged-out majority.
-      lede: 'Every per-user number here covers signed-in visits only. Most of this site\'s traffic arrives logged out from search, and shows up only in the surface breakdown below.',
+      switchError: 'Could not load the {{n}}-day view; still showing {{m}} days below',
+      meta: 'Signed-in users only · days split at midnight Beijing time · as of {{asOf}}',
       windowLabel: 'Time window',
       windowDays: '{{n}} days',
       loading: 'Loading',
-      dau: 'DAU',
-      dauHint: 'People here today',
-      wau: 'WAU',
-      wauHint: 'Rolling 7 days, today included',
-      mau: 'MAU',
-      mauHint: 'Rolling 30 days, today included',
-      stickiness: 'Stickiness DAU/MAU',
-      stickinessHint: 'Of the people who used the site this month, the share who used it today',
-      trendTitle: 'Daily trend',
-      legendActive: 'Active users',
-      legendReconstructed: 'Reconstructed (pre-instrumentation)',
-      legendSignups: 'New signups',
-      chartAlt: 'Daily active users over the last {{n}} days, peaking at {{max}}.',
-      logins: 'Logins',
-      requests: 'API requests',
-      reconstructedDay: 'Reconstructed day — counts only users who left an interaction behind',
-      // Said out loud rather than left to a legend swatch. A reader who does
-      // not know the seam exists will read the step at the boundary as growth,
-      // and that is the most misleading thing this panel can show.
-      seamNote: 'Per-request recording started {{date}}. The {{n}} days before it are reconstructed from comments, follows and subscriptions — interaction days, a floor on real visits. The two halves are not comparable.',
-      notInstrumented: 'Per-request recording has not produced data yet. Every bar here is reconstructed from historical traces and is only a lower bound.',
-      retentionTitle: 'New-user retention',
-      retentionUnavailable: 'Could not load retention',
-      retentionWindow: 'Signups in the last {{n}} days',
-      // Spelled out because the three denominators genuinely differ and the
-      // difference looks like a bug. Somebody who registered this morning has
-      // not failed to return tomorrow.
-      retentionNote: 'The three denominators differ on purpose: an account less than a day old is excluded from day-1, less than seven days old from day-7. Otherwise every burst of signups would drag retention down.',
-      retentionD1: 'Day 1',
-      retentionD1Hint: 'Active on signup + 1 exactly — not "within 7 days"',
-      retentionD7: 'Day 7',
-      retentionD7Hint: 'Active on signup + 7 exactly',
-      retentionEver: 'Ever returned',
-      retentionEverHint: 'Active on any day after signup. Largest sample — read this one first',
-      noCohort: 'No cohort',
+      withReconstructed: '{{text}} (incl. reconstructed)',
+      deltaFlat: 'No change',
+      kpiToday: 'Active today',
+      sameTime: 'Same time yesterday {{yesterday}} · last week {{lastWeek}}',
+      kpiTodayHint: 'As of {{time}}; all of yesterday {{total}}',
+      kpiReturning: 'Returning, last {{n}} days',
+      kpiPrev: 'Previous {{n}} days {{count}}',
+      kpiReturningHint: '{{active}} active in all, {{signupOnly}} of them only on their signup day',
+      kpiSignups: 'Signups, last {{n}} days',
+      kpiSignupsHint: '{{n}} came back after signing up',
+      dailyTitle: 'Active per day',
+      legendReturning: 'Returning (not their signup day)',
+      legendSignupDay: 'On their signup day',
+      legendToday: 'Today, not over yet',
+      legendReconstructed: 'Reconstructed day, a floor',
+      dateLabel: '{{m}}/{{d}}',
+      dayLabel: '{{wd}} {{date}}',
+      // Sunday first, matching getUTCDay()'s 0–6.
+      weekdays: 'Sun,Mon,Tue,Wed,Thu,Fri,Sat',
+      readoutToday: '{{day}} · today, as of {{time}}',
+      readoutActive: 'Active {{n}}',
+      readoutReturning: 'Returning {{n}}',
+      readoutSignupDay: 'Signup day {{n}}',
+      readoutRequests: 'API requests {{n}}',
+      readoutReconstructed: 'Reconstructed, a floor',
+      barLabel: '{{date}}: {{total}} active, {{returning}} returning, {{signupDay}} on their signup day',
+      barToday: ' (today, not over yet)',
+      barReconstructed: ' (reconstructed, a floor)',
+      today: 'Today',
+      sumAvgReturning: 'Excluding today: {{n}} returning a day on average',
+      sumAvgSignupDay: '{{n}} a day on their signup day',
+      sumPeak: 'Most returning: {{n}} ({{date}})',
+      sumReconstructed: 'Includes reconstructed days, so these are floors',
+      depthTitle: 'Days active in the last {{n}}',
+      depthTotal: '{{n}} active',
+      depthOnlyOne: 'Only 1 day',
+      depthOneDay: '1 day',
+      depthDays: '{{n}} days',
+      depthRange: '{{min}}–{{max}} days',
+      depthRowLabel: '{{n}} active on {{range}} of the last {{days}} days: show them in the user list',
+      depthFoot: 'Of the {{one}} active on only 1 day, {{n}} came only on their signup day',
+      cohortTitle: 'New-user retention by signup week',
+      cohortMeta: 'Came back within N days of signing up',
+      cohortWeek: 'Signup week',
+      cohortSignups: 'Signups',
+      cohortNextDay: 'Next day',
+      cohortWithin: 'Within {{n}} days',
+      cohortCount: '{{n}} back',
+      cohortPending: '{{n}} so far',
+      cohortCellTitle: 'Week of {{week}}: {{returned}} of {{signups}} came back ({{horizon}})',
+      cohortCellReconstructed: '; before {{date}}, only returns that left an interaction behind are counted',
+      cohortCellReconstructedAll: '; only returns that left an interaction behind are counted',
+      // No rate until the horizon is over for every member: until then the
+      // count is still growing, and a rate would be read as a result.
+      cohortPendingTitle: 'Not every signup this week is past day {{n}} yet; the count is still growing, so no rate yet',
+      cohortNoneTitle: 'Not due yet',
+      cohortEmptyTitle: 'Nobody signed up this week',
+      cohortLegendPending: 'Not due yet, still growing',
+      cohortLegendReconstructed: 'Includes reconstructed data from before {{date}}',
+      cohortLegendReconstructedAll: 'Includes reconstructed data',
     },
     //
     // Not a "missing content" block: a "content is lying" block. The

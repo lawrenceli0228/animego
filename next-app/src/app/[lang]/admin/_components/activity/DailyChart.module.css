@@ -1,0 +1,140 @@
+/* The daily chart's own rules (DailyChart.tsx). The shared card, legend and
+ * summary styles are in activity.module.css; per-bar treatments (heights,
+ * hatches, today's dashed edge) are inline styles from palette.ts. */
+
+.readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+  padding: 10px 12px;
+  background: #0e0e16;
+  border: 1px solid #1f1f2a;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #cfcfdc;
+  font-variant-numeric: tabular-nums;
+}
+
+.readout strong {
+  color: #f4f4f8;
+  font-weight: 600;
+}
+
+.readoutItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.readoutSameTime {
+  color: #8cc2f0;
+}
+
+.chart {
+  display: flex;
+  gap: 8px;
+}
+
+.yAxis {
+  position: relative;
+  width: 22px;
+  flex: none;
+}
+
+.yLabel {
+  position: absolute;
+  right: 0;
+  font-size: 10.5px;
+  color: #8a8a9a;
+  transform: translateY(50%);
+  font-variant-numeric: tabular-nums;
+}
+
+.plot {
+  position: relative;
+  flex: 1;
+  height: 200px;
+  min-width: 0;
+}
+
+.gridLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed #262634;
+}
+
+.gridLineZero {
+  border-top-style: solid;
+  border-top-color: #2a2a38;
+}
+
+/* The column gap is set inline: it narrows on a 90-day window so ninety
+ * columns still fit a phone. */
+.cols {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+}
+
+.col {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  position: relative;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.col:hover,
+.colOn {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+/* The one focus ring (DESIGN.md), with a transparent outline kept for
+ * forced-colors mode, where box-shadow is not painted. */
+.col:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+}
+
+.segment {
+  display: block;
+  flex: none;
+}
+
+/* 30px = the y axis (22px) + the chart's gap (8px), so each label sits under
+ * its bar. The gap between labels is set inline to match the columns. */
+.xAxis {
+  display: flex;
+  margin-left: 30px;
+  margin-top: 6px;
+}
+
+.xLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: #8a8a9a;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
