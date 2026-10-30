@@ -1659,11 +1659,11 @@ const en = {
       calendarCell: '{{date}}: {{state}}',
       calendarRecorded: 'visited',
       calendarReconstructed: 'interacted (reconstructed)',
-      calendarReconstructedSince: 'interacted (reconstructed, before {{date}})',
+      calendarReconstructedSince: 'interacted (reconstructed, before recording began on {{date}})',
       calendarNone: 'nothing recorded',
       legendRecorded: 'Visited',
       legendReconstructed: 'Reconstructed: interaction days only',
-      legendReconstructedSince: 'Before {{date}}, reconstructed: interaction days only',
+      legendReconstructedSince: 'Before recording began on {{date}}, reconstructed: interaction days only',
       legendNone: 'No visit',
       sumLast30: 'Last 30 days: {{n}}',
       sum90: 'last 90 days: {{n}}',
@@ -1856,7 +1856,7 @@ const en = {
       cohortCount: '{{n}} back',
       cohortPending: '{{n}} so far',
       cohortCellTitle: 'Week of {{week}}: {{returned}} of {{signups}} came back ({{horizon}})',
-      cohortCellReconstructed: '; before {{date}}, only returns that left an interaction behind are counted',
+      cohortCellReconstructed: '; before recording began on {{date}}, only returns that left an interaction behind are counted',
       cohortCellReconstructedAll: '; only returns that left an interaction behind are counted',
       // No rate until the horizon is over for every member: until then the
       // count is still growing, and a rate would be read as a result.
@@ -1864,7 +1864,7 @@ const en = {
       cohortNoneTitle: 'Not due yet',
       cohortEmptyTitle: 'Nobody signed up this week',
       cohortLegendPending: 'Not due yet, still growing',
-      cohortLegendReconstructed: 'Includes reconstructed data from before {{date}}',
+      cohortLegendReconstructed: 'Includes data reconstructed from before recording began on {{date}}',
       cohortLegendReconstructedAll: 'Includes reconstructed data',
     },
     //

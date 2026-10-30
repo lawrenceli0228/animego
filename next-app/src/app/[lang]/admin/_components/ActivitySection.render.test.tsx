@@ -505,15 +505,15 @@ describe("cohort cells: a rate only for a horizon that is over", () => {
     for (const c of [...cells(older, "eligible"), ...cells(older, "pending")]) {
       expect(c).toContain("repeating-linear-gradient");
     }
-    expect(cells(older, "eligible")[0]).toContain("（6-08 前的回访只算得到留过互动痕迹的）");
+    expect(cells(older, "eligible")[0]).toContain("（6-08 开始记录前的回访只算得到留过互动痕迹的）");
     const legend = textOf(divWith(html, 'data-card="cohorts"'));
     expect(legend).toContain("还没满期，人数还会涨");
-    expect(legend).toContain("含 6-08 前回推的数据");
+    expect(legend).toContain("含 6-08 开始记录前回推的数据");
   });
 
   test("with nothing instrumented the legend drops the date; with nothing hatched it drops the entry", () => {
     expect(textOf(markup(fresh()))).toContain("含回推的数据");
-    expect(textOf(markup(mature()))).not.toContain("前回推的数据");
+    expect(textOf(markup(mature()))).not.toContain("开始记录前回推的数据");
   });
 });
 

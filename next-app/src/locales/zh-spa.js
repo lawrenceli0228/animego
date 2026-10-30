@@ -1719,11 +1719,11 @@ const zh = {
       calendarCell: '{{date}}：{{state}}',
       calendarRecorded: '有访问',
       calendarReconstructed: '有互动（回推）',
-      calendarReconstructedSince: '有互动（{{date}} 前回推）',
+      calendarReconstructedSince: '有互动（{{date}} 开始记录前回推）',
       calendarNone: '没有记录',
       legendRecorded: '有访问',
       legendReconstructed: '回推，只算有互动的天',
-      legendReconstructedSince: '{{date}} 前回推，只算有互动的天',
+      legendReconstructedSince: '{{date}} 开始记录前回推，只算有互动的天',
       legendNone: '没来',
       sumLast30: '近 30 天 {{n}} 天',
       sum90: '近 90 天 {{n}} 天',
@@ -1906,7 +1906,7 @@ const zh = {
       cohortCount: '{{n}} 人',
       cohortPending: '已 {{n}} 人',
       cohortCellTitle: '{{week}} 那周注册的 {{signups}} 人里，{{returned}} 人在{{horizon}}回来过',
-      cohortCellReconstructed: '（{{date}} 前的回访只算得到留过互动痕迹的）',
+      cohortCellReconstructed: '（{{date}} 开始记录前的回访只算得到留过互动痕迹的）',
       cohortCellReconstructedAll: '（回访只算得到留过互动痕迹的）',
       // 「还没满期」的格子不给比例：这周最晚注册的人还在期内，人数还会涨，
       // 这时算出来的比例会被当成结论读。
@@ -1914,7 +1914,7 @@ const zh = {
       cohortNoneTitle: '还没满期',
       cohortEmptyTitle: '这周没有人注册',
       cohortLegendPending: '还没满期，人数还会涨',
-      cohortLegendReconstructed: '含 {{date}} 前回推的数据',
+      cohortLegendReconstructed: '含 {{date}} 开始记录前回推的数据',
       cohortLegendReconstructedAll: '含回推的数据',
     },
     // 这块看的不是「缺内容」，是「内容在骗人」：富化 worker 一直在写简体列，

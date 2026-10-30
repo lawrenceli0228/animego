@@ -285,14 +285,14 @@ describe("the 90-day calendar", () => {
     expect(html.match(/data-state="recorded"/g)).toHaveLength(3);
     expect(html.match(/data-state="reconstructed"/g)).toHaveLength(2);
     expect(html.match(/data-today="true"/g)).toHaveLength(1);
-    expect(decode(html)).toContain('title="1月2日 周五：有互动（1-20 前回推）"');
+    expect(decode(html)).toContain('title="1月2日 周五：有互动（1-20 开始记录前回推）"');
     expect(decode(html)).toContain('title="3月15日 周日：有访问"');
     expect(decode(html)).toContain('title="3月16日 周一：没有记录"');
   });
 
   test("one accessible summary, the legend, and the three counts", () => {
     expect(html).toContain('role="img" aria-label="近 90 天来过 5 天，其中 2 天是回推的"');
-    expect(text(html)).toContain("1-20 前回推，只算有互动的天");
+    expect(text(html)).toContain("1-20 开始记录前回推，只算有互动的天");
     expect(text(html)).toContain("有访问");
     expect(text(html)).toContain("没来");
     expect(html).toContain("近 30 天 <b>2</b> 天");
