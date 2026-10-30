@@ -364,6 +364,8 @@ func TestFormatBinaryBytes(t *testing.T) {
 		{"zero", "0", ""},
 		{"negative", "-100", ""},
 		{"non-numeric", "abc", ""},
+		{"dmhy's placeholder length 1 is unknown", "1", ""},
+		{"just under 1 KiB is unknown", "1023", ""},
 		{"exactly 1 KiB", "1024", "1.0 KiB"},
 		{"KiB with a decimal", "5000", "4.9 KiB"},
 		{"just under 1 MiB stays KiB", "1048575", "1024.0 KiB"},

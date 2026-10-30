@@ -98,11 +98,26 @@ func TestFetchDmhy_HappyPath(t *testing.T) {
 	assert.Equal(t, SourceDmhy, it.Source)
 	assert.Nil(t, it.Provider, "dmhy never sets provider")
 	require.NotNil(t, it.Date)
-	assert.Equal(t, "Sat, 01 Jan 2026 00:00:00 +0800", *it.Date)
+	assert.Equal(t, "2025-12-31T16:00:00Z", *it.Date, "+0800 pubDate normalised to RFC 3339 UTC")
 
 	// Second item: length="0" → FormatBinaryBytes returns "" (no size).
 	assert.Equal(t, "magnet:?xt=urn:btih:bbbb2222", items[1].Magnet)
 	assert.Equal(t, "", items[1].Size, `length="0" yields an empty Size`)
+}
+
+// TestDmhySize_PlaceholderLengthIsUnknown: on 2026-10-31 every item of a
+// live dmhy feed (500 of 500) carried <enclosure length="1">.  That is a
+// placeholder, not a size, and must come out as "" (hidden by the
+// frontend) instead of the "0 KB" the old formatter printed.
+func TestDmhySize_PlaceholderLengthIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	for _, length := range []string{"1", "0", "", "1023"} {
+		got := dmhySize(rssItem{Enclosure: rssEnclosure{Length: length}})
+		assert.Equal(t, "", got, "length=%q", length)
+	}
+	assert.Equal(t, "1.4 GiB", dmhySize(rssItem{Enclosure: rssEnclosure{Length: "1500000000"}}),
+		"a real byte count still formats")
 }
 
 // ---------------------------------------------------------------------------

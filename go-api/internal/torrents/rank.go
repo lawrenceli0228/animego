@@ -210,9 +210,11 @@ func rankItems(items []TorrentItem, ranks map[Source]int) []TorrentItem {
 	return out
 }
 
-// itemDateLayouts are the timestamp formats the upstream sources emit.
-// RSS feeds (acg / nyaa) use RFC1123-style pubDate; garden's JSON uses
-// RFC3339.  Parsed in order; the first that matches wins.
+// itemDateLayouts are the timestamp formats ranked items may carry.  The
+// mappers normalise every source to RFC 3339 UTC (date.go), so RFC3339 is
+// the layout that matters; the RFC 1123 forms stay so an item built by
+// hand (tests, a future source that skips normalisation) still orders by
+// date instead of sinking.  Parsed in order; the first that matches wins.
 var itemDateLayouts = []string{
 	time.RFC1123Z, // "Mon, 02 Jan 2006 15:04:05 -0700"
 	time.RFC1123,  // "Mon, 02 Jan 2006 15:04:05 MST"

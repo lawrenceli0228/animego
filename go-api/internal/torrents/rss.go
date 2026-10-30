@@ -133,7 +133,8 @@ func fetchRSS(ctx context.Context, httpClient *http.Client, name, endpoint strin
 //   - drop items with an empty title OR a non-magnet resolved URI
 //     (hasMagnetScheme), exactly as acg.rip / nyaa / garden do;
 //   - fansub via ParseFansub on the title;
-//   - date via stringPtr on <pubDate> (nil → JSON null when absent);
+//   - date via normalizeDate on <pubDate> (RFC 3339 UTC; nil → JSON
+//     null when absent or unparseable);
 //   - source stamped from the caller's Source constant.
 //
 // Size comes from the size resolver so each source controls its own unit
@@ -151,7 +152,7 @@ func mapRSSItems(items []rssItem, src Source, magnet magnetResolver, size sizeRe
 			Magnet: m,
 			Size:   size(it),
 			Fansub: ParseFansub(it.Title),
-			Date:   stringPtr(it.PubDate),
+			Date:   normalizeDate(it.PubDate),
 			Source: src,
 		})
 	}

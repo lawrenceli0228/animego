@@ -180,7 +180,7 @@ func mapNyaaItems(items []nyaaItem) []TorrentItem {
 			// sources format theirs to match (FormatBinaryBytes).
 			Size:   it.Size,
 			Fansub: ParseFansub(it.Title),
-			Date:   stringPtr(it.PubDate),
+			Date:   normalizeDate(it.PubDate),
 			Source: SourceNyaa,
 		})
 	}

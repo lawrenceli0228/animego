@@ -194,7 +194,7 @@ func mapGardenResources(rs []gardenResource) []TorrentItem {
 		}
 
 		fansub := pickGardenFansub(r)
-		date := stringPtr(r.CreatedAt)
+		date := normalizeDate(r.CreatedAt)
 		provider := stringPtr(r.Provider)
 
 		out = append(out, TorrentItem{

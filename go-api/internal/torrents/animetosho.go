@@ -259,16 +259,16 @@ func mapToshoEntries(entries []toshoEntry) []TorrentItem {
 	return out
 }
 
-// toshoDate formats a unix-seconds timestamp as RFC3339 (UTC) so rank.go's
-// RFC3339 layout can parse it for date ordering.  A non-positive timestamp
-// (absent / zero) yields nil → JSON null, matching the "no date" signal the
-// other sources produce via stringPtr("").
+// toshoDate formats a unix-seconds timestamp in the package's wire layout
+// (RFC 3339 UTC, see date.go) so it matches every other source and rank.go
+// can parse it for date ordering.  A non-positive timestamp (absent /
+// zero) yields nil → JSON null, the "no date" signal the other sources
+// produce for a missing date.
 func toshoDate(ts int64) *string {
 	if ts <= 0 {
 		return nil
 	}
-	s := time.Unix(ts, 0).UTC().Format(time.RFC3339)
-	return &s
+	return formatWireDate(time.Unix(ts, 0))
 }
 
 // copySeeders returns a fresh *int copy of the decoded seeders pointer so

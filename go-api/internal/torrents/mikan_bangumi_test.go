@@ -111,7 +111,7 @@ func TestFetchMikanByBangumi_ParsesTheFeed(t *testing.T) {
 	// same figure Mikan's own <description> prints ("26.3 GB", binary).
 	assert.Equal(t, "26.3 GiB", first.Size)
 	require.NotNil(t, first.Date)
-	assert.Equal(t, "2026-08-12T06:12:15.638227", *first.Date, "no channel pubDate → the namespaced torrent pubDate")
+	assert.Equal(t, "2026-08-11T22:12:15Z", *first.Date, "no channel pubDate → the namespaced torrent pubDate, UTC+8 to UTC, fraction dropped")
 	require.NotNil(t, first.Fansub)
 	assert.Equal(t, "H-Enc", *first.Fansub)
 	assert.Nil(t, first.Seeders)

@@ -24,7 +24,7 @@
 //   - magnet      → item.enclosure.url, fallback item.link
 //   - size        → FormatBinaryBytes(item.enclosure.length)
 //   - fansub      → ParseFansub(title)
-//   - date        → item.pubDate
+//   - date        → normalizeDate(item.pubDate)  (RFC 3339 UTC)
 //   - source      → SourceAcg
 //
 // Filter: drop items whose magnet doesn't start with "magnet:".
@@ -161,7 +161,7 @@ func mapAcgItems(items []acgItem) []TorrentItem {
 			Magnet: magnet,
 			Size:   FormatBinaryBytes(it.Enclosure.Length),
 			Fansub: ParseFansub(it.Title),
-			Date:   stringPtr(it.PubDate),
+			Date:   normalizeDate(it.PubDate),
 			Source: SourceAcg,
 		})
 	}

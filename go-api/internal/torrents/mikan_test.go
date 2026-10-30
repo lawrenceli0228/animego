@@ -119,7 +119,7 @@ func TestFetchMikan_HappyPath(t *testing.T) {
 	require.NotNil(t, it.Fansub)
 	assert.Equal(t, "喵萌奶茶屋", *it.Fansub)
 	require.NotNil(t, it.Date)
-	assert.Equal(t, "2026-01-01T12:00:00", *it.Date, "channel pubDate absent → falls back to torrent pubDate")
+	assert.Equal(t, "2026-01-01T04:00:00Z", *it.Date, "channel pubDate absent → torrent pubDate, read as UTC+8")
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ func TestFetchMikan_ChannelPubDatePreferred(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.NotNil(t, items[0].Date)
-	assert.Equal(t, "Sat, 03 Jan 2026 09:00:00 GMT", *items[0].Date,
+	assert.Equal(t, "2026-01-03T09:00:00Z", *items[0].Date,
 		"channel-level pubDate wins over the namespaced torrent pubDate")
 }
 

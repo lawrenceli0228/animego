@@ -56,7 +56,7 @@ func TestMapRSSItems_FilterAndMapping(t *testing.T) {
 	require.NotNil(t, it.Fansub)
 	assert.Equal(t, "GroupA", *it.Fansub)
 	require.NotNil(t, it.Date)
-	assert.Equal(t, "Sat, 01 Jan 2026 00:00:00 GMT", *it.Date)
+	assert.Equal(t, "2026-01-01T00:00:00Z", *it.Date, "pubDate normalised to RFC 3339 UTC")
 	assert.Nil(t, it.Provider, "RSS sources never set provider")
 }
 

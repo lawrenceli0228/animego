@@ -98,6 +98,10 @@ func hasMagnetScheme(s string) bool {
 	return strings.HasPrefix(s, magnetScheme)
 }
 
+// minRealSizeBytes is the smallest byte count FormatBinaryBytes treats as
+// a real size; anything below it is a placeholder (see FormatBinaryBytes).
+const minRealSizeBytes = 1024
+
 // binaryUnits are the size units FormatBinaryBytes steps through, each
 // 1024x the previous.  They are the units Nyaa prints in <nyaa:size>.
 var binaryUnits = []string{"KiB", "MiB", "GiB", "TiB"}
@@ -114,11 +118,15 @@ var binaryUnits = []string{"KiB", "MiB", "GiB", "TiB"}
 // same infohash read identically whichever source surfaced it.
 //
 // Input parsing keeps the parseIntJSLike leniency ("1234abc" is 1234).
-// Empty, non-numeric, zero and negative inputs yield "" — the "no size"
-// signal the frontend hides.
+// Empty, non-numeric and sub-KiB inputs yield "" — the "no size" signal
+// the frontend hides.  The sub-KiB cut exists because dmhy's RSS puts a
+// placeholder in <enclosure length>: on 2026-10-31 all 500 items of a
+// live feed carried length="1", which the decimal formatter printed as
+// "0 KB".  No real torrent payload is under a kibibyte, so a number that
+// small is a placeholder, not a size.
 func FormatBinaryBytes(raw string) string {
 	n, ok := parseIntJSLike(raw)
-	if !ok || n <= 0 {
+	if !ok || n < minRealSizeBytes {
 		return ""
 	}
 	v := float64(n) / 1024
