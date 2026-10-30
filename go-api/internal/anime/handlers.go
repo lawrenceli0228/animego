@@ -561,8 +561,10 @@ type MikanIDLookup func(anilistID int32, bgmID *int32) (int32, bool)
 // Two entry points share one response shape:
 //
 //   - ?anilistId=N (primary): resolve the anime's four cached titles into
-//     deduped search variants and, when the id map carries an AniDB id, pull
-//     AnimeTosho's complete aid feed alongside the keyword fan-out.  When
+//     deduped search variants, drop keyword hits whose titles match none of
+//     the anime's titles (those four plus the Traditional Chinese one), and,
+//     when the id map carries an AniDB id, pull AnimeTosho's complete aid
+//     feed alongside the keyword fan-out.  When
 //     mikanIDs names the show's Mikan bangumi page, Mikan's per-bangumi feed
 //     replaces Mikan's keyword search.  Server-side title resolution is what
 //     unlocks full coverage — the client no longer has to guess a single
@@ -624,7 +626,11 @@ func Torrents(agg *torrents.Aggregator, db TorrentsDB, mikanIDs MikanIDLookup) h
 				return
 			}
 
-			query := torrents.AnimeQuery{Variants: buildTorrentVariants(row), AnidbID: row.AnidbID}
+			query := torrents.AnimeQuery{
+				Variants:    buildTorrentVariants(row),
+				AnidbID:     row.AnidbID,
+				MatchTitles: buildTorrentMatchTitles(row),
+			}
 			if mikanIDs != nil {
 				if mikanID, ok := mikanIDs(int32(id), row.BgmID); ok {
 					query.MikanID = &mikanID
@@ -703,6 +709,26 @@ func buildTorrentVariants(row dbgen.GetTorrentQueryInputsByAnilistIDRow) []strin
 		out = append(out, t)
 		if len(out) == maxTorrentVariants {
 			break
+		}
+	}
+	return out
+}
+
+// buildTorrentMatchTitles lists every title the keyword hits are checked
+// against: the four search titles plus the Traditional Chinese one.  The
+// Traditional title is never searched (that would add a fan-out per
+// source), but Taiwanese and Hong Kong groups title releases in it, and a
+// release named only 葬送的芙莉蓮 must still count as this show's.  Blank
+// titles are left out; duplicates are harmless to the matcher.
+func buildTorrentMatchTitles(row dbgen.GetTorrentQueryInputsByAnilistIDRow) []string {
+	candidates := []*string{row.TitleRomaji, row.TitleNative, row.TitleEnglish, row.TitleChinese, row.TitleHant}
+	out := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		if c == nil {
+			continue
+		}
+		if t := strings.TrimSpace(*c); t != "" {
+			out = append(out, t)
 		}
 	}
 	return out

@@ -459,6 +459,12 @@ type AnimeQuery struct {
 	// lists every release for the season, so for this request Mikan is not
 	// searched by title.  The other sources still are.
 	MikanID *int32
+	// MatchTitles are every title the anime is known by (Variants plus
+	// any that are never searched, such as the Traditional Chinese one).
+	// Keyword hits whose titles match none of them are dropped as
+	// another show's releases (relevance.go); rows from the id feeds are
+	// kept regardless.  Empty means no filtering.
+	MatchTitles []string
 }
 
 // FetchForAnime is the id-keyed counterpart to Fetch: instead of a single
@@ -484,7 +490,11 @@ type AnimeQuery struct {
 //     fan-out leaves Mikan's keyword source out.  Per-variant / per-source
 //     failures are absorbed exactly as in Fetch (logged, treated as empty)
 //     — only a parent-ctx cancellation surfaces as a top-level error.
-//  4. Merge → dedup → rank → cache, sharing finalise + cacheResult with
+//  4. Keyword hits (every variant's fan-out) are filtered against
+//     q.MatchTitles so another show sharing a token such as "4th Season"
+//     is dropped; the id feeds are this show by construction and skip the
+//     check.
+//  5. Merge → dedup → rank → cache, sharing finalise + cacheResult with
 //     Fetch (same quality-aware TTL: long for a non-empty result, short
 //     for an all-source miss).
 //
@@ -498,7 +508,7 @@ func (a *Aggregator) FetchForAnime(ctx context.Context, q AnimeQuery) ([]Torrent
 		return []TorrentItem{}, nil
 	}
 
-	key := animeCacheKey(clean, q.AnidbID, q.MikanID)
+	key := animeCacheKey(clean, q.AnidbID, q.MikanID, q.MatchTitles)
 	if cached, hit := a.cache.Get(key); hit {
 		return cached, nil
 	}
@@ -514,6 +524,7 @@ func (a *Aggregator) FetchForAnime(ctx context.Context, q AnimeQuery) ([]Torrent
 	// then the aid feed, then the Mikan feed.
 	aidSlot, mikanSlot := len(clean), len(clean)+1
 	results := make([][]TorrentItem, len(clean)+2)
+	relevant := newRelevanceMatcher(q.MatchTitles)
 
 	g, gctx := errgroup.WithContext(ctx)
 	for i, v := range clean {
@@ -523,7 +534,9 @@ func (a *Aggregator) FetchForAnime(ctx context.Context, q AnimeQuery) ([]Torrent
 			if err != nil {
 				return err
 			}
-			results[i] = items
+			// Keyword hits only: the id feeds below are this show by
+			// construction and skip the check.
+			results[i] = relevant.filter(items)
 			return nil
 		})
 	}
@@ -768,10 +781,12 @@ func cleanVariants(variants []string) []string {
 // (when present) is appended so a keyword-only request and an id-augmented
 // one for the same titles don't collide: the aid feed can add rows the
 // keyword search misses, and a Mikan id swaps Mikan's keyword search for
-// its per-bangumi feed.  A leading marker namespaces these keys away from
-// Fetch's single-query keys so a one-keyword Fetch and a single-variant
-// FetchForAnime never alias.
-func animeCacheKey(clean []string, anidbID, mikanID *int32) string {
+// its per-bangumi feed.  The match titles are appended too, because they
+// decide which keyword hits survive: the same variants checked against
+// different titles are a different result.  A leading marker namespaces
+// these keys away from Fetch's single-query keys so a one-keyword Fetch
+// and a single-variant FetchForAnime never alias.
+func animeCacheKey(clean []string, anidbID, mikanID *int32, matchTitles []string) string {
 	lowered := make([]string, len(clean))
 	for i, v := range clean {
 		lowered[i] = strings.ToLower(v)
@@ -785,5 +800,18 @@ func animeCacheKey(clean []string, anidbID, mikanID *int32) string {
 	if mikanID != nil {
 		key += "|mikan=" + strconv.Itoa(int(*mikanID))
 	}
+	if len(matchTitles) > 0 {
+		key += "|match=" + strings.Join(sortedLower(matchTitles), "\x00")
+	}
 	return key
+}
+
+// sortedLower returns a lower-cased, sorted copy of ss.
+func sortedLower(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = strings.ToLower(strings.TrimSpace(s))
+	}
+	sort.Strings(out)
+	return out
 }

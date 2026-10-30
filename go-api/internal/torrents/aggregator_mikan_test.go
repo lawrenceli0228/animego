@@ -183,14 +183,14 @@ func TestAnimeCacheKey_IncludesTheMikanID(t *testing.T) {
 	t.Parallel()
 
 	variants := []string{"Alpha"}
-	without := animeCacheKey(variants, nil, nil)
-	with3141 := animeCacheKey(variants, nil, int32Ptr(3141))
-	with3821 := animeCacheKey(variants, nil, int32Ptr(3821))
+	without := animeCacheKey(variants, nil, nil, nil)
+	with3141 := animeCacheKey(variants, nil, int32Ptr(3141), nil)
+	with3821 := animeCacheKey(variants, nil, int32Ptr(3821), nil)
 
 	assert.NotEqual(t, without, with3141, "a Mikan id changes the key")
 	assert.NotEqual(t, with3141, with3821, "different Mikan ids, different keys")
 	// An aid and a Mikan id with the same number must not alias.
-	assert.NotEqual(t, animeCacheKey(variants, int32Ptr(7), nil), animeCacheKey(variants, nil, int32Ptr(7)))
+	assert.NotEqual(t, animeCacheKey(variants, int32Ptr(7), nil, nil), animeCacheKey(variants, nil, int32Ptr(7), nil))
 }
 
 // A request without a Mikan id must not be answered from the cache entry of
