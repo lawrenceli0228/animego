@@ -28,7 +28,7 @@
 // testImportHygiene.test.ts). Nothing about it belongs in the server HTML.
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { fillTemplate } from "@/lib/home/time";
 import { useLang } from "@/lib/lang-client";
 import {
@@ -78,6 +78,20 @@ interface Held {
   page: AdminUsersPage;
   query: AdminUsersQuery;
 }
+
+const subscribeNothing = () => () => {};
+
+/**
+ * False in the server's HTML and while hydrating it, true in the browser
+ * after. A request is only ever out in the browser: until then the server's
+ * failed fetch is what the section has to say.
+ */
+const useInBrowser = () =>
+  useSyncExternalStore(
+    subscribeNothing,
+    () => true,
+    () => false,
+  );
 
 export function UsersSection({ initial }: UsersSectionProps) {
   const { t } = useLang();
@@ -173,7 +187,10 @@ export function UsersSection({ initial }: UsersSectionProps) {
   const refetch = useCallback(() => setReload((n) => n + 1), []);
 
   // The failed query again, with the controls showing it while it is out.
+  // The error box, 重试 with it, goes while the request is out; focus moves
+  // to the heading first rather than falling to <body> with the button.
   const retry = () => {
+    headingRef.current?.focus({ preventScroll: true });
     if (failure) {
       setMenuFor(null);
       setQuery(failure);
@@ -225,9 +242,11 @@ export function UsersSection({ initial }: UsersSectionProps) {
   const rows = data?.data ?? [];
   const today = data?.today ?? "";
   const allUsers = data?.segments?.all ?? data?.total;
-  // A newer request that is out hides an older failure, as long as there are
-  // rows to dim instead; with none, the error stays until something answers.
-  const failed = failure !== null && (data === null || !loading);
+  // A request that is out hides the last failure: there are rows to dim, or
+  // with none the loading line below. Not in the server's HTML, though, where
+  // nothing is out yet and the server's own failure is the news.
+  const inBrowser = useInBrowser();
+  const failed = failure !== null && !(loading && inBrowser);
 
   const sortHeader = (label: string, key: AdminUserSort | null, numeric = false) => {
     const sorted = key !== null && query.sort === key;
@@ -353,7 +372,12 @@ export function UsersSection({ initial }: UsersSectionProps) {
             </button>
           </footer>
         </>
-      ) : null}
+      ) : failed ? null : (
+        // No page yet: the server's fetch failed and the browser's is out.
+        <p className={s.empty} role="status">
+          {t("admin.userPanel.loading")}
+        </p>
+      )}
 
       {drawer ? (
         <UserDetailDrawer

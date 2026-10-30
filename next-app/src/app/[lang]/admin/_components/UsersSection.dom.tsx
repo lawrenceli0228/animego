@@ -199,7 +199,7 @@ describe("a failed request", () => {
     expect(busy()).toBeNull();
   });
 
-  test("puts the search box back too, unless something newer was typed", async () => {
+  test("puts the search box back too", async () => {
     const box = host.querySelector<HTMLInputElement>('input[type="search"]');
     if (!box) throw new Error("no search box");
     await type(box, "fixture");
@@ -211,6 +211,32 @@ describe("a failed request", () => {
     expect(box.value).toBe("");
     // Nothing re-sent the failed search on its own.
     expect(net.requests).toHaveLength(1);
+  });
+
+  test("but not over a search typed since, which is asked for next", async () => {
+    const box = host.querySelector<HTMLInputElement>('input[type="search"]');
+    if (!box) throw new Error("no search box");
+    await type(box, "fixture");
+    await settle(450);
+    await type(box, "fixture2");
+
+    await lastRequest().respond(FAILED, 500);
+    expect(box.value).toBe("fixture2");
+    await settle(450);
+
+    expect(lastRequest().url).toBe("/api/admin/users?page=1&q=fixture2");
+  });
+
+  test("重试 moves focus to the list's heading before its own button goes", async () => {
+    await click(chip("admin"));
+    await lastRequest().respond(FAILED, 500);
+    const retry = button(host, "重试");
+    retry.focus();
+
+    await click(retry);
+
+    expect(alert()).toBeNull();
+    expect(document.activeElement?.id).toBe("users-heading");
   });
 
   test("重试 asks for the failed query again, and its chip comes back with it", async () => {
@@ -236,6 +262,23 @@ describe("a failed request", () => {
 
     expect(alert()).toContain("用户列表读取失败");
     expect(busy()).toBeNull();
+  });
+});
+
+describe("a first page the server could not read", () => {
+  test("the browser's own try says it is loading, and its failure says so", async () => {
+    await unmountAll();
+    host = await mount(<UsersSection initial={null} />);
+    const status = () => host.querySelector('[role="status"]')?.textContent ?? null;
+
+    expect(lastRequest().url).toBe("/api/admin/users?page=1");
+    expect(status()).toBe("加载中…");
+    expect(alert()).toBeNull();
+
+    await lastRequest().respond(FAILED, 500);
+
+    expect(status()).toBeNull();
+    expect(alert()).toContain("用户列表读取失败");
   });
 });
 
