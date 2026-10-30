@@ -196,10 +196,12 @@ func TestBuildActivityDepth_ReconstructedFollowsTheWindowStart(t *testing.T) {
 		days  int
 		want  bool
 	}{
-		{"2026-03-05", 7, false}, // window starts on the seam itself
+		{"2026-03-04", 7, false}, // window starts the day after the seam
+		{"2026-03-05", 7, true},  // window starts on the seam, which is part reconstructed
 		{"2026-03-06", 7, true},  // window starts the day before it
 		{"2026-03-05", 30, true},
-		{"2026-02-10", 30, false},
+		{"2026-02-09", 30, false},
+		{"2026-02-10", 30, true},
 		{"", 7, true}, // nothing instrumented at all
 	}
 	for _, tc := range cases {
@@ -241,9 +243,9 @@ func TestBuildActivityDaily_FillsGapsAgainstTheSnapshotToday(t *testing.T) {
 	assert.Equal(t, ActivityDay{Date: "2031-01-02", Returning: 6, SignupDay: 2, Requests: 70, Logins: 3, Instrumented: true, Partial: true}, got[6])
 }
 
-// TestBuildActivityDaily_Flags: instrumented flips exactly on
-// instrumentedSince (the seam day itself is instrumented), and only today is
-// partial.
+// TestBuildActivityDaily_Flags: instrumented flips the day after
+// instrumentedSince (recording began during the seam day, so the seam day is
+// still part reconstructed), and only today is partial.
 func TestBuildActivityDaily_Flags(t *testing.T) {
 	got, err := buildActivityDaily(actClock(t, "2026-03-11", "2026-03-08"), 7, nil)
 	require.NoError(t, err)
@@ -257,8 +259,8 @@ func TestBuildActivityDaily_Flags(t *testing.T) {
 		}
 	}
 	assert.Equal(t, map[string]bool{
-		"2026-03-05": false, "2026-03-06": false, "2026-03-07": false,
-		"2026-03-08": true, "2026-03-09": true, "2026-03-10": true, "2026-03-11": true,
+		"2026-03-05": false, "2026-03-06": false, "2026-03-07": false, "2026-03-08": false,
+		"2026-03-09": true, "2026-03-10": true, "2026-03-11": true,
 	}, instrumented)
 	assert.Equal(t, []string{"2026-03-11"}, partial)
 }
@@ -317,10 +319,12 @@ func TestBuildTodayActive_SameTimeIsNullOnReconstructedDays(t *testing.T) {
 		wantLastWeek  *int64
 	}{
 		{"", nil, nil},
-		{"2026-03-11", nil, nil},      // only today is instrumented
-		{"2026-03-10", &seven, nil},   // yesterday is the seam day
+		{"2026-03-11", nil, nil},      // recording began today
+		{"2026-03-10", nil, nil},      // yesterday is the seam day, part reconstructed
+		{"2026-03-09", &seven, nil},   // yesterday is the first day measured whole
 		{"2026-03-05", &seven, nil},   // seven days ago is still before it
-		{"2026-03-04", &seven, &five}, // seven days ago is the seam day
+		{"2026-03-04", &seven, nil},   // seven days ago is the seam day
+		{"2026-03-03", &seven, &five}, // seven days ago is the first day measured whole
 		{"2026-01-01", &seven, &five}, // long instrumented
 	}
 	for _, tc := range cases {
@@ -345,12 +349,16 @@ func TestBuildActivityWindow_PartsAddUpAndFlagsFollowTheStarts(t *testing.T) {
 		wantPrev  bool
 		situation string
 	}{
-		{7, "2026-03-05", false, true, "window starts on the seam (today-6); prev starts today-13"},
+		{7, "2026-03-04", false, true, "window starts the day after the seam; prev starts before it"},
+		{7, "2026-03-05", true, true, "window starts on the seam (today-6), which is part reconstructed"},
 		{7, "2026-03-06", true, true, "seam one day into the window"},
-		{7, "2026-02-26", false, false, "prev starts on the seam (today-13)"},
+		{7, "2026-02-25", false, false, "prev starts the day after the seam"},
+		{7, "2026-02-26", false, true, "prev starts on the seam (today-13)"},
 		{7, "2026-02-27", false, true, "seam one day into prev"},
-		{30, "2026-02-10", false, true, "window starts on the seam (today-29)"},
-		{30, "2026-01-11", false, false, "prev starts on the seam (today-59)"},
+		{30, "2026-02-09", false, true, "window starts the day after the seam"},
+		{30, "2026-02-10", true, true, "window starts on the seam (today-29)"},
+		{30, "2026-01-10", false, false, "prev starts the day after the seam"},
+		{30, "2026-01-11", false, true, "prev starts on the seam (today-59)"},
 		{30, "2026-01-12", false, true, "seam one day into prev"},
 		{30, "", true, true, "nothing instrumented"},
 	}
@@ -490,15 +498,17 @@ func TestBuildActivityCohorts_MapsEveryHorizonInOrder(t *testing.T) {
 }
 
 // TestBuildActivityCohorts_ReconstructedBoundary: a week is reconstructed when
-// its earliest possible return day, the Tuesday, predates the seam.
+// its earliest possible return day, the Tuesday, is not measured whole: when
+// it is the seam day or before it.
 func TestBuildActivityCohorts_ReconstructedBoundary(t *testing.T) {
 	cases := []struct {
 		since string
 		want  bool
 	}{
-		{"2026-03-03", false}, // the Tuesday is the seam day
+		{"2026-03-02", false}, // the Tuesday is the day after the seam
+		{"2026-03-03", true},  // the Tuesday is the seam day
 		{"2026-03-04", true},  // the Tuesday is the day before it
-		{"2026-03-02", false},
+		{"2026-03-01", false},
 		{"", true},
 	}
 	for _, tc := range cases {

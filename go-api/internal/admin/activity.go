@@ -141,9 +141,11 @@ type ActivityPanel struct {
 	AsOf  string `json:"asOf"`
 	// InstrumentedSince is the first day with per-request data, derived from
 	// the data itself (the earliest row with a non-zero request count;
-	// migration 0026's reconstruction always writes zero).  Null means
-	// recording has not started and must be rendered as "not instrumented",
-	// not as a date.
+	// migration 0026's reconstruction always writes zero).  Recording began
+	// during that day, so the day itself is still part reconstructed and the
+	// day after it is the first one measured whole (see instrumented).  Null
+	// means recording has not started and must be rendered as "not
+	// instrumented", not as a date.
 	InstrumentedSince *string `json:"instrumentedSince"`
 
 	TodayActive ActivityTodayActive  `json:"todayActive"`
@@ -534,15 +536,21 @@ func newActivityClock(row dbgen.GetActivityClockRow) (activityClock, error) {
 	return activityClock{today: today, asOf: row.AsOf, since: since, hasSince: hasSince}, nil
 }
 
-// instrumented reports whether day has per-request data: instrumentation has
-// started and day is on or after the day it did.
+// instrumented reports whether day was measured whole: instrumentation has
+// started and day is after the day it did.
+//
+// The seam day itself is not.  Recording began at some point during it, so
+// the hours before that hold only 0026's interaction days: somebody who
+// browsed that morning without commenting or subscribing is missing from it,
+// and its count is a floor like every reconstructed day's.  Drawn as measured,
+// it reads as a dip on the day before recording took over.
 //
 // Every "reconstructed" flag in the payload is this predicate negated for the
-// FIRST day its range depends on -- a window's start, a week's earliest
-// possible return day, the day a same-time comparison looks at -- so the
-// boundary is defined once and moves for all of them together.
+// FIRST day its range depends on -- a window's start, the earliest possible
+// return day of a signup week or window, the day a same-time comparison looks
+// at -- so the boundary is defined once and moves for all of them together.
 func (c activityClock) instrumented(day panelDay) bool {
-	return c.hasSince && day >= c.since
+	return c.hasSince && day > c.since
 }
 
 // windowStart is the first day of the `days`-day range ending today.
@@ -585,12 +593,16 @@ func buildActivityWindow(c activityClock, days int, row dbgen.GetActivityWindowR
 	}
 }
 
+// buildActivitySignupWindow fills the signups card.  The counts are recorded
+// instants and never reconstructed; ReturnedAfter is read from activity days
+// after each signup day, so the earliest day it depends on is the day after
+// the window starts.
 func buildActivitySignupWindow(c activityClock, days int, row dbgen.GetActivitySignupsRow) ActivitySignupWindow {
 	return ActivitySignupWindow{
 		Count:         row.Signups,
 		PrevCount:     row.PrevSignups,
 		ReturnedAfter: row.ReturnedAfter,
-		Reconstructed: !c.instrumented(c.windowStart(days)),
+		Reconstructed: !c.instrumented(c.windowStart(days) + 1),
 	}
 }
 

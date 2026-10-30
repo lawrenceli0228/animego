@@ -103,7 +103,9 @@ type GetActivityClockRow struct {
 // NULL means recording has not started -- a container running the migrations
 // but not yet serving -- and the caller must render that as "not
 // instrumented" rather than as a date.  Everything before this date counts
-// interaction days; everything from it on counts visits.  See 0026's header.
+// interaction days and everything after it visits; the date itself is both,
+// because recording began during it, and the handler treats it as
+// reconstructed.  See 0026's header.
 // Closed at today like every other range here: a row dated after today
 // cannot start the seam on its own.
 func (q *Queries) GetActivityClock(ctx context.Context) (GetActivityClockRow, error) {

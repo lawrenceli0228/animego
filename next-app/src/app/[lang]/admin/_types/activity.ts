@@ -17,11 +17,13 @@
 //   returning       active on a day that is NOT their signup day.
 //   signup-only     active in the window, but only on their signup day.
 //                   active = returning + signupOnly, always.
-//   reconstructed   the range starts before `instrumentedSince` (or nothing is
-//                   instrumented yet): days before that were rebuilt from
-//                   interaction traces by migration 0026 and undercount
-//                   visits.  Show such numbers as a floor, never as a
-//                   measurement.
+//   reconstructed   the first day the range depends on is on or before
+//                   `instrumentedSince` (or nothing is instrumented yet):
+//                   days before it were rebuilt from interaction traces by
+//                   migration 0026 and undercount visits, and so does the
+//                   seam day itself, whose hours before recording began hold
+//                   only those traces.  Show such numbers as a floor, never
+//                   as a measurement.
 //
 // All of it is read in ONE read-only REPEATABLE READ transaction, so the
 // parts of one response always agree with each other (depth.total equals the
@@ -36,7 +38,10 @@ export interface AdminActivityPanel {
   today: string;
   /** When the snapshot was taken, "YYYY-MM-DD HH:mm" in +08. */
   asOf: string;
-  /** First day with per-request data; null when nothing is instrumented. */
+  /**
+   * First day with per-request data; null when nothing is instrumented.
+   * Recording began during it, so the first day measured whole is the next.
+   */
   instrumentedSince: string | null;
 
   todayActive: AdminTodayActive;
@@ -103,7 +108,7 @@ export interface AdminActivityDay {
   requests: number;
   /** Password logins. */
   logins: number;
-  /** date >= instrumentedSince. */
+  /** date > instrumentedSince: measured whole. */
   instrumented: boolean;
   /** date === today: the day is not over. */
   partial: boolean;

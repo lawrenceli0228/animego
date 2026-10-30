@@ -412,6 +412,8 @@ func TestActivityPanel_SameTimeComparisons(t *testing.T) {
 		p := e.person(t, e.at(-30, 9, 0), false)
 		e.visitAt(t, p, offset, e.at(offset, hh, mm), 1, 0)
 	}
+	// Recording began on day -8, so -7 and -1 are measured whole.
+	visitor(-8, 12, 0)
 	visitor(-1, 9, 59)  // a minute before: counted
 	visitor(-1, 10, 0)  // exactly 24 hours before: counted
 	visitor(-1, 10, 1)  // a minute after: not yet, by this time of day
@@ -432,25 +434,28 @@ func TestActivityPanel_SameTimeComparisons(t *testing.T) {
 
 // TestActivityPanel_SameTimeIsNullBeforeInstrumentation: a reconstructed day's
 // first_seen_at is the time of an interaction, not of a visit, so the
-// comparison is withheld rather than guessed.
+// comparison is withheld rather than guessed.  The seam day counts as
+// reconstructed: recording began during it, so its morning is interactions.
 func TestActivityPanel_SameTimeIsNullBeforeInstrumentation(t *testing.T) {
 	cases := []struct {
 		name          string
-		firstMeasured int // the earliest day with request_count > 0
+		seam          int // the earliest day with request_count > 0
 		wantYesterday bool
 		wantLastWeek  bool
 	}{
-		{"only today is measured", 0, false, false},
-		{"yesterday is the first measured day", -1, true, false},
-		{"seven days ago is the first measured day", -7, true, true},
+		{"recording began today", 0, false, false},
+		{"yesterday is the seam day", -1, false, false},
+		{"yesterday is the first day measured whole", -2, true, false},
+		{"seven days ago is the seam day", -7, true, false},
+		{"seven days ago is the first day measured whole", -8, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newPanelEnv(t, panelFrozenNow())
 			p := e.person(t, e.at(-30, 9, 0), false)
-			for _, offset := range []int{-7, -1, 0} {
+			for _, offset := range []int{-8, -7, -2, -1, 0} {
 				requests := int64(0)
-				if offset >= tc.firstMeasured {
+				if offset >= tc.seam {
 					requests = 3
 				}
 				e.visitAt(t, p, offset, e.at(offset, 8, 0), requests, 0)
@@ -458,7 +463,7 @@ func TestActivityPanel_SameTimeIsNullBeforeInstrumentation(t *testing.T) {
 
 			got := e.panel(t, "")
 			require.NotNil(t, got.InstrumentedSince)
-			assert.Equal(t, e.date(tc.firstMeasured), *got.InstrumentedSince)
+			assert.Equal(t, e.date(tc.seam), *got.InstrumentedSince)
 			assert.Equal(t, tc.wantYesterday, got.TodayActive.SameTimeYesterday != nil, "sameTimeYesterday present")
 			assert.Equal(t, tc.wantLastWeek, got.TodayActive.SameTimeLastWeek != nil, "sameTimeLastWeek present")
 			assert.Equal(t, int64(1), got.TodayActive.YesterdayTotal, "the whole-day count is never withheld")
@@ -468,9 +473,10 @@ func TestActivityPanel_SameTimeIsNullBeforeInstrumentation(t *testing.T) {
 
 // --- flags ----------------------------------------------------------------------
 
-// TestActivityPanel_FlagsFollowTheSeam: per-day instrumented flips exactly on
-// instrumentedSince, only today is partial, and each range is reconstructed
-// exactly when its first day predates the seam.
+// TestActivityPanel_FlagsFollowTheSeam: per-day instrumented flips the day
+// after instrumentedSince (the seam day is part reconstructed), only today is
+// partial, and each range is reconstructed exactly when the first day it
+// depends on is not measured whole.
 func TestActivityPanel_FlagsFollowTheSeam(t *testing.T) {
 	e := newPanelEnv(t, panelFrozenNow())
 	p := e.person(t, e.at(-60, 9, 0), false)
@@ -487,7 +493,7 @@ func TestActivityPanel_FlagsFollowTheSeam(t *testing.T) {
 
 	for i, day := range got.Daily {
 		offset := i - 29
-		assert.Equal(t, offset >= -10, day.Instrumented, "%s instrumented", day.Date)
+		assert.Equal(t, offset > -10, day.Instrumented, "%s instrumented", day.Date)
 		assert.Equal(t, offset == 0, day.Partial, "%s partial", day.Date)
 	}
 
@@ -501,15 +507,16 @@ func TestActivityPanel_FlagsFollowTheSeam(t *testing.T) {
 }
 
 // TestActivityPanel_CohortReconstructedBoundary: a week is reconstructed when
-// its Tuesday -- the earliest day a Monday signup can come back -- predates
-// the seam.
+// its Tuesday -- the earliest day a Monday signup can come back -- is not
+// measured whole: when it is the seam day or before it.
 func TestActivityPanel_CohortReconstructedBoundary(t *testing.T) {
 	// Wednesday: week 1 starts on today-9, so its Tuesday is today-8.
 	for _, tc := range []struct {
 		seam            int
 		wantWeek1Recons bool
 	}{
-		{-8, false}, // the seam is the Tuesday itself
+		{-9, false}, // the seam is the day before the Tuesday
+		{-8, true},  // the seam is the Tuesday itself
 		{-7, true},  // the seam is the day after it
 	} {
 		t.Run(fmt.Sprintf("seam today%d", tc.seam), func(t *testing.T) {
@@ -874,7 +881,9 @@ func modelPanel(e panelEnv, people []modelPerson, days int) ActivityPanel {
 			}
 		}
 	}
-	instrumented := func(offset int) bool { return hasSince && offset >= since }
+	// The seam day itself is part reconstructed; the day after it is the
+	// first one measured whole (activityClock.instrumented).
+	instrumented := func(offset int) bool { return hasSince && offset > since }
 	var out ActivityPanel
 	if hasSince {
 		s := e.date(since)
@@ -944,7 +953,8 @@ func modelPanel(e panelEnv, people []modelPerson, days int) ActivityPanel {
 			out.Signups30.PrevCount++
 		}
 	}
-	out.Signups30.Reconstructed = !instrumented(-29)
+	// The earliest day a return can be on is the day after the window starts.
+	out.Signups30.Reconstructed = !instrumented(-28)
 
 	for offset := -(days - 1); offset <= 0; offset++ {
 		d := ActivityDay{Date: e.date(offset), Instrumented: instrumented(offset), Partial: offset == 0}
