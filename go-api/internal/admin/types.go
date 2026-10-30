@@ -330,14 +330,66 @@ type userItem struct {
 	// monthly.  A high value next to a low ActiveDays is the interesting
 	// shape — it usually means the session keeps failing to persist.
 	Logins int64 `json:"logins"`
+
+	// Ratings is how many of the account's subscriptions carry a score.
+	Ratings int64 `json:"ratings"`
+
+	// WatchedEpisodes counts episode marks (episode_watches rows).
+	WatchedEpisodes int64 `json:"watchedEpisodes"`
+
+	// Returned is true when the account was recorded on any day after its
+	// signup day, both days on the +08 reporting boundary.  The same SQL as
+	// the "returned" segment, so a row's flag and the chip it is listed under
+	// cannot disagree.
+	Returned bool `json:"returned"`
+
+	// RecentActiveDates are the recorded days in [today-29, today],
+	// ascending, as YYYY-MM-DD reporting days.  Never null: an account with
+	// nothing in the window has an empty strip.
+	RecentActiveDates []string `json:"recentActiveDates"`
+
+	// LastDevice is the live session used most recently, or null when the
+	// account has none (signed out everywhere, or every session expired).
+	LastDevice *userDevice `json:"lastDevice"`
+}
+
+// userDevice is a session as the user table names it: the parsed
+// User-Agent (auth.ParseUserAgent), the country the CDN placed the request
+// in, and when the session was last used.
+type userDevice struct {
+	Kind       string    `json:"kind"`
+	OS         string    `json:"os"`
+	Browser    string    `json:"browser"`
+	Country    *string   `json:"country"`
+	LastUsedAt time.Time `json:"lastUsedAt"`
+}
+
+// userSegmentCounts is every segment's size over all accounts.  A struct
+// rather than a map so all six keys are always present and in a fixed order.
+type userSegmentCounts struct {
+	All           int64 `json:"all"`
+	Active7       int64 `json:"active7"`
+	Returned      int64 `json:"returned"`
+	NeverReturned int64 `json:"neverReturned"`
+	Subscribed    int64 `json:"subscribed"`
+	Admin         int64 `json:"admin"`
 }
 
 // userListResponse is the full /api/admin/users envelope.  Same
 // field order as enrichmentListResponse — Express keeps both list
-// endpoints' top-level shape identical.
+// endpoints' top-level shape identical.  today and segments follow the
+// historical four so their order is undisturbed.
 type userListResponse struct {
 	Data    []userItem `json:"data"`
 	HasMore bool       `json:"hasMore"`
 	Total   int64      `json:"total"`
 	Page    int        `json:"page"`
+
+	// Today is the reporting day (YYYY-MM-DD, +08) every date in the page was
+	// computed against: the strip, the segments and the active7 window.
+	Today string `json:"today"`
+
+	// Segments ignores q and the depth filter: the chips show the size of
+	// each segment, not of the current search.
+	Segments userSegmentCounts `json:"segments"`
 }

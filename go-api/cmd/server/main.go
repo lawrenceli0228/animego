@@ -689,6 +689,7 @@ func main() {
 	}
 	adminReadHandlers := admin.NewHandlers(pool, q, queueStatusFn, nil)
 	adminUserHandlers := admin.NewUserHandlers(admin.NewUserStore(pool), enqueuer)
+	adminSessionHandlers := admin.NewUserSessionHandlers(admin.NewUserStore(pool))
 	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
 	adminHantHandlers := admin.NewHantHandlers(q, enqueuer)
 	adminActivityHandlers := admin.NewActivityHandlers(q, slog.Default())
@@ -1033,6 +1034,7 @@ func main() {
 		r.Get("/stats", adminReadHandlers.GetStats)
 		r.Get("/enrichment", adminReadHandlers.ListEnrichment)
 		r.Get("/users", adminReadHandlers.ListUsers)
+		r.Get("/users/{userId}", adminReadHandlers.GetUser)
 		r.Get("/reports", safetyHandlers.ListReports)
 		r.Patch("/reports/{id}", safetyHandlers.UpdateReport)
 		// Removing a reported review, thread or reply (soft; deleted_by is
@@ -1085,6 +1087,10 @@ func main() {
 		r.Patch("/users/{userId}", adminUserHandlers.UpdateUser)
 		r.Post("/users/{userId}/password", adminUserHandlers.SetUserPassword)
 		r.Delete("/users/{userId}", adminUserHandlers.DeleteUser)
+		// Signing an account out from the admin page: every device, or one.
+		// The admin's own account is refused; its devices are on /settings.
+		r.Delete("/users/{userId}/sessions", adminSessionHandlers.RevokeUserSessions)
+		r.Delete("/users/{userId}/sessions/{sessionId}", adminSessionHandlers.RevokeUserSession)
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

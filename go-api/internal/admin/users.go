@@ -69,6 +69,7 @@ const (
 	msgEmailConflict      = "Email already exists"
 	msgUserNotFound       = "User not found"
 	msgCannotDeleteSelf   = "Cannot delete yourself"
+	msgCannotRevokeSelf   = "Cannot sign yourself out here" // own devices: the settings page
 	msgInvalidUserID      = "Invalid user ID"
 	msgInvalidRequestBody = "Invalid request body"
 	msgPasswordTooShort   = "Password must be at least 6 characters"

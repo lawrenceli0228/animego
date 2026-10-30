@@ -490,6 +490,14 @@ type Querier interface {
 	// LockUserForNewSession, in its transaction.
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) error
 	DecideEditItem(ctx context.Context, status string, rejectNote *string, iD uuid.UUID, submissionID uuid.UUID) (int64, error)
+	// "Sign this account out everywhere", from the admin page.  Runs in
+	// admin.UserStore.RevokeAllUserSessions' transaction after LockUserForRevoke
+	// and ClearLegacyRefreshTokens -- the same order, for the same reason, as
+	// auth.Store.RevokeOtherSessions, except that no session is kept: the admin
+	// is not one of this account's devices.  Each device notices on its next
+	// request, when jwtx's session check (UserSessionLive) no longer finds the
+	// session its access token names.
+	DeleteAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error)
 	// Wipe child tables when Reset clears a row.  Express puts characters /
 	// episode_titles back to `undefined` in the document — Postgres mirrors
 	// that with a DELETE inside the reset transaction.
@@ -828,6 +836,21 @@ type Querier interface {
 	// it, visit days -- the same caveat that applies to the chart.  It is the
 	// honest ceiling on "how many days do we know this account was here".
 	GetAdminUserActivityCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]GetAdminUserActivityCountsRow, error)
+	// Every scalar the detail drawer shows, in one round-trip.  pgx.ErrNoRows
+	// means the account does not exist (404).
+	//
+	// Activity is all time: active_days counts every row (before
+	// instrumented_since a row is a reconstructed interaction day, after it a
+	// recorded visit -- the same caveat as the list column), recorded_days only
+	// the rows the live recorder wrote (request_count > 0).
+	//
+	// score_sum is returned instead of an average so the mean is computed in Go
+	// from two NOT NULL integers: "no rated subscriptions" stays an explicit
+	// null instead of depending on how a nullable float survives a cast.
+	//
+	// Community counts skip soft-deleted rows where the table has deleted_at
+	// (threads, replies, reviews); the other tables delete for real.
+	GetAdminUserDetail(ctx context.Context, id uuid.UUID) (GetAdminUserDetailRow, error)
 	// ==================== User management ====================
 	// Batch fetch sub_count + follower_count for a slice of user ids.
 	// Replaces the two Promise.all aggregate pipelines in listUsers.
@@ -1578,6 +1601,55 @@ type Querier interface {
 	// per_event_limit for each.  One query for the whole page rather than one
 	// per event.
 	ListActivityReplies(ctx context.Context, eventIds []uuid.UUID, viewerID *uuid.UUID, perEventLimit int32) ([]ListActivityRepliesRow, error)
+	// The detail drawer's 90-day calendar: every recorded day of the account in
+	// [today-89, today], ascending.  recorded = the live recorder wrote the row;
+	// false means migration 0026 reconstructed it from other tables.
+	ListAdminUserActivityDays(ctx context.Context, userID uuid.UUID, today pgtype.Date) ([]ListAdminUserActivityDaysRow, error)
+	// The most recently used LIVE session of each account on the page.  Expired
+	// rows stay in user_sessions until the owner's next login prunes them, so
+	// the expiry predicate is what keeps a device that can no longer refresh off
+	// the "last device" column.  Ties on last_used_at break on id, the same order
+	// the settings page lists devices in (ListUserSessions).
+	ListAdminUserLastDevices(ctx context.Context, userIds []uuid.UUID) ([]ListAdminUserLastDevicesRow, error)
+	// The account's live sessions, most recently used first: the settings
+	// page's device list (ListUserSessions) as an admin sees it, plus expiry.
+	ListAdminUserLiveSessions(ctx context.Context, userID uuid.UUID) ([]ListAdminUserLiveSessionsRow, error)
+	// The admin user table's per-page batches, one account's detail drawer, and
+	// the admin's "sign this account out" action.
+	//
+	// These describe ACCOUNTS, so they read `users` and `user_activity_daily`
+	// directly rather than the activity_people / activity_days views (migration
+	// 0054): a deleted account is not an account, and the views exist for
+	// statistics about people over time.  The one exception is
+	// instrumented_since below, which is a fact about the recorder rather than
+	// about this account and is therefore read from the union like every other
+	// seam on the admin page.
+	//
+	// The page query itself (filters, sort, pagination, the segment counts) is
+	// NOT here: its WHERE and ORDER BY are composed from a whitelist at request
+	// time, which sqlc cannot express -- see internal/admin/list_users.go.
+	//
+	// `today` is always a parameter, never derived from now() here.  The handler
+	// computes the reporting day once per request (activity.Day, +08) and passes
+	// the same value to the page query, the segment counts and the batches below,
+	// so the strip, the segments and the response's `today` cannot disagree
+	// across a midnight that falls between two statements.  Session liveness is
+	// the exception and uses now(): expiry is an instant, not a reporting day.
+	//
+	// Conventions follow admin.sql: counts are cast to ::bigint so sqlc emits
+	// int64, and nullable aggregates are cast so sqlc can type them.
+	// The 30-day strip for one page of the user table: every recorded day in
+	// [today-29, today], ascending per user.  One round-trip for the whole page.
+	// An account with no row in the window simply contributes no rows; the
+	// handler starts every account with an empty strip.
+	ListAdminUserRecentDays(ctx context.Context, userIds []uuid.UUID, today pgtype.Date) ([]ListAdminUserRecentDaysRow, error)
+	// The account's most recently updated subscriptions, same title fields.
+	ListAdminUserRecentSubscriptions(ctx context.Context, userID uuid.UUID, rowLimit int32) ([]ListAdminUserRecentSubscriptionsRow, error)
+	// The account's newest episode marks with the title fields pickTitle()
+	// reads.  Marks backfilled by migration 0024 share one watched_at, so the
+	// tie-break (show, then episode, both descending) is what keeps the order
+	// stable between two loads of the drawer.
+	ListAdminUserRecentWatches(ctx context.Context, userID uuid.UUID, rowLimit int32) ([]ListAdminUserRecentWatchesRow, error)
 	// Rows due for an AniList rating read, most urgent first.
 	//
 	// Two populations, one query, because they are the same work with
