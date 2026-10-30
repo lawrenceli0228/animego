@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { STRIP_YEARS, isRankedYear, parseTopYear, parseTopYears, siteYear, stripYears } from "./years";
+import { STRIP_YEARS, isRankedYear, parseTopYear, parseTopYears, siteYear, stripYears, withYearListed } from "./years";
 
 describe("siteYear", () => {
   test("turns over at midnight in China, eight hours before UTC does", () => {
@@ -62,5 +62,13 @@ describe("parseTopYear", () => {
     expect(parseTopYear("1850")).toBeNull();
     expect(parseTopYear("2019.0")).toBeNull();
     expect(parseTopYear("constructor")).toBeNull();
+  });
+});
+
+describe("withYearListed", () => {
+  test("adds a year the list lags behind on, in its place; leaves a listed one alone", () => {
+    const years = [{ year: 2020, count: 3 }, { year: 2010, count: 2 }];
+    expect(withYearListed(years, 2015, 7)).toEqual([{ year: 2020, count: 3 }, { year: 2015, count: 7 }, { year: 2010, count: 2 }]);
+    expect(withYearListed(years, 2020, 9)).toEqual(years);
   });
 });

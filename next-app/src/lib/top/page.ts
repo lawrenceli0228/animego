@@ -14,7 +14,7 @@ import { toTopItems } from "./items";
 import { topItemListJsonLd } from "./jsonLd";
 import { hasFilters, topCanonical, type TopState } from "./query";
 import { topTitle } from "./titles";
-import { isRankedYear, siteYear, stripYears } from "./years";
+import { isRankedYear, siteYear, stripYears, withYearListed } from "./years";
 
 export interface LoadedTopPage {
   data: TopPageData;
@@ -31,8 +31,13 @@ export interface LoadedTopPage {
  * contract every hub page keeps.
  */
 export async function loadTopPage(state: TopState, lang: Lang, locale: Locale, nowMs: number): Promise<LoadedTopPage | null> {
-  const [rows, years] = await Promise.all([fetchTopRows(state), fetchTopYears()]);
-  if (state.year !== null && years !== null && !isRankedYear(years, state.year) && !rows?.length) return null;
+  const [rows, listed] = await Promise.all([fetchTopRows(state), fetchTopYears()]);
+  let years = listed;
+  if (state.year !== null && years !== null && !isRankedYear(years, state.year)) {
+    if (!rows?.length) return null;
+    // The list of years lags the ranking: this year has one all the same.
+    years = withYearListed(years, state.year, rows.length);
+  }
   const items = toTopItems(rows ?? [], lang);
   return {
     data: { state, items, strip: stripYears(years, siteYear(nowMs)) },

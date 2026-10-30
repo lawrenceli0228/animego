@@ -46,6 +46,12 @@ export function isRankedYear(years: readonly TopYear[], year: number): boolean {
   return years.some((y) => y.year === year);
 }
 
+/** `years` with `year` among them (newest first), counted `count` when it was missing. */
+export function withYearListed(years: readonly TopYear[], year: number, count: number): TopYear[] {
+  if (isRankedYear(years, year)) return [...years];
+  return [...years, { year, count }].sort((a, b) => b.year - a.year);
+}
+
 export interface StripYears {
   /** The strip's own cells, newest first. */
   recent: number[];

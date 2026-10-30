@@ -88,7 +88,7 @@ describe("the ranking's server HTML", () => {
 
   test("twenty are shown and the rest wait behind 显示更多 · 还有 N 部", () => {
     const html = render(data({}, 100));
-    const cards = html.match(/<div [^>]*data-anime-card="true"[^>]*>/g) ?? [];
+    const cards: string[] = html.match(/<div [^>]*data-anime-card="true"[^>]*>/g) ?? [];
     expect(cards).toHaveLength(100);
     expect(cards.filter((c) => c.includes("hidden")).length).toBe(80);
     expect(cards.slice(0, 20).every((c) => !c.includes("hidden"))).toBe(true);
