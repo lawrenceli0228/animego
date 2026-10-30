@@ -148,8 +148,10 @@ export interface AdminCohortHorizon {
   /** Members active on some day within `days` days after their signup day. */
   returned: number;
   /**
-   * Every member's horizon is over: lastSignup + days <= today - 1.  Until
-   * then `returned` is still growing and must not be shown as a rate.
+   * The week's members are final and every one's horizon is over: the week's
+   * Sunday (weekStart + 6) <= today - 1 and lastSignup + days <= today - 1.
+   * Until then `returned` (or the week's size) is still growing and must not
+   * be shown as a rate.
    */
   eligible: boolean;
 }

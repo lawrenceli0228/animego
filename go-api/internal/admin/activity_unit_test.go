@@ -426,6 +426,36 @@ func TestBuildActivityCohorts_EligibilityBoundary(t *testing.T) {
 	}
 }
 
+// TestBuildActivityCohorts_OpenWeekIsNotEligible: until the week's Sunday is
+// over, a later signup can still join it with a horizon that has barely
+// begun, so no horizon is eligible however early the members so far signed
+// up.  Wednesday with every member on Monday was the case that printed a
+// one-day rate and took it back that afternoon.
+func TestBuildActivityCohorts_OpenWeekIsNotEligible(t *testing.T) {
+	const week = "2026-03-09" // a Monday
+	cases := []struct {
+		today, lastSignup string
+		want              bool
+	}{
+		{"2026-03-11", "2026-03-09", false}, // Wednesday: the week is open
+		{"2026-03-15", "2026-03-13", false}, // Sunday: still open, today is not over
+		{"2026-03-16", "2026-03-13", true},  // Monday after: final, and Friday's day 1 is over
+		{"2026-03-16", "2026-03-15", false}, // final, but Sunday's day 1 is today
+		{"2026-03-17", "2026-03-15", true},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("today %s, last %s", tc.today, tc.lastSignup), func(t *testing.T) {
+			got, err := buildActivityCohorts(actClock(t, tc.today, "2026-01-01"),
+				[]dbgen.ListActivityCohortsRow{actCohortRow(week, 2, tc.lastSignup)})
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			h := got[0].Horizons[0]
+			require.Equal(t, 1, h.Days)
+			assert.Equal(t, tc.want, h.Eligible)
+		})
+	}
+}
+
 // TestBuildActivityCohorts_EmptyWeekIsNeverEligible: no members, no last
 // signup, nothing to report a rate for.
 func TestBuildActivityCohorts_EmptyWeekIsNeverEligible(t *testing.T) {

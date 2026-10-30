@@ -553,9 +553,10 @@ func TestActivityPanel_NothingInstrumentedYet(t *testing.T) {
 // --- cohorts --------------------------------------------------------------------
 
 // TestActivityPanel_CohortEligibilityBoundary: a week is eligible for horizon
-// h once lastSignup + h <= today - 1.  With today a Wednesday, the current
-// week's Monday is today-2 and its Tuesday today-1; the previous week's
-// Tuesday and Wednesday are today-8 and today-7.
+// h once its members are final (its Sunday, weekStart + 6, is a whole day in
+// the past) and lastSignup + h <= today - 1.  With today a Wednesday, the
+// current week's Monday is today-2 and its Tuesday today-1; the previous
+// week runs from today-9 to its Sunday, today-3.
 func TestActivityPanel_CohortEligibilityBoundary(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -564,8 +565,8 @@ func TestActivityPanel_CohortEligibilityBoundary(t *testing.T) {
 		horizon   int
 		eligible  bool
 	}{
-		{"last signup today-2 is eligible for 1 day", []int{-2}, -2, 1, true},
-		{"last signup today-1 is not", []int{-2, -1}, -2, 1, false},
+		{"the current week is not eligible although its Monday's day 1 is over", []int{-2}, -2, 1, false},
+		{"last signup on the previous Sunday (today-3) is eligible for 1 day", []int{-9, -3}, -9, 1, true},
 		{"last signup today-8 is eligible for 7 days", []int{-9, -8}, -9, 7, true},
 		{"last signup today-7 is not", []int{-9, -7}, -9, 7, false},
 	}
@@ -1018,7 +1019,7 @@ func modelPanel(e panelEnv, people []modelPerson, days int) ActivityPanel {
 		}
 		for _, h := range activityCohortHorizons {
 			w.Horizons = append(w.Horizons, ActivityCohortHorizon{
-				Days: h, Returned: returned[h], Eligible: hasLast && last+h <= -1,
+				Days: h, Returned: returned[h], Eligible: hasLast && start+6 <= -1 && last+h <= -1,
 			})
 		}
 		out.Cohorts = append(out.Cohorts, w)

@@ -252,9 +252,9 @@ type ActivityCohortWeek struct {
 }
 
 // ActivityCohortHorizon is how many of a week's members were back within Days
-// days of their signup day.  Eligible is false while any member's horizon is
-// still open; until then Returned is still growing and must not be shown as a
-// rate.
+// days of their signup day.  Eligible is false while the week can still gain
+// members or any member's horizon is still open; until then Returned and the
+// week's size are still growing and must not be shown as a rate.
 type ActivityCohortHorizon struct {
 	Days     int   `json:"days"`
 	Returned int64 `json:"returned"`
@@ -700,7 +700,7 @@ func buildActivityCohorts(c activityClock, rows []dbgen.ListActivityCohortsRow) 
 			// Tuesday.  If that day is already reconstructed, every rate in
 			// the row may undercount.
 			Reconstructed: !c.instrumented(weekStart + 1),
-			Horizons:      activityCohortHorizonsOf(c, lastSignup, hasLast, row),
+			Horizons:      activityCohortHorizonsOf(c, weekStart, lastSignup, hasLast, row),
 		})
 	}
 	return out, nil
@@ -708,20 +708,29 @@ func buildActivityCohorts(c activityClock, rows []dbgen.ListActivityCohortsRow) 
 
 // activityCohortHorizonsOf lists a week's horizons in activityCohortHorizons order.
 //
-// ELIGIBLE means every member's horizon is over.  The last member to sign up
-// is the last to finish, and a horizon of h days is over once its final day,
-// lastSignup + h, is a whole day in the past: lastSignup + h <= today - 1.
-// Today does not count -- it is not over -- so somebody who signed up
-// yesterday is not yet eligible for the one-day horizon even though
-// "tomorrow" has begun.
-func activityCohortHorizonsOf(c activityClock, lastSignup panelDay, hasLast bool, row dbgen.ListActivityCohortsRow) []ActivityCohortHorizon {
+// ELIGIBLE means the week's members are final and every one of their horizons
+// is over.
+//
+// The members are final once the week's Sunday, weekStart + 6, is a whole day
+// in the past.  Before that, a signup later this week would join the
+// denominator with a horizon that has barely begun: a week whose members so
+// far all signed up on its Monday would otherwise print a one-day rate on the
+// Wednesday and take it back when somebody signed up that afternoon.
+//
+// The last member to sign up is then the last to finish, and a horizon of h
+// days is over once its final day, lastSignup + h, is a whole day in the
+// past: lastSignup + h <= today - 1.  Today does not count -- it is not over
+// -- so somebody who signed up yesterday is not yet eligible for the one-day
+// horizon even though "tomorrow" has begun.
+func activityCohortHorizonsOf(c activityClock, weekStart, lastSignup panelDay, hasLast bool, row dbgen.ListActivityCohortsRow) []ActivityCohortHorizon {
 	returned := [len(activityCohortHorizons)]int64{row.Returned1, row.Returned7, row.Returned14, row.Returned30}
+	membersFinal := weekStart+6 <= c.today-1
 	out := make([]ActivityCohortHorizon, len(activityCohortHorizons))
 	for i, h := range activityCohortHorizons {
 		out[i] = ActivityCohortHorizon{
 			Days:     h,
 			Returned: returned[i],
-			Eligible: hasLast && lastSignup+panelDay(h) <= c.today-1,
+			Eligible: hasLast && membersFinal && lastSignup+panelDay(h) <= c.today-1,
 		}
 	}
 	return out
