@@ -173,13 +173,23 @@
   font-weight: 600;
 }
 
-/* The depth card and the cohort card side by side; one column on a phone.
- * min() keeps a column narrower than 340px from forcing a sideways scroll. */
+/* The depth card and the cohort card: stacked, and side by side only once
+ * the cohort table fits without scrolling.  The table needs 560px of content
+ * (see .table) plus the card's 44px of padding; at a 2:3 split that is a
+ * container of about 1020px, which is a viewport of about 1070px.  An even
+ * split hid the 30-day column behind a sideways scroll at 1280px, and macOS
+ * hides the scrollbar, so it looked cut off rather than scrollable. */
 .two {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+}
+
+@media (min-width: 1100px) {
+  .two {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
 }
 
 .legend {
