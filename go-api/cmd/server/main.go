@@ -336,6 +336,16 @@ func main() {
 		slog.Error("yearly-top cache init failed", "err", err)
 		os.Exit(1)
 	}
+	topCache, err := anime.NewTopCache()
+	if err != nil {
+		slog.Error("top cache init failed", "err", err)
+		os.Exit(1)
+	}
+	topYearsCache, err := anime.NewTopYearsCache()
+	if err != nil {
+		slog.Error("top years cache init failed", "err", err)
+		os.Exit(1)
+	}
 
 	// Boot-time setup, off the critical path so HTTP serving starts
 	// immediately. Order matters: seed the AniList->Bangumi id map BEFORE
@@ -868,6 +878,12 @@ func main() {
 		r.Get("/browse", anime.Browse(q))
 		r.Get("/hubs", anime.Hubs(q, hubsCache))
 		r.Get("/genre-overview", anime.GenreOverview(q, genreOverviewCache))
+		// The Top 100 pages: one ranking (all time, or a year's), and the
+		// years that have one.  Fixed segments, like /episodes: chi resolves
+		// them before the /{anilistId} wildcard, and /top/years before the
+		// two-segment /{anilistId}/... routes.
+		r.Get("/top", anime.Top(q, topCache))
+		r.Get("/top/years", anime.TopYears(q, topYearsCache))
 		r.Get("/trending", anime.Trending(q, trendingCache))
 		r.Get("/torrents", anime.Torrents(torrentsAgg, q, mikanidmap.Lookup))
 		r.Get("/search", searchSvc.Handler())
