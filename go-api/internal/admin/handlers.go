@@ -2,7 +2,7 @@ package admin
 
 // handlers.go — Handlers struct + constructor + shared helpers.
 //
-// The three read handlers (GetStats / ListEnrichment / ListUsers) hang
+// The read handlers (GetStats / ListEnrichment / ListUsers / GetUser) hang
 // off this struct.  Write handlers added by later phases will share
 // the same struct so dependency wiring at the router level stays in
 // one place.
@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
@@ -58,11 +57,9 @@ type QueueStatusFn func(ctx context.Context) (QueueSnapshot, error)
 // tests can substitute a fakeAdminQuerier without depending on the
 // full dbgen.Querier surface.
 //
-// Only two methods were needed for P2.3.2:
-//   - GetAdminStats for the stats endpoint.
-//   - GetAdminUserSubFollowCounts for the listUsers batch counts step.
+// P2.3.2 needed GetAdminStats for the stats endpoint.
 //
-// P3 added a third:
+// P3 added a second:
 //   - GetDescriptionCnStats for the Chinese-description coverage block.
 //     Kept as its own method rather than more columns on GetAdminStats
 //     so the handler can soft-fail it independently — it is the only
@@ -70,7 +67,7 @@ type QueueStatusFn func(ctx context.Context) (QueueSnapshot, error)
 //     migration 0016) instead of a base table, so it is the only one
 //     that can fail while the rest of the payload is perfectly fine.
 //
-// And a fourth alongside it:
+// And a third alongside it:
 //   - GetDescriptionCnLlmStats for the machine-translation tier.  Split
 //     from the Bangumi block for the same soft-fail reason AND because
 //     the two tiers must be able to break independently: fused, a bad
@@ -81,20 +78,14 @@ type QueueStatusFn func(ctx context.Context) (QueueSnapshot, error)
 // caller will pass the full dbgen.Querier — the interface widens
 // without breaking existing callers).
 //
-// P11 added a fifth:
-//   - GetAdminUserActivityCounts, the last-seen / visit-days / logins batch
-//     for one page of the user table.  It reads user_activity_daily
-//     (migration 0025), the only table on this interface that a container can
-//     be running without — a rolled-forward image that has not applied 0025
-//     yet answers every other method fine.  runUsersList therefore soft-fails
-//     it rather than propagating: losing three informational columns must not
-//     take down the page an operator uses to edit and delete accounts.
+// The user table's reads are not on this interface: the page itself is a
+// composed statement on Pool, and its per-page batches and the detail
+// drawer are their own small interfaces (userBatchQuerier in
+// list_users.go, userDetailQuerier in user_detail.go) over dbgen.New(Pool).
 type adminQuerier interface {
 	GetAdminStats(ctx context.Context) (dbgen.GetAdminStatsRow, error)
 	GetDescriptionCnStats(ctx context.Context) (dbgen.GetDescriptionCnStatsRow, error)
 	GetDescriptionCnLlmStats(ctx context.Context) (dbgen.GetDescriptionCnLlmStatsRow, error)
-	GetAdminUserSubFollowCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]dbgen.GetAdminUserSubFollowCountsRow, error)
-	GetAdminUserActivityCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]dbgen.GetAdminUserActivityCountsRow, error)
 }
 
 // Handlers carries the deps shared by every /api/admin/* read handler.
@@ -104,8 +95,9 @@ type adminQuerier interface {
 // Pool is the raw pgxpool.Pool — required by ListEnrichment +
 // ListUsers because their SQL needs dynamic ORDER BY + filter
 // composition that sqlc cannot express without an explosion of
-// query variants.  The static aggregates (GetAdminStats +
-// GetAdminUserSubFollowCounts) go through Queries.
+// query variants.  The static aggregates (GetAdminStats and the
+// description_cn coverage reads) go through Queries; the user table's
+// batches and GetUser use dbgen.New(Pool).
 //
 // QueueStatus is injected as a function so the handler package
 // doesn't import river.  Pass a wrapper around riverhealth /
@@ -116,11 +108,25 @@ type adminQuerier interface {
 // arrives via query string and is parsed manually) — kept on the
 // struct so the write handlers added in later phases can reuse it
 // without reconstructing.
+//
+// now is the clock the user table's reporting day comes from; nil means
+// time.Now.  Tests pin it so a run that straddles midnight +08 cannot move
+// the day between the seed and the request.
 type Handlers struct {
 	Pool        *pgxpool.Pool
 	Queries     adminQuerier
 	QueueStatus QueueStatusFn
 	Validate    *validator.Validate
+
+	now func() time.Time
+}
+
+// clock is the current instant by h.now, or the wall clock.
+func (h *Handlers) clock() time.Time {
+	if h.now != nil {
+		return h.now()
+	}
+	return time.Now()
 }
 
 // NewHandlers constructs a Handlers bundle.  pool must be non-nil;
