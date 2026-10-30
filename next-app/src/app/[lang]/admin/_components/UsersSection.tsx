@@ -205,10 +205,20 @@ export function UsersSection({ initial }: UsersSectionProps) {
     target?.focus({ preventScroll: true });
   }, []);
 
-  const afterDelete = useCallback(() => {
+  // A delete can finish after its drawer was closed and another account's
+  // opened. Only the drawer it was made from closes; the list refetches either
+  // way. The open drawer is read through a ref: afterDelete is made once, and
+  // a finished delete calls the copy its drawer was handed when it began.
+  const openIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    openIdRef.current = drawer?.id ?? null;
+  }, [drawer]);
+
+  const afterDelete = useCallback((id: string) => {
+    setReload((n) => n + 1);
+    if (openIdRef.current !== id) return;
     openerRef.current = headingRef.current;
     setDrawer(null);
-    setReload((n) => n + 1);
   }, []);
 
   const data = held?.page ?? null;

@@ -335,4 +335,13 @@ describe("a failed action is reported in the drawer's own words", () => {
     const alert = dialog.querySelector('[data-block="sessions"] [role="alert"]');
     expect(alert?.textContent).toBe("这台设备已经退出了");
   });
+
+  test("a delete reports the deleted account's id", async () => {
+    const dialog = await open("delete");
+    await click(button(dialog, "确认删除"));
+
+    await actionCalls[0].resolve({ ok: true, data: { deleted: true, username: "fixture-a" } });
+
+    expect(onDeleted.mock.calls).toEqual([[USER_ID]]);
+  });
 });

@@ -73,8 +73,12 @@ export interface UserDetailDrawerProps {
   onClose: () => void;
   /** The account changed: the list refetches its page. */
   onChanged: () => void;
-  /** The account is gone: the list closes the drawer and refetches. */
-  onDeleted: () => void;
+  /**
+   * The account `id` is gone: the list refetches, and closes the drawer if it
+   * is still this account's. A delete can finish after its drawer was closed
+   * and another account's opened, so the id is what says which.
+   */
+  onDeleted: (id: string) => void;
 }
 
 /** A thrown action — the network to Next, or Next itself — says only that it failed. */
@@ -317,7 +321,7 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
       toast.success(
         fillTemplate(t("admin.userPanel.deleted"), { username: outcome.data.username || current.username }),
       );
-      onDeleted();
+      onDeleted(target.id);
       return null;
     });
   };

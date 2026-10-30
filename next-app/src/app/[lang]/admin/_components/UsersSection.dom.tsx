@@ -1,15 +1,16 @@
 // The user list, mounted in a real DOM with a fetch the test answers by hand:
 // what the table, the chips and the search box show while a request is out,
-// after one is superseded, and after one fails. renderToStaticMarkup runs no
-// effects, so none of this can be seen from UsersSection.render.test.tsx.
-// Runs in its own bun process (domSuites.test.ts).
+// after one is superseded, and after one fails — and the drawer a late delete
+// must not close. renderToStaticMarkup runs no effects, so none of this can be
+// seen from UsersSection.render.test.tsx. Runs in its own bun process
+// (domSuites.test.ts).
 //
 // Every fixture is synthetic.
 
-import { button, click, holdFetch, mount, settle, type, unmountAll } from "@/lib/test-utils/domHarness";
+import { button, click, holdFetch, mount, press, settle, type, unmountAll } from "@/lib/test-utils/domHarness";
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { AdminUserRow, AdminUsersPage } from "../_types/users";
+import type { AdminUserDetail, AdminUserRow, AdminUsersPage } from "../_types/users";
 
 // ─── The server actions, answered by the test ───────────────────────────
 
@@ -86,6 +87,21 @@ function page(rows: AdminUserRow[] = EVERYONE): AdminUsersPage {
   };
 }
 
+function detail(id: string, username: string): AdminUserDetail {
+  return {
+    today: TODAY,
+    instrumentedSince: "2030-01-01",
+    user: { _id: id, username, email: `${username}@example.test`, role: null, createdAt: "2030-01-05T01:00:00Z", isPublic: false, avatarUrl: null },
+    activity: { activeDays: 3, recordedDays: 3, lastSeenAt: null, logins: 1, requests: 9, days90: [] },
+    subscriptions: { total: 0, watching: 0, completed: 0, planToWatch: 0, dropped: 0, rated: 0, avgScore: null, lastUpdatedAt: null },
+    watches: { total: 0, lastWatchedAt: null },
+    recentWatches: [],
+    recentSubscriptions: [],
+    sessions: [],
+    community: { comments: 0, replies: 0, threads: 0, reviews: 0, danmaku: 0, following: 0, followers: 0, reportsFiled: 0, editSubmissions: 0 },
+  };
+}
+
 const FAILED = { error: { code: "SERVER_ERROR", message: "boom" } };
 
 // ─── Reading the section ───────────────────────────────────────────────
@@ -111,6 +127,19 @@ const rows = () => Array.from(host.querySelectorAll("tr[data-user-row]")).map((t
 const alert = () => host.querySelector('#users > [role="alert"]')?.textContent ?? null;
 const chip = (segment: string) => host.querySelector(`[data-segment="${segment}"]`);
 const lastRequest = () => net.requests[net.requests.length - 1];
+
+/**
+ * Waits for the drawer to be in the document. next/dynamic loads its module
+ * on the first open, which a cold CI runner can take a while to transpile.
+ */
+async function drawerFor(id: string): Promise<HTMLElement> {
+  for (let waited = 0; waited < 10_000; waited += 10) {
+    const found = document.querySelector<HTMLElement>(`[data-user-drawer="${id}"]`);
+    if (found) return found;
+    await settle(10);
+  }
+  throw new Error(`no drawer for ${id}`);
+}
 
 // ─── Loading ───────────────────────────────────────────────────────────
 
@@ -208,4 +237,31 @@ describe("a failed request", () => {
     expect(alert()).toContain("用户列表读取失败");
     expect(busy()).toBeNull();
   });
+});
+
+// ─── The drawer ────────────────────────────────────────────────────────
+
+describe("a delete that outlives its drawer", () => {
+  test("does not close the drawer opened since, and the list still refetches", async () => {
+    // A's drawer: ask for the delete, then close the drawer before it answers.
+    await click(button(host.querySelector(`tr[data-user-row="${A}"]`) as HTMLElement, "fixture-a"));
+    const drawerA = await drawerFor(A);
+    await lastRequest().respond({ data: detail(A, "fixture-a") });
+    await click(button(drawerA, "删除用户…"));
+    await click(button(drawerA, "确认删除"));
+    expect(actionCalls.map((c) => c.name)).toEqual(["deleteAdminUser"]);
+    await press("Escape");
+    expect(document.querySelector(`[data-user-drawer="${A}"]`)).toBeNull();
+
+    // B's drawer is open when A's delete finishes.
+    await click(button(host.querySelector(`tr[data-user-row="${B}"]`) as HTMLElement, "fixture-b"));
+    await drawerFor(B);
+    await lastRequest().respond({ data: detail(B, "fixture-b") });
+    const before = net.requests.length;
+
+    await actionCalls[0].resolve({ ok: true, data: { deleted: true, username: "fixture-a" } });
+
+    expect(document.querySelector(`[data-user-drawer="${B}"]`)).not.toBeNull();
+    expect(net.requests.slice(before).map((r) => r.url)).toEqual(["/api/admin/users?page=1"]);
+  }, 30_000);
 });
