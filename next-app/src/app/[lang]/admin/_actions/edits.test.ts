@@ -34,6 +34,16 @@ mock.module("next/cache", () => ({
   revalidatePath: (path: string) => {
     revalidated.push(path);
   },
+  // `revalidateTag` is not used by this action, and this file asserts
+  // nothing about it. It is here because `mock.module` is process-global and
+  // every test file in this directory registers its own `next/cache` factory
+  // before its `await import`. That await yields, so another file's factory
+  // can be the one a pending import links against -- and a factory missing an
+  // export that the APP imports makes that import fail with
+  // `Export named 'revalidateTag' not found`, in some file orderings only
+  // (seen in CI, never locally). So every factory here exports the full
+  // surface the admin actions use. enrichment-row.ts and users.ts import it.
+  revalidateTag: () => {},
 }));
 
 const { reviewEditSubmission } = await import("./edits");
