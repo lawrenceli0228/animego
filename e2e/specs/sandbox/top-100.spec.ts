@@ -237,6 +237,22 @@ test.describe("a year's ranking on a desktop", () => {
     await expect(page.locator("[data-grid]")).toBeVisible();
   });
 
+  test("after a change of view, the batches open are still open on the way back", async ({ page }) => {
+    await open(page, `/top/${YEAR}`);
+    await page.locator('[data-view-toggle="chart"]').click();
+    await expect(page).toHaveURL(new RegExp(`/top/${YEAR}\\?view=chart$`));
+    await page.locator("[data-load-more]").click();
+    await expect(visibleCards(page)).toHaveCount(27);
+    // Away by a link in the page (a client navigation), and Back.
+    await navbar(page).locator('a[href="/welcome"]').click();
+    await page.waitForURL("**/welcome");
+    await page.goBack();
+    await page.waitForURL(new RegExp(`/top/${YEAR}\\?view=chart$`));
+    await expect(page.locator("[data-charts]")).toBeVisible();
+    await expect(visibleCards(page)).toHaveCount(27);
+    await expect(page.locator("[data-load-more]")).toHaveCount(0);
+  });
+
   test("更早 opens the years before the strip's; an older year shows itself in that cell", async ({ page }) => {
     await open(page, `/top/${YEAR}`);
     const older = page.locator("[data-older]");

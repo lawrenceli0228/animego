@@ -133,7 +133,13 @@ export default function TopView({ data, serverNowMs, Follow }: TopViewProps) {
     setView(next);
     setPages(1);
     const search = topSearch({ ...page, view: next });
-    window.history.replaceState({ ...window.history.state }, "", `${window.location.pathname}${search}`);
+    // A fresh object, as on the seasonal page: Next copies its own entry state
+    // into it and moves the router's query (useSearchParams, and with it `own`)
+    // to the new address. Spreading the old state would carry Next's marker
+    // along, and the call would bypass the router: the address would say
+    // ?view=chart while the router, and the batch memory, kept the old one.
+    const url = memoryUrl(window.location.pathname, search);
+    window.history.replaceState(batchMemory(url, 1), "", `${window.location.pathname}${search}${window.location.hash}`);
   };
 
   const more = useCallback(() => setPages((p) => p + 1), []);

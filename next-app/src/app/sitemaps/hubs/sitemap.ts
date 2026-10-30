@@ -15,7 +15,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // Anonymous: the same answer for every reader (see lib/genre/fetch.ts).
     const [hubs, topYears] = await Promise.all([
       apiGet<HubsPayload>("/api/anime/hubs", { revalidate: 3600, auth: false }),
-      apiGet<unknown>("/api/anime/top/years", { revalidate: 3600, auth: false }),
+      // The rankings' years on their own: without them the document still
+      // lists every other hub, and only the yearly rankings go missing.
+      apiGet<unknown>("/api/anime/top/years", { revalidate: 3600, auth: false }).catch((err: unknown) => {
+        console.warn("[sitemap] top years fetch failed:", err);
+        return [];
+      }),
     ]);
     return hubSitemapRows(hubs, parseTopYears(topYears), new Date());
   } catch (err) {
