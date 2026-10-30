@@ -1,297 +1,329 @@
 "use client";
 
-// Monolithic user-management section for the single /admin page.
-// Replaces the previous /admin/users route + its URL-driven
-// UserSearchInput. All state (page, q) is internal — no URL sync — to
-// match the legacy AdminDashboard.jsx UX.
+// User management on the single /admin page: the segment chips with their
+// sizes, the activity panel's depth filter, search, sort, the table, the
+// pager — and the detail drawer every row opens.
+//
+// State lives here: the committed query, the page it produced, which row's
+// menu is open, and which account the drawer shows. None of it is in the
+// URL. Next's router owns history and this page is one scroll of sections,
+// so the activity panel hands its depth filter over as a window event
+// (ADMIN_USERS_DEPTH_EVENT) instead.
+//
+// Fetching follows ActivitySection's shape: the server renders the default
+// query; the effect fetches only when the query (or the reload counter a
+// mutation bumps) differs from the one the held page answers; every setState
+// happens inside the async helper, never in the effect body; and a request
+// that is superseded is aborted rather than raced.
+//
+// The drawer is loaded with next/dynamic: it is the half of this surface
+// that calls toast(), and react-hot-toast touches `document` on import (see
+// testImportHygiene.test.ts). Nothing about it belongs in the server HTML.
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { fillTemplate } from "@/lib/home/time";
+import { useLang } from "@/lib/lang-client";
+import {
+  ADMIN_USERS_DEPTH_EVENT,
+  DEFAULT_USERS_QUERY,
+  formatCount,
+  parseDepthDetail,
+  readUsersPage,
+  usersQueryString,
+  type AdminUsersQuery,
+  type UserDrawerMode,
+  type UserDrawerTarget,
+} from "@/lib/adminUsers";
+import type { AdminUserRow, AdminUserSort, AdminUsersPage } from "../_types/users";
 import { CreateUserForm } from "./CreateUserForm";
 import { UserRow } from "./UserRow";
-import type { AdminUser, PagedResponse } from "../_types";
-import { useLang } from "@/lib/lang-client";
+import { UsersToolbar } from "./UsersToolbar";
+import s from "./users.module.css";
 
+const UserDetailDrawer = dynamic(() => import("./UserDetailDrawer"), { ssr: false });
+
+/** Idle time after the last keystroke before the search is committed. */
 const DEBOUNCE_MS = 400;
 
 interface UsersSectionProps {
-  initial: PagedResponse<AdminUser>;
+  /** Null when the server-side fetch failed; the section then fetches on its own. */
+  initial: AdminUsersPage | null;
 }
 
-function buildApiUrl(page: number, q: string): string {
-  const u = new URLSearchParams();
-  u.set("page", String(page));
-  if (q) u.set("q", q);
-  return `/api/admin/users?${u.toString()}`;
+async function fetchUsersPage(query: string, signal: AbortSignal): Promise<AdminUsersPage> {
+  // Same-origin: nginx proxies /api/* to go-api in prod, next dev rewrites it.
+  const res = await fetch(`/api/admin/users?${query}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    signal,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const page = readUsersPage(await res.json());
+  if (!page) throw new Error("unreadable user list");
+  return page;
 }
+
+const requestKey = (query: string, reload: number) => `${query}#${reload}`;
 
 export function UsersSection({ initial }: UsersSectionProps) {
   const { t } = useLang();
-  const [page, setPage] = useState(1);
-  const [q, setQ] = useState("");
-  const [qInput, setQInput] = useState("");
-  const [data, setData] = useState<PagedResponse<AdminUser>>(initial);
-  const [error, setError] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
-  const isFirstRun = useRef(true);
+  const createId = useId();
+  const [query, setQuery] = useState<AdminUsersQuery>(DEFAULT_USERS_QUERY);
+  const [search, setSearch] = useState("");
+  const [data, setData] = useState<AdminUsersPage | null>(initial);
+  const [reload, setReload] = useState(0);
+  // What `data` answers. Seeded with the server's query so hydration does not
+  // refetch the page it was just handed.
+  const [loaded, setLoaded] = useState<string | null>(() =>
+    initial ? requestKey(usersQueryString(DEFAULT_USERS_QUERY), 0) : null,
+  );
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(initial === null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<UserDrawerTarget | null>(null);
+  // Where focus goes when the drawer closes: its opener, or the heading after
+  // a delete (the opener's row is about to leave the table).
+  const openerRef = useRef<HTMLElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
 
-  // Debounced commit: typing in qInput → after 400ms idle copy into q
-  // which triggers the fetch effect below.
+  const queryString = usersQueryString(query);
+  const wanted = requestKey(queryString, reload);
+
   useEffect(() => {
-    if (qInput === q) return;
+    if (wanted === loaded) return;
+    const ac = new AbortController();
+    const run = async () => {
+      setLoading(true);
+      setFailed(false);
+      try {
+        const page = await fetchUsersPage(queryString, ac.signal);
+        if (ac.signal.aborted) return;
+        setData(page);
+        setFailed(false);
+      } catch {
+        // An abort is a newer query, not a failure.
+        if (ac.signal.aborted) return;
+        setFailed(true);
+      } finally {
+        if (!ac.signal.aborted) {
+          setLoaded(wanted);
+          setLoading(false);
+        }
+      }
+    };
+    void run();
+    return () => ac.abort();
+  }, [wanted, loaded, queryString]);
+
+  // Debounced search: the box updates at once, the query 400ms after typing stops.
+  useEffect(() => {
+    const next = search.trim();
+    if (next === query.q) return;
     const timer = setTimeout(() => {
-      setQ(qInput);
-      setPage(1);
+      setMenuFor(null);
+      setQuery((prev) => ({ ...prev, q: next, page: 1 }));
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [qInput, q]);
+  }, [search, query.q]);
 
+  // The activity panel's depth rows. "Show me that bucket" means the whole
+  // bucket, so the segment and the search are cleared with it.
   useEffect(() => {
-    if (isFirstRun.current) {
-      isFirstRun.current = false;
-      return;
-    }
-    const url = buildApiUrl(page, q);
-    const abort = new AbortController();
-    setError(null);
-    startTransition(async () => {
-      try {
-        const res = await fetch(url, {
-          credentials: "same-origin",
-          cache: "no-store",
-          signal: abort.signal,
-        });
-        if (!res.ok) {
-          setError(`HTTP ${res.status}`);
-          return;
-        }
-        const body = await res.json();
-        setData({
-          data: body.data ?? [],
-          hasMore: body.hasMore ?? false,
-          total: body.total ?? 0,
-          page: body.page ?? page,
-        });
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : t("admin.loadError"));
-      }
+    const onDepth = (event: Event) => {
+      const depth = parseDepthDetail((event as CustomEvent<unknown>).detail);
+      if (!depth) return;
+      setSearch("");
+      setMenuFor(null);
+      setQuery((prev) => ({ ...prev, page: 1, q: "", segment: "all", depth }));
+    };
+    window.addEventListener(ADMIN_USERS_DEPTH_EVENT, onDepth);
+    return () => window.removeEventListener(ADMIN_USERS_DEPTH_EVENT, onDepth);
+  }, []);
+
+  /** Any filter change goes back to page 1; paging passes its own page. */
+  const update = (patch: Partial<AdminUsersQuery>) => {
+    setMenuFor(null);
+    setQuery((prev) => ({ ...prev, page: 1, ...patch }));
+  };
+
+  const refetch = useCallback(() => setReload((n) => n + 1), []);
+
+  const openDrawer = useCallback((user: AdminUserRow, mode: UserDrawerMode, opener: HTMLElement | null) => {
+    openerRef.current = opener;
+    setMenuFor(null);
+    setDrawer({
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      createdAt: user.createdAt,
+      mode,
     });
-    return () => abort.abort();
-  }, [page, q]);
+  }, []);
+
+  const closeDrawer = useCallback(() => setDrawer(null), []);
+
+  // Stable, so the drawer calls it once, as it unmounts. Falls back to the
+  // heading when the opener has left the page.
+  const restoreFocus = useCallback(() => {
+    const opener = openerRef.current;
+    const target = opener && opener.isConnected ? opener : headingRef.current;
+    target?.focus({ preventScroll: true });
+  }, []);
+
+  const afterDelete = useCallback(() => {
+    openerRef.current = headingRef.current;
+    setDrawer(null);
+    setReload((n) => n + 1);
+  }, []);
+
+  const rows = data?.data ?? [];
+  const today = data?.today ?? "";
+  const allUsers = data?.segments?.all ?? data?.total;
+
+  const sortHeader = (label: string, key: AdminUserSort | null, numeric = false) => {
+    const sorted = key !== null && query.sort === key;
+    return (
+      <th
+        scope="col"
+        className={numeric ? `${s.th} ${s.thNum}` : s.th}
+        aria-sort={sorted ? "descending" : undefined}
+      >
+        {label}
+        {sorted ? <span aria-hidden="true"> ↓</span> : null}
+      </th>
+    );
+  };
 
   return (
     <section id="users" aria-labelledby="users-heading">
-      <header style={styles.header}>
-        <h2 id="users-heading" style={styles.title}>
-          {t("admin.usersTitle")}
-        </h2>
-        <span style={styles.totalHint}>
-          {t("admin.totalUsers").replace("{{count}}", data.total.toLocaleString())}
-        </span>
+      <header className={s.head}>
+        <div className={s.titleRow}>
+          <h2 id="users-heading" ref={headingRef} tabIndex={-1} className={s.title}>
+            {t("admin.usersTitle")}
+          </h2>
+          {typeof allUsers === "number" ? (
+            <span className={s.total}>{fillTemplate(t("admin.totalUsers"), { count: formatCount(allUsers) })}</span>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className={s.primary}
+          aria-expanded={createOpen}
+          aria-controls={createOpen ? createId : undefined}
+          onClick={() => setCreateOpen((open) => !open)}
+        >
+          {createOpen ? t("admin.userPanel.collapse") : t("admin.createUser")}
+        </button>
       </header>
 
-      <CreateUserForm />
+      {createOpen ? <CreateUserForm id={createId} onCreated={refetch} /> : null}
 
-      <form
-        role="search"
-        style={styles.searchForm}
-        onSubmit={(e) => {
-          e.preventDefault();
-          setQ(qInput);
-          setPage(1);
-        }}
-      >
-        <input
-          type="search"
-          value={qInput}
-          onChange={(e) => setQInput(e.target.value)}
-          placeholder={t("admin.userSearchPlaceholder")}
-          style={styles.searchInput}
-          aria-label={t("admin.usersTitle")}
-        />
-        {qInput && (
-          <button
-            type="button"
-            onClick={() => {
-              setQInput("");
-              setQ("");
-              setPage(1);
-            }}
-            style={styles.clearBtn}
-            aria-label={t("admin.clearSearch")}
-          >
-            ×
+      <UsersToolbar
+        segments={data?.segments ?? {}}
+        segment={query.segment}
+        onSegment={(segment) => update({ segment })}
+        depth={query.depth}
+        onClearDepth={() => update({ depth: null })}
+        search={search}
+        onSearch={setSearch}
+        onSearchSubmit={() => update({ q: search.trim() })}
+        sort={query.sort}
+        onSort={(sort) => update({ sort })}
+      />
+
+      {failed ? (
+        <div role="alert" className={s.listError}>
+          <span>{t("admin.userPanel.loadError")}</span>
+          <button type="button" className={s.btn} onClick={refetch}>
+            {t("admin.userPanel.retry")}
           </button>
-        )}
-      </form>
-
-      {error && (
-        <div role="alert" style={styles.errorBox}>
-          {error}
         </div>
+      ) : null}
+
+      {data ? (
+        <>
+          <div className={s.scroll} aria-busy={loading || undefined}>
+            <table className={s.table}>
+              <thead>
+                <tr>
+                  {sortHeader(t("admin.userPanel.colUser"), null)}
+                  {sortHeader(t("admin.userPanel.colJoined"), "joined")}
+                  {sortHeader(t("admin.userPanel.colLastSeen"), "lastSeen")}
+                  {sortHeader(t("admin.userPanel.colRecent"), "activeDays")}
+                  {sortHeader(t("admin.userPanel.colSubs"), "subscriptions", true)}
+                  {sortHeader(t("admin.userPanel.colRatings"), null, true)}
+                  {sortHeader(t("admin.userPanel.colWatched"), "watched", true)}
+                  {sortHeader(t("admin.userPanel.colDevice"), null)}
+                  <th scope="col" className={s.th}>
+                    <span className={s.srOnly}>{t("admin.userPanel.colActions")}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td className={s.empty} colSpan={9}>
+                      {t("admin.noMatchingUsers")}
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((user) => (
+                    <UserRow
+                      key={user._id}
+                      user={user}
+                      today={today}
+                      menuOpen={menuFor === user._id}
+                      onMenu={setMenuFor}
+                      onOpen={openDrawer}
+                    />
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <footer className={s.pager}>
+            <button
+              type="button"
+              className={s.pageBtn}
+              disabled={query.page <= 1}
+              onClick={() => update({ page: Math.max(1, query.page - 1) })}
+            >
+              ← {t("admin.prev")}
+            </button>
+            <span className={s.pageInfo}>
+              {fillTemplate(t("admin.pageIndicator"), { page: query.page, total: formatCount(data.total) })}
+            </span>
+            <button
+              type="button"
+              className={s.pageBtn}
+              disabled={!data.hasMore}
+              onClick={() => update({ page: query.page + 1 })}
+            >
+              {t("admin.next")} →
+            </button>
+          </footer>
+        </>
+      ) : failed ? null : (
+        // No page yet: the server's fetch failed and the browser's is out.
+        <p className={s.empty} role="status">
+          {t("admin.userPanel.loading")}
+        </p>
       )}
 
-      <div style={styles.tableScroll}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>{t("admin.colUsername")}</th>
-              <th style={styles.th}>{t("admin.colEmail")}</th>
-              <th style={styles.th}>{t("admin.colRole")}</th>
-              <th style={styles.th}>{t("admin.colJoined")}</th>
-              {/* The three activity columns sit between "joined" and the
-                  social counts on purpose: joined and last-seen are the pair
-                  an operator reads together, and putting anything between
-                  them makes the comparison a scan instead of a glance. */}
-              <th style={styles.th}>{t("admin.colLastSeen")}</th>
-              <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colActiveDays")}</th>
-              <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colLogins")}</th>
-              <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colSubs")}</th>
-              <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colFollowers")}</th>
-              <th style={styles.th}>{t("admin.colActions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.data.length === 0 ? (
-              <tr>
-                <td style={styles.empty} colSpan={10}>
-                  {t("admin.noMatchingUsers")}
-                </td>
-              </tr>
-            ) : (
-              data.data.map((u) => <UserRow key={u._id} user={u} />)
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <footer style={styles.pagination}>
-        <button
-          type="button"
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          disabled={page <= 1}
-          style={styles.pageBtn}
-        >
-          ← {t("admin.prev")}
-        </button>
-        <span style={styles.pageIndicator}>
-          {t("admin.pageIndicator")
-            .replace("{{page}}", String(page))
-            .replace("{{total}}", data.total.toLocaleString())}
-        </span>
-        <button
-          type="button"
-          onClick={() => setPage((p) => p + 1)}
-          disabled={!data.hasMore}
-          style={styles.pageBtn}
-        >
-          {t("admin.next")} →
-        </button>
-      </footer>
+      {drawer ? (
+        <UserDetailDrawer
+          key={drawer.id}
+          target={drawer}
+          onRestoreFocus={restoreFocus}
+          onClose={closeDrawer}
+          onChanged={refetch}
+          onDeleted={afterDelete}
+        />
+      ) : null}
     </section>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  header: {
-    display: "flex",
-    alignItems: "baseline",
-    gap: 12,
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 600,
-    margin: 0,
-    color: "#e7e7ef",
-  },
-  totalHint: {
-    fontSize: 13,
-    color: "#7c7c8c",
-  },
-  searchForm: {
-    position: "relative",
-    display: "flex",
-    alignItems: "center",
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  searchInput: {
-    flex: 1,
-    background: "#0d0d14",
-    border: "1px solid #2a2a38",
-    borderRadius: 8,
-    padding: "8px 32px 8px 12px",
-    color: "#e7e7ef",
-    fontSize: 14,
-    outline: "none",
-  },
-  clearBtn: {
-    position: "absolute",
-    right: 8,
-    background: "transparent",
-    border: "none",
-    color: "#7c7c8c",
-    fontSize: 18,
-    cursor: "pointer",
-    padding: "0 6px",
-  },
-  errorBox: {
-    background: "#3a0d0d",
-    border: "1px solid #663030",
-    color: "#ffb4b4",
-    padding: "8px 12px",
-    borderRadius: 6,
-    marginBottom: 12,
-    fontSize: 13,
-  },
-  tableScroll: {
-    overflowX: "auto",
-    border: "1px solid #1f1f2a",
-    borderRadius: 8,
-    background: "#15151f",
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    minWidth: 720,
-  },
-  th: {
-    textAlign: "left",
-    padding: "10px 12px",
-    borderBottom: "1px solid #1f1f2a",
-    fontSize: 12,
-    fontWeight: 600,
-    color: "#9090a0",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    background: "#111118",
-  },
-  empty: {
-    padding: "24px 12px",
-    textAlign: "center",
-    color: "#7c7c8c",
-    fontSize: 13,
-  },
-  pagination: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    marginTop: 12,
-    padding: "8px 0",
-  },
-  pageBtn: {
-    background: "#15151f",
-    border: "1px solid #2a2a38",
-    color: "#e7e7ef",
-    fontSize: 13,
-    padding: "6px 14px",
-    borderRadius: 6,
-    cursor: "pointer",
-  },
-  pageIndicator: {
-    fontSize: 13,
-    color: "#a8a8b8",
-  },
-};

@@ -1,0 +1,592 @@
+/* The admin user list (UsersSection, UsersToolbar, UserRow, CreateUserForm).
+ * The detail drawer's styles are in userDetail.module.css.
+ *
+ * A module rather than the inline styles the rest of /admin uses, because
+ * this surface needs what inline styles cannot carry: hover and focus states,
+ * a portalled menu, and a narrow-screen layout. Selectors in tests go through
+ * roles and data-* attributes, never these class names — they are hashed
+ * differently by `next dev` and by the production build, and bun loads a CSS
+ * module as a plain string.
+ *
+ * Every @media block is at the end of the file. */
+
+/* ─── Header and the create form ─────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #e7e7ef;
+}
+
+.total {
+  font-size: 13px;
+  color: #8a8a9a;
+  font-feature-settings: "tnum";
+}
+
+.primary {
+  padding: 9px 18px;
+  border-radius: 6px;
+  border: 1px solid #3b82f6;
+  background: #3b82f6;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary:hover {
+  background: #4b8ff7;
+}
+
+.primary:disabled {
+  border-color: #1f2a44;
+  background: #1f2a44;
+  color: #7c7c8c;
+  cursor: not-allowed;
+}
+
+.createWrap {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border: 1px solid #1f1f2a;
+  border-radius: 10px;
+  background: #15151f;
+}
+
+.createForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.input {
+  flex: 1 1 200px;
+  min-width: 160px;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border-radius: 6px;
+  border: 1px solid #2a2a38;
+  background: #0d0d14;
+  color: #e7e7ef;
+  font: inherit;
+  font-size: 13px;
+}
+
+.input:focus {
+  border-color: #3d90dd;
+}
+
+.inputNarrow {
+  flex: 0 1 200px;
+  max-width: 220px;
+}
+
+.formError {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #ff6b61;
+}
+
+.formOk {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #30d158;
+}
+
+/* ─── Segment chips, search and sort ─────────────────────────────────── */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid #2a2a38;
+  background: transparent;
+  color: #a8a8b8;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: #3a3a4c;
+  color: #e7e7ef;
+}
+
+.chip[aria-pressed="true"],
+.depthChip {
+  border-color: rgba(61, 144, 221, 0.45);
+  background: rgba(61, 144, 221, 0.14);
+  color: #cfe4f7;
+}
+
+.chipCount {
+  font-size: 12px;
+  color: #8a8a9a;
+  font-feature-settings: "tnum";
+}
+
+.chip[aria-pressed="true"] .chipCount {
+  color: #8cc2f0;
+}
+
+.chipX {
+  font-size: 15px;
+  line-height: 1;
+  color: #8cc2f0;
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.searchForm {
+  position: relative;
+  flex: 1 1 280px;
+  min-width: 0;
+  margin: 0;
+}
+
+.searchIcon {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  transform: translateY(-50%);
+  color: #8a8a9a;
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px 8px 34px;
+  border-radius: 8px;
+  border: 1px solid #2a2a38;
+  background: #0d0d14;
+  color: #e7e7ef;
+  font: inherit;
+  font-size: 14px;
+}
+
+.searchInput:focus {
+  border-color: #3d90dd;
+}
+
+.sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #a8a8b8;
+}
+
+.select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #2a2a38;
+  background: #0d0d14;
+  color: #e7e7ef;
+  font: inherit;
+  font-size: 13px;
+}
+
+.listError {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #663030;
+  background: #3a0d0d;
+  color: #ffb4b4;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ─── The table ──────────────────────────────────────────────────────── */
+
+.scroll {
+  overflow-x: auto;
+  border: 1px solid #1f1f2a;
+  border-radius: 8px;
+  background: #15151f;
+  transition: opacity 0.15s ease;
+}
+
+.scroll[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+.table {
+  width: 100%;
+  min-width: 1040px;
+  border-collapse: collapse;
+}
+
+.th {
+  padding: 10px 12px;
+  border-bottom: 1px solid #1f1f2a;
+  background: #111118;
+  color: #9090a0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.th[aria-sort] {
+  color: #cfe4f7;
+}
+
+.thNum {
+  text-align: right;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.tr {
+  border-bottom: 1px solid #1f1f2a;
+}
+
+.tr:hover {
+  background: #181824;
+}
+
+.td {
+  padding: 10px 12px;
+  color: #cfcfdc;
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.num {
+  text-align: right;
+  font-feature-settings: "tnum";
+}
+
+.zero {
+  color: #6a6a7a;
+}
+
+.dim {
+  color: #6a6a7a;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #0b0b10;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.uname {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #f4f4f8;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.uname:hover {
+  color: #8cc2f0;
+  text-decoration: underline;
+}
+
+.mail {
+  display: block;
+  margin-top: 2px;
+  color: #8a8a9a;
+  font-size: 12px;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: #3a1f25;
+  color: #ff6b61;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.time {
+  white-space: nowrap;
+  font-feature-settings: "tnum";
+}
+
+.timeMain {
+  color: #f4f4f8;
+}
+
+.subLine {
+  display: block;
+  margin-top: 2px;
+  color: #8a8a9a;
+  font-size: 12px;
+  font-feature-settings: "tnum";
+}
+
+.strip {
+  display: inline-flex;
+  gap: 1px;
+  vertical-align: middle;
+}
+
+.cell {
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  border-radius: 1px;
+  background: #262634;
+}
+
+.cell[data-active="true"] {
+  background: #3d90dd;
+}
+
+.cell[data-today="true"] {
+  box-shadow: 0 0 0 1px #8cc2f0;
+}
+
+.days {
+  display: block;
+  margin-top: 4px;
+  color: #8a8a9a;
+  font-size: 12px;
+  font-feature-settings: "tnum";
+}
+
+.device {
+  white-space: nowrap;
+}
+
+.cc {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #2a2a38;
+  color: #a8a8b8;
+  font-size: 11px;
+  font-feature-settings: "tnum";
+}
+
+.moreCell {
+  width: 44px;
+  text-align: right;
+}
+
+.dots {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #a8a8b8;
+  cursor: pointer;
+}
+
+.dots:hover,
+.dots[aria-expanded="true"] {
+  border-color: #2a2a38;
+  background: #1a1a26;
+  color: #f4f4f8;
+}
+
+/* Portalled to <body> with fixed coordinates, so the table's horizontal
+ * scroller cannot clip it on a short result list. */
+.menu {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  width: 184px;
+  box-sizing: border-box;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid #2a2a38;
+  background: #1a1a26;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  font-family: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #e7e7ef;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover,
+.menuItem:focus {
+  background: #24243a;
+  color: #f4f4f8;
+}
+
+.menuDanger {
+  color: #ff6b61;
+}
+
+.menuDanger:hover,
+.menuDanger:focus {
+  background: rgba(255, 69, 58, 0.12);
+  color: #ff8a82;
+}
+
+.menuSep {
+  height: 1px;
+  margin: 4px 2px;
+  background: #2a2a38;
+}
+
+.empty {
+  padding: 28px 12px;
+  color: #8a8a9a;
+  font-size: 13px;
+  text-align: center;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 8px 0;
+}
+
+.pageBtn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid #2a2a38;
+  background: #15151f;
+  color: #e7e7ef;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pageBtn:disabled {
+  color: #6a6a7a;
+  cursor: not-allowed;
+}
+
+.pageInfo {
+  color: #a8a8b8;
+  font-size: 13px;
+  font-feature-settings: "tnum";
+}
+
+/* The list's one secondary button (the retry beside a failed load). */
+.btn {
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid #2a2a38;
+  background: transparent;
+  color: #cfcfdc;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: #3a3a4c;
+  color: #f4f4f8;
+}
+
+/* One ring for everything focusable here — DESIGN.md's, as
+ * components/ui/focusRing.test.ts requires — with a transparent outline left
+ * for forced-colors mode to paint. */
+.primary:focus-visible,
+.input:focus-visible,
+.chip:focus-visible,
+.depthChip:focus-visible,
+.searchInput:focus-visible,
+.select:focus-visible,
+.uname:focus-visible,
+.dots:focus-visible,
+.menuItem:focus-visible,
+.pageBtn:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll {
+    transition: none;
+  }
+}

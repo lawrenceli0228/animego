@@ -1,4 +1,5 @@
-import { apiGet, apiGetPaged } from "@/lib/api";
+import { apiGet, apiGetEnvelope, apiGetPaged } from "@/lib/api";
+import { readUsersPage } from "@/lib/adminUsers";
 import { resolveLocale } from "@/lib/i18n/route";
 import type { Dict } from "@/lib/i18n";
 import { ActivitySection } from "./_components/ActivitySection";
@@ -11,11 +12,11 @@ import ReportsSection, { type AdminReportsData } from "./_components/ReportsSect
 import type { AdminActivityPanel } from "./_types/activity";
 import type {
   AdminStats,
-  AdminUser,
   EnrichmentRow as EnrichmentRowData,
   HantDriftStats,
   PagedResponse,
 } from "./_types";
+import type { AdminUsersPage } from "./_types/users";
 
 // Monolithic single-page admin (one /admin route, three sections).
 //
@@ -72,9 +73,12 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
       ),
       EMPTY_PAGE as PagedResponse<EnrichmentRowData>,
     ),
-    safeGet<PagedResponse<AdminUser>>(
-      apiGetPaged<AdminUser>("/api/admin/users?page=1", { cache: "no-store" }),
-      EMPTY_PAGE as PagedResponse<AdminUser>,
+    // Null on failure, not an empty page: "共 0 个用户" with every chip at 0
+    // would be the list asserting the site has no accounts. The section says
+    // it could not load and tries again from the browser.
+    safeGet<AdminUsersPage | null>(
+      apiGetEnvelope<unknown>("/api/admin/users?page=1", { cache: "no-store" }).then(readUsersPage),
+      null,
     ),
     safeGet<AdminReportsData>(
       apiGet<AdminReportsData>("/api/admin/reports?status=pending&limit=50", { cache: "no-store" }),

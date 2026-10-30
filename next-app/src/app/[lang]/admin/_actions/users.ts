@@ -3,21 +3,31 @@
 // Server Actions for the admin user management surface. Mirrors legacy
 // `client/src/api/admin.api.js` createUser / updateUser / deleteUser,
 // but re-shapes the call sites as Server Functions so the Client
-// Components (CreateUserForm, UserRow) can invoke them directly without
-// React Query.
+// Components (CreateUserForm, the user detail drawer) can invoke them
+// directly without React Query.
 //
-// All three endpoints sit behind RequireAuth+RequireAdmin in go-api
+// Every endpoint here sits behind RequireAuth+RequireAdmin in go-api
 // (see docs/migration/P7-DESIGN.md §5). `apiMutate` forwards the
 // browser session cookie, so authentication just works.
 //
 // Revalidation strategy — per P7-DESIGN §5:
-//   POST   /api/admin/users           → admin:users (+ path)
-//   PATCH  /api/admin/users/:id       → admin:users + user:profile:{id} (+ path)
-//   DELETE /api/admin/users/:id       → admin:users + user:profile:{id} (+ path)
+//   POST   /api/admin/users                      → admin:users (+ path)
+//   PATCH  /api/admin/users/:id                  → admin:users + user:profile:{id} (+ path)
+//   DELETE /api/admin/users/:id                  → admin:users + user:profile:{id} (+ path)
+//   DELETE /api/admin/users/:id/sessions[/:sid]  → admin:users + user:profile:{id} (+ path)
+//
+// Who may call these is decided by go-api, on every request: each action
+// forwards the caller's own session (apiMutate's default, never anonymous),
+// and go-api re-checks it — RequireAuth + RequireAdmin, and the session must
+// still be live — before anything changes. A non-admin, or an admin whose
+// session has been ended, gets go-api's 401/403 back as a UserActionError
+// with that status, and nothing is revalidated.
 
 import { revalidatePath, revalidateTag } from "next/cache";
 import { ApiError, apiMutate } from "@/lib/api";
 import { getDict, type Dict } from "@/lib/i18n";
+import { UUID } from "@/lib/people/edit/review";
+import type { AdminRevokeSessionsResult } from "../_types/users";
 import {
   type AdminUserFull,
   type AdminUserMinimal,
@@ -268,5 +278,101 @@ export async function deleteAdminUser(
     return result;
   } catch (err) {
     throw toActionError("deleteAdminUser", err);
+  }
+}
+
+// Both ids are uuids in go-api (users.id, user_sessions.id) and the session
+// routes carry them in the path, so anything else is refused here rather
+// than forwarded.
+function validateUserUuid(raw: string, dict: Dict): string {
+  if (!raw) {
+    throw new UserActionError(
+      "VALIDATION_ERROR",
+      dict.admin.userActions.missingUserId,
+      400,
+    );
+  }
+  if (!UUID.test(raw)) {
+    throw new UserActionError(
+      "VALIDATION_ERROR",
+      dict.admin.userPanel.invalidUserId,
+      400,
+    );
+  }
+  return raw;
+}
+
+function validateSessionUuid(raw: string, dict: Dict): string {
+  if (!raw || !UUID.test(raw)) {
+    throw new UserActionError(
+      "VALIDATION_ERROR",
+      dict.admin.userPanel.invalidSessionId,
+      400,
+    );
+  }
+  return raw;
+}
+
+// The list's 最近设备 column reads the newest live session, so ending one
+// changes the list; user:profile:{id} for the reason setAdminUserPassword
+// busts it — anything keyed on the account's session state.
+function revalidateAfterSessions(userId: string): void {
+  revalidateTag("admin:users", "max");
+  revalidateTag(`user:profile:${userId}`, "max");
+  revalidatePath("/admin");
+}
+
+/**
+ * DELETE /api/admin/users/:id/sessions — sign the account out everywhere:
+ * every one of its sessions plus the legacy refresh-token columns, in one
+ * go-api transaction. Returns `{ revoked }`, the sessions and legacy tokens
+ * ended (0 when there were none).
+ *
+ * Takes effect on each device's next request rather than when its access
+ * token expires: an access token names its session, and go-api refuses it
+ * once the session is gone.
+ *
+ * go-api answers 400 when the target is the calling admin — their own
+ * devices are ended from /settings, which keeps the current one — and 404
+ * when the account no longer exists.
+ */
+export async function revokeAdminUserSessions(
+  userId: string,
+): Promise<AdminRevokeSessionsResult> {
+  try {
+    const dict = await getDict();
+    const id = validateUserUuid(userId, dict);
+    const result = await apiMutate<AdminRevokeSessionsResult>(
+      `/api/admin/users/${encodeURIComponent(id)}/sessions`,
+      "DELETE",
+    );
+    revalidateAfterSessions(id);
+    return result;
+  } catch (err) {
+    throw toActionError("revokeAdminUserSessions", err);
+  }
+}
+
+/**
+ * DELETE /api/admin/users/:id/sessions/:sessionId — sign out one device.
+ * Returns `{ revoked: 1 }`. 404 when the session is not this account's or is
+ * already gone; the same 400 for the calling admin as above.
+ */
+export async function revokeAdminUserSession(
+  userId: string,
+  sessionId: string,
+): Promise<AdminRevokeSessionsResult> {
+  try {
+    const dict = await getDict();
+    const id = validateUserUuid(userId, dict);
+    const sid = validateSessionUuid(sessionId, dict);
+    const result = await apiMutate<AdminRevokeSessionsResult>(
+      `/api/admin/users/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sid)}`,
+      "DELETE",
+    );
+    revalidateAfterSessions(id);
+    return result;
+  } catch (err) {
+    throw toActionError("revokeAdminUserSession", err);
   }
 }

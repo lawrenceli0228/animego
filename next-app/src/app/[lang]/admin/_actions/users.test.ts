@@ -12,10 +12,13 @@ interface ApiMutateCall {
   path: string;
   method: string;
   body?: unknown;
+  /** apiMutate's `auth` option as passed: undefined means the default, authenticated. */
+  auth?: boolean;
 }
 
 // Minimal static dict that satisfies the Dict shape users.ts reads.
-// Mirrors the zh.admin.userActions keys so validation messages flow through.
+// Mirrors the zh.admin.userActions keys so validation messages flow through,
+// plus the two userPanel keys the session actions read.
 const STATIC_DICT: Pick<Dict, "admin"> = {
   admin: {
     userActions: {
@@ -28,7 +31,11 @@ const STATIC_DICT: Pick<Dict, "admin"> = {
       missingUserId: "Missing user ID",
       noUpdateFields: "No fields to update",
     },
-  } as Dict["admin"],
+    userPanel: {
+      invalidUserId: "Invalid user ID",
+      invalidSessionId: "Invalid session ID",
+    },
+  } as unknown as Dict["admin"],
 };
 
 // No getLang stub: the module no longer exports one. users.ts resolves its
@@ -43,8 +50,8 @@ let apiMutateImpl: (path: string, method: string, opts?: { body?: unknown }) => 
   async () => ({});
 
 mock.module("@/lib/api", () => ({
-  apiMutate: async (path: string, method: string, opts?: { body?: unknown }) => {
-    apiMutateCalls.push({ path, method, body: opts?.body });
+  apiMutate: async (path: string, method: string, opts?: { body?: unknown; auth?: boolean }) => {
+    apiMutateCalls.push({ path, method, body: opts?.body, auth: opts?.auth });
     return apiMutateImpl(path, method, opts);
   },
   ApiError: class extends Error {
@@ -75,6 +82,8 @@ const {
   updateAdminUser,
   deleteAdminUser,
   setAdminUserPassword,
+  revokeAdminUserSessions,
+  revokeAdminUserSession,
 } = await import("./users");
 const { UserActionError } = await import("./_shared");
 
@@ -435,5 +444,128 @@ describe("toActionError — ApiError path", () => {
     expect((thrown as InstanceType<typeof UserActionError>).message).toBe(
       "database connection lost",
     );
+  });
+});
+
+// ─── The session actions ────────────────────────────────────────────────
+//
+// Synthetic ids. The user id is a uuid because go-api's users.id is one; so
+// is the session id (user_sessions.id).
+
+const USER_ID = "0a1b2c3d-0000-4000-8000-00000000000a";
+const SESSION_ID = "0a1b2c3d-0000-4000-8000-0000000000b1";
+
+/** The error an action threw, so a test can read its code and status. */
+async function thrownBy(run: () => Promise<unknown>): Promise<InstanceType<typeof UserActionError>> {
+  try {
+    await run();
+  } catch (err) {
+    expect(err).toBeInstanceOf(UserActionError);
+    return err as InstanceType<typeof UserActionError>;
+  }
+  throw new Error("expected the action to throw");
+}
+
+describe("revokeAdminUserSessions", () => {
+  test("DELETEs /api/admin/users/:id/sessions with no body and returns go-api's count", async () => {
+    apiMutateImpl = async () => ({ revoked: 3 });
+    const out = await revokeAdminUserSessions(USER_ID);
+    expect(out).toEqual({ revoked: 3 });
+    expect(apiMutateCalls).toEqual([
+      { path: `/api/admin/users/${USER_ID}/sessions`, method: "DELETE", body: undefined, auth: undefined },
+    ]);
+  });
+
+  test("goes out as the caller, so go-api re-checks the admin role on the request", async () => {
+    apiMutateImpl = async () => ({ revoked: 0 });
+    await revokeAdminUserSessions(USER_ID);
+    // `auth: false` would make it anonymous; the default forwards the session.
+    expect(apiMutateCalls[0]?.auth).not.toBe(false);
+  });
+
+  test("a refusal from go-api's admin check comes back with its status, and nothing is revalidated", async () => {
+    const { ApiError } = await import("@/lib/api");
+    apiMutateImpl = async () => {
+      throw new ApiError("FORBIDDEN", "Admin only", 403);
+    };
+    const err = await thrownBy(() => revokeAdminUserSessions(USER_ID));
+    expect(err.code).toBe("FORBIDDEN");
+    expect(err.status).toBe(403);
+    expect(revalidateTagCalls).toEqual([]);
+    expect(revalidatePathCalls).toEqual([]);
+  });
+
+  test("signing yourself out here is go-api's 400, surfaced as is", async () => {
+    const { ApiError } = await import("@/lib/api");
+    apiMutateImpl = async () => {
+      throw new ApiError("BAD_REQUEST", "Cannot sign yourself out here", 400);
+    };
+    const err = await thrownBy(() => revokeAdminUserSessions(USER_ID));
+    expect(err.status).toBe(400);
+    expect(err.message).toBe("Cannot sign yourself out here");
+  });
+
+  test("revalidates the list, the profile and /admin", async () => {
+    apiMutateImpl = async () => ({ revoked: 1 });
+    await revokeAdminUserSessions(USER_ID);
+    expect(revalidateTagCalls).toContainEqual({ tag: "admin:users", profile: "max" });
+    expect(revalidateTagCalls).toContainEqual({ tag: `user:profile:${USER_ID}`, profile: "max" });
+    expect(revalidatePathCalls).toContain("/admin");
+  });
+
+  test("refuses a missing or non-uuid user id before the network", async () => {
+    expect((await thrownBy(() => revokeAdminUserSessions(""))).message).toBe("Missing user ID");
+    for (const bad of ["u1", "../users", `${USER_ID}/sessions`, `${USER_ID} `]) {
+      const err = await thrownBy(() => revokeAdminUserSessions(bad));
+      expect(err.code).toBe("VALIDATION_ERROR");
+      expect(err.message).toBe("Invalid user ID");
+    }
+    expect(apiMutateCalls).toHaveLength(0);
+  });
+});
+
+describe("revokeAdminUserSession", () => {
+  test("DELETEs /api/admin/users/:id/sessions/:sessionId with no body", async () => {
+    apiMutateImpl = async () => ({ revoked: 1 });
+    const out = await revokeAdminUserSession(USER_ID, SESSION_ID);
+    expect(out).toEqual({ revoked: 1 });
+    expect(apiMutateCalls).toEqual([
+      {
+        path: `/api/admin/users/${USER_ID}/sessions/${SESSION_ID}`,
+        method: "DELETE",
+        body: undefined,
+        auth: undefined,
+      },
+    ]);
+    expect(revalidateTagCalls).toContainEqual({ tag: "admin:users", profile: "max" });
+    expect(revalidatePathCalls).toContain("/admin");
+  });
+
+  test("another account's session is go-api's 404, nothing revalidated", async () => {
+    const { ApiError } = await import("@/lib/api");
+    apiMutateImpl = async () => {
+      throw new ApiError("NOT_FOUND", "Session not found", 404);
+    };
+    const err = await thrownBy(() => revokeAdminUserSession(USER_ID, SESSION_ID));
+    expect(err.status).toBe(404);
+    expect(revalidateTagCalls).toEqual([]);
+  });
+
+  test("an unauthenticated caller is go-api's 401", async () => {
+    const { ApiError } = await import("@/lib/api");
+    apiMutateImpl = async () => {
+      throw new ApiError("UNAUTHORIZED", "Not authenticated", 401);
+    };
+    expect((await thrownBy(() => revokeAdminUserSession(USER_ID, SESSION_ID))).status).toBe(401);
+  });
+
+  test("refuses a bad session id, or a bad user id, before the network", async () => {
+    for (const bad of ["", "s1", "../../users", `${SESSION_ID}?x=1`]) {
+      const err = await thrownBy(() => revokeAdminUserSession(USER_ID, bad));
+      expect(err.code).toBe("VALIDATION_ERROR");
+      expect(err.message).toBe("Invalid session ID");
+    }
+    expect((await thrownBy(() => revokeAdminUserSession("nope", SESSION_ID))).message).toBe("Invalid user ID");
+    expect(apiMutateCalls).toHaveLength(0);
   });
 });
