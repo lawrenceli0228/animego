@@ -88,9 +88,6 @@ type Querier interface {
 	// Go and a future caller of this query will not have read it.  Expressed
 	// here, "manual is never overwritten" survives a bug in the tool.
 	ApplyHantTitleBatch(ctx context.Context, anilistIds []int32, titles []string, sources []string, hashes []string) (int64, error)
-	// Every recorded day of the account, copied unchanged under archive_id.  The
-	// cascade from AdminDeleteUser removes the originals in the same transaction.
-	ArchiveUserActivity(ctx context.Context, archiveID uuid.UUID, userID uuid.UUID) (int64, error)
 	// Apply step: reset a batch of flagged rows so the fixed pipeline re-enriches
 	// them from scratch.  Nulls the (possibly wrong) bgm_id + title_chinese +
 	// score/votes so the bad data disappears immediately; bangumi_version=0
@@ -2551,19 +2548,39 @@ type Querier interface {
 	LockHeldUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error)
 	// Archiving a deleted account's activity (migration 0054).
 	//
-	// The three statements below run in ONE transaction, in this order, inside
-	// admin.UserStore.ArchiveAndDeleteUser, followed by AdminDeleteUser.  They are
-	// separate statements rather than one data-modifying CTE on purpose: the
-	// activity recorder (internal/activity) may be flushing this account's
-	// counters at the same moment, and a flush holds a KEY SHARE lock on the
-	// users row from its foreign-key check until it commits.  LockUserForArchive
-	// waits for that flush to commit; under READ COMMITTED the copy that follows
-	// then takes a fresh snapshot that includes it.  A single statement would
-	// copy from the snapshot taken before the wait and quietly drop whatever the
-	// flush had just written for today.
-	// Holds the account for the rest of the transaction.  While it is held, no
-	// new activity row for it can be written: the recorder's insert needs a KEY
-	// SHARE lock on this row for its foreign key, which FOR UPDATE excludes.
+	// The statements below run in ONE READ COMMITTED transaction, in this order,
+	// inside admin.UserStore.ArchiveAndDeleteUser, followed by AdminDeleteUser.
+	//
+	// The activity recorder (internal/activity) may be flushing this account's
+	// counters at the same moment, and the order is what keeps that flush from
+	// being lost or from deadlocking with the delete.  A flush is one
+	// INSERT ... ON CONFLICT DO UPDATE.  For a day that already has a row it locks
+	// that row and adds to it; the foreign key is unchanged, so Postgres checks
+	// nothing and the users row is not locked at all.  For a new day it inserts,
+	// and the foreign-key check at the end of the statement takes a KEY SHARE
+	// lock on the users row.  A flush therefore always locks activity rows first
+	// and the users row last, and the archive takes them in the same order:
+	//
+	//   1. LockUserActivityForArchive waits for a flush that is adding to one of
+	//      the account's rows.
+	//   2. LockUserForArchive waits for a flush that inserted a row and is
+	//      committing.  From here on no new row for the account can be written.
+	//   3. MoveUserActivityToArchive deletes the rows and archives what it
+	//      deleted.  A DELETE waits for a row that is still being updated and
+	//      returns the version that update committed, so the archive gets each
+	//      day's counters as they finally stand.
+	//
+	// Locking the users row first instead would let a flush that adds to
+	// yesterday's row and inserts today's (one batch across +08 midnight) hold the
+	// row the delete needs while waiting for the lock the delete holds.  And
+	// copying with INSERT ... SELECT instead of moving would read a row as it was
+	// before a concurrent update and then let the cascade delete the updated one,
+	// so that flush's counters would be in neither table.
+	// Step 1: the account's activity rows, before its users row (see above).
+	LockUserActivityForArchive(ctx context.Context, userID uuid.UUID) error
+	// Step 2: holds the account for the rest of the transaction.  While it is
+	// held no new activity row for it can be written: the recorder's insert needs
+	// a KEY SHARE lock on this row for its foreign key, which FOR UPDATE excludes.
 	// pgx.ErrNoRows means the account is already gone.
 	LockUserForArchive(ctx context.Context, id uuid.UUID) (pgtype.Timestamptz, error)
 	// user_sessions: one refresh session per device (migration 0052).
@@ -2882,6 +2899,9 @@ type Querier interface {
 	// failures, so failures goes back to 0.
 	MarkImageWarmed(ctx context.Context, url string) error
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error)
+	// Step 3: every recorded day of the account, moved unchanged under
+	// archive_id.  The cascade from AdminDeleteUser then finds nothing left.
+	MoveUserActivityToArchive(ctx context.Context, archiveID uuid.UUID, userID uuid.UUID) (int64, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error

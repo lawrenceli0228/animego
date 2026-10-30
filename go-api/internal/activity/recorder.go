@@ -154,10 +154,21 @@ SET first_seen_at = LEAST(uad.first_seen_at, EXCLUDED.first_seen_at),
     request_count = uad.request_count + EXCLUDED.request_count,
     login_count   = uad.login_count   + EXCLUDED.login_count`
 
-// pgForeignKeyViolation is the SQLSTATE a flush fails with when an account in
-// the batch is deleted while the statement is running.  See the note on the
-// WHERE EXISTS guard above and execFlush below.
-const pgForeignKeyViolation = "23503"
+// The two SQLSTATEs a flush is retried on (see execFlush).
+const (
+	// pgForeignKeyViolation is what a flush fails with when an account in the
+	// batch is deleted while the statement is running.  See the note on the
+	// WHERE EXISTS guard above.
+	pgForeignKeyViolation = "23503"
+
+	// pgDeadlockDetected is what a flush fails with when Postgres picks it as
+	// the victim of a lock cycle.  Nothing in this repo should form one any
+	// more -- flushes are serialised (flushMu) and the account delete locks
+	// rows in the flush's order (activity_archive.sql) -- so this is the
+	// defence for a cycle nobody has thought of, which would otherwise cost
+	// every user in the batch their counters for the interval.
+	pgDeadlockDetected = "40P01"
+)
 
 // execer is the pgxpool surface the recorder needs -- one method, satisfied by
 // *pgxpool.Pool as-is.  Declared here, where it is consumed, so tests can
@@ -206,6 +217,17 @@ type Recorder struct {
 
 	mu  sync.Mutex
 	buf map[bufferKey]*bufferEntry
+
+	// flushMu serialises flushes: the ticker's, an early one the buffer cap
+	// asked for, the shutdown drain, and one an account delete asks for
+	// through Flush.  Held from the buffer swap until the statement returns.
+	//
+	// Two flush statements running at once would upsert overlapping rows in
+	// map-iteration order, which is a deadlock waiting to happen.  And a
+	// caller of Flush is owed "everything recorded before this call is in the
+	// database when it returns", which a concurrent flush still holding part
+	// of the buffer would quietly break.
+	flushMu sync.Mutex
 
 	// kick asks the flush loop to run early because the buffer hit its cap.
 	//
@@ -398,8 +420,17 @@ func (r *Recorder) loop() {
 	}
 }
 
-// Flush writes everything buffered and empties the buffer.  Exported so tests
-// can drive it deterministically instead of waiting on a ticker.
+// Flush writes everything buffered and empties the buffer, after waiting for a
+// flush that is already running, so when it returns everything recorded
+// before the call has been written (or the failure has been logged).
+//
+// Exported for two callers: tests, which drive it instead of waiting on a
+// ticker, and the admin account delete, which flushes before archiving so
+// the account's last minute of activity is in the database while the account
+// still exists -- after that the guard below skips it.
+//
+// Pass a context that a departing client cannot cancel: a cancelled flush
+// drops the whole batch, everybody's counters included.
 func (r *Recorder) Flush(ctx context.Context) {
 	r.flush(ctx, flushTimeout)
 }
@@ -425,6 +456,8 @@ func (r *Recorder) flush(ctx context.Context, budget time.Duration) {
 	if r == nil {
 		return
 	}
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 	r.mu.Lock()
 	if len(r.buf) == 0 {
 		r.mu.Unlock()
@@ -471,15 +504,17 @@ func flushArgs(batch map[bufferKey]*bufferEntry) []any {
 }
 
 // execFlush runs the flush statement, and runs it exactly once more when the
-// first attempt fails with a foreign-key violation.
+// first attempt fails with a foreign-key violation or as a deadlock victim.
 //
-// That failure means an account in the batch was deleted while the statement
-// was running (see the WHERE EXISTS note on recordUserActivitySQL).  Retrying
-// is safe and cannot double-count: a statement that fails is rolled back
-// whole, so the first attempt wrote nothing, and the second one re-evaluates
-// the guard against a fresh snapshot and skips the account that is gone.  It
-// is one retry and not a loop -- a second foreign-key failure means another
-// delete landed in the same instant, which is rare enough to log and drop
+// A foreign-key violation means an account in the batch was deleted while the
+// statement was running (see the WHERE EXISTS note on recordUserActivitySQL);
+// a deadlock means some other transaction formed a lock cycle with it (see
+// pgDeadlockDetected).  Retrying is safe and cannot double-count: a statement
+// that fails is rolled back whole, so the first attempt wrote nothing, and
+// the second one runs on a fresh snapshot, where the guard skips the account
+// that is gone and the other transaction has finished or been rolled back.
+// It is one retry and not a loop -- a second failure means the same thing
+// happened again in the same instant, which is rare enough to log and drop
 // like any other failure.  Every other error is returned as-is: none of them
 // is fixed by asking again within the same budget.
 //
@@ -487,17 +522,26 @@ func flushArgs(batch map[bufferKey]*bufferEntry) []any {
 // caller gave it -- which matters for the shutdown drain (see drainTimeout).
 func (r *Recorder) execFlush(ctx context.Context, args []any, rows int) error {
 	_, err := r.pool.Exec(ctx, recordUserActivitySQL, args...)
-	if !isForeignKeyViolation(err) {
+	code, retry := retryableFlushError(err)
+	if !retry {
 		return err
 	}
-	r.log.Info("activity: flush raced an account delete; retrying once", "rows", rows)
+	r.log.Info("activity: flush failed on a concurrent transaction; retrying once",
+		"sqlstate", code, "rows", rows)
 	_, err = r.pool.Exec(ctx, recordUserActivitySQL, args...)
 	return err
 }
 
-// isForeignKeyViolation reports whether err is, or wraps, a Postgres
-// foreign-key violation.
-func isForeignKeyViolation(err error) bool {
+// retryableFlushError reports whether err is, or wraps, one of the Postgres
+// errors execFlush retries, and which one.
+func retryableFlushError(err error) (string, bool) {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation
+	if !errors.As(err, &pgErr) {
+		return "", false
+	}
+	switch pgErr.Code {
+	case pgForeignKeyViolation, pgDeadlockDetected:
+		return pgErr.Code, true
+	}
+	return "", false
 }

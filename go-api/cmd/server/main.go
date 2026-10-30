@@ -708,6 +708,9 @@ func main() {
 	// A login is the one presence event the recorder's middleware structurally
 	// cannot see: nobody holds a valid token at the moment they are logging in.
 	authHandlers.SetLoginObserver(activityRecorder)
+	// Deleting an account archives its activity; the flush first puts the
+	// minute still in this buffer into what gets archived.
+	adminUserHandlers.SetActivityFlusher(activityRecorder)
 
 	// P2.4 — subscriptions + social.  Subscriptions handler depends on
 	// anime.EnsureCached for the FK pre-fill (POST /api/subscriptions

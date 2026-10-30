@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/activity"
 	"github.com/lawrenceli0228/animego/go-api/internal/testutil"
 )
 
@@ -189,6 +191,198 @@ func TestDeleteUser_ThroughTheHandlerArchives(t *testing.T) {
 	assert.EqualValues(t, 0, countRows(t, pool, `SELECT count(*) FROM users WHERE id = $1`, target))
 	assert.EqualValues(t, 1, countRows(t, pool, `SELECT count(*) FROM archived_users`))
 	assert.EqualValues(t, 1, countRows(t, pool, `SELECT count(*) FROM archived_user_activity_daily`))
+}
+
+// flushLikeUpsert adds to one activity day the way the recorder's flush does
+// (internal/activity, recordUserActivitySQL): the same ON CONFLICT path, so
+// the same locks.  An existing day is updated in place -- its row locked, the
+// users row not locked at all, because the foreign key does not change -- and
+// a new day is inserted, with the foreign-key check taking a KEY SHARE lock
+// on the users row.  Run inside a test-held transaction so the locks stay
+// held for as long as the test needs.
+func flushLikeUpsert(t *testing.T, ctx context.Context, tx pgx.Tx, userID uuid.UUID, first, last time.Time, requests, logins int64) error {
+	t.Helper()
+	_, err := tx.Exec(ctx, `
+		INSERT INTO user_activity_daily AS uad
+			(user_id, activity_date, first_seen_at, last_seen_at, request_count, login_count)
+		VALUES ($1, ($2::timestamptz AT TIME ZONE 'Asia/Shanghai')::date, $2, $3, $4, $5)
+		ON CONFLICT (activity_date, user_id) DO UPDATE
+		SET first_seen_at = LEAST(uad.first_seen_at, EXCLUDED.first_seen_at),
+		    last_seen_at  = GREATEST(uad.last_seen_at, EXCLUDED.last_seen_at),
+		    request_count = uad.request_count + EXCLUDED.request_count,
+		    login_count   = uad.login_count   + EXCLUDED.login_count`,
+		userID, first, last, requests, logins)
+	return err
+}
+
+// waitForAnotherBackendOnLock blocks until a backend other than pid is
+// waiting on a lock, so a test can force an interleaving instead of hoping
+// for it.
+func waitForAnotherBackendOnLock(t *testing.T, pool *pgxpool.Pool, pid uint32) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting int
+		require.NoError(t, pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND pid <> $1 AND datname = current_database()`,
+			int64(pid)).Scan(&waiting))
+		if waiting > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("no other backend ever waited on a lock")
+}
+
+type archiveOutcome struct {
+	deleted bool
+	err     error
+}
+
+// archiveInBackground runs ArchiveAndDeleteUser on its own goroutine.
+func archiveInBackground(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) <-chan archiveOutcome {
+	done := make(chan archiveOutcome, 1)
+	go func() {
+		deleted, err := NewUserStore(pool).ArchiveAndDeleteUser(ctx, id)
+		done <- archiveOutcome{deleted, err}
+	}()
+	return done
+}
+
+func awaitArchive(t *testing.T, done <-chan archiveOutcome) {
+	t.Helper()
+	select {
+	case out := <-done:
+		require.NoError(t, out.err)
+		require.True(t, out.deleted)
+	case <-time.After(15 * time.Second):
+		t.Fatal("the archive never finished")
+	}
+}
+
+// A flush that adds to a day the account already has does not lock the users
+// row, so locking that row first did not wait for it: the copy read the day
+// as it was before the flush, the cascade then deleted the day as the flush
+// left it, and the flush's counters ended up in neither table.  The archive
+// now locks the account's activity rows first and moves them, so it waits
+// for the flush and archives the day as it finally stands.
+func TestArchiveAndDeleteUser_WaitsForAFlushAddingToAnExistingDay(t *testing.T) {
+	pool := newStorePool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	at := func(hhmm string) time.Time {
+		ts, err := time.Parse("2006-01-02 15:04 -0700", "2026-10-20 "+hhmm+" +0800")
+		require.NoError(t, err)
+		return ts
+	}
+	victim := seedUserAt(t, pool, "victim", "victim@example.com", at("08:00"))
+	archiveSeedDay(t, pool, victim, "2026-10-20", at("10:00"), at("10:00"), 1, 0)
+
+	flush, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = flush.Rollback(ctx) }()
+	var flushPID uint32
+	require.NoError(t, flush.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&flushPID))
+	require.NoError(t, flushLikeUpsert(t, ctx, flush, victim, at("11:00"), at("11:30"), 5, 1))
+
+	done := archiveInBackground(ctx, pool, victim)
+	waitForAnotherBackendOnLock(t, pool, flushPID)
+	select {
+	case out := <-done:
+		t.Fatalf("the archive finished while the flush was still open: %+v", out)
+	default:
+	}
+	require.NoError(t, flush.Commit(ctx))
+	awaitArchive(t, done)
+
+	days := readArchivedDays(t, pool)
+	require.Len(t, days, 1)
+	assert.EqualValues(t, 6, days[0].Requests, "the flush's +5 must be archived with the day")
+	assert.EqualValues(t, 1, days[0].Logins)
+	assert.True(t, days[0].FirstSeen.Equal(at("10:00")))
+	assert.True(t, days[0].LastSeen.Equal(at("11:30")))
+	assert.EqualValues(t, 0, countRows(t, pool, `SELECT count(*) FROM user_activity_daily WHERE user_id = $1`, victim))
+}
+
+// One flush can carry two days for the same account across +08 midnight: it
+// adds to yesterday's row (locking it) and inserts today's (whose foreign-key
+// check then wants the users row).  The archive used to lock the users row
+// first and then need yesterday's row for the cascade: a lock cycle, and
+// whichever side Postgres aborted, a delete failed or everybody's counters
+// for the interval were lost.  The archive now takes the rows in the flush's
+// order, so the flush finishes and the archive waits for it.
+//
+// The two days go in as two statements of one transaction.  That holds the
+// same locks in the same order as the recorder's single statement (the
+// update's row lock first, the insert's foreign-key lock at the end), and it
+// lets the test start the delete between them, which is exactly where the
+// cycle formed.
+func TestArchiveAndDeleteUser_FlushAcrossMidnightDoesNotDeadlock(t *testing.T) {
+	pool := newStorePool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	at := func(day, hhmm string) time.Time {
+		ts, err := time.Parse("2006-01-02 15:04:05 -0700", day+" "+hhmm+" +0800")
+		require.NoError(t, err)
+		return ts
+	}
+	victim := seedUserAt(t, pool, "victim", "victim@example.com", at("2026-10-01", "12:00:00"))
+	archiveSeedDay(t, pool, victim, "2026-10-20", at("2026-10-20", "23:00:00"), at("2026-10-20", "23:40:00"), 3, 0)
+
+	flush, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = flush.Rollback(ctx) }()
+	var flushPID uint32
+	require.NoError(t, flush.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&flushPID))
+	require.NoError(t, flushLikeUpsert(t, ctx, flush, victim,
+		at("2026-10-20", "23:50:00"), at("2026-10-20", "23:59:00"), 2, 0), "yesterday: update in place")
+
+	done := archiveInBackground(ctx, pool, victim)
+	waitForAnotherBackendOnLock(t, pool, flushPID)
+
+	require.NoError(t, flushLikeUpsert(t, ctx, flush, victim,
+		at("2026-10-21", "00:00:30"), at("2026-10-21", "00:01:00"), 1, 0),
+		"today: insert, whose foreign-key check must not be left waiting on the archive")
+	require.NoError(t, flush.Commit(ctx))
+	awaitArchive(t, done)
+
+	days := readArchivedDays(t, pool)
+	require.Len(t, days, 2)
+	assert.Equal(t, "2026-10-20", days[0].ActivityDate)
+	assert.EqualValues(t, 5, days[0].Requests)
+	assert.True(t, days[0].LastSeen.Equal(at("2026-10-20", "23:59:00")))
+	assert.Equal(t, "2026-10-21", days[1].ActivityDate)
+	assert.EqualValues(t, 1, days[1].Requests)
+	assert.EqualValues(t, 0, countRows(t, pool, `SELECT count(*) FROM user_activity_daily WHERE user_id = $1`, victim))
+}
+
+// The recorder writes its buffer once a minute and skips accounts that no
+// longer exist, so an account deleted within a minute of its last request
+// lost that minute -- for an account whose only visit that day it was, a
+// whole day in the statistics.  DeleteUser flushes the recorder first.
+func TestDeleteUser_ArchivesActivityStillInTheRecorder(t *testing.T) {
+	pool := newStorePool(t)
+	target := seedUserAt(t, pool, "target", "target@example.com", time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	at := time.Date(2026, 10, 21, 2, 0, 0, 0, time.UTC)
+
+	rec := activity.NewRecorder(pool, discardLogger(), time.Hour)
+	rec.Touch(target, at)
+	rec.Touch(target, at.Add(time.Minute))
+
+	h := NewUserHandlers(NewUserStore(pool), fakeEnqueuer{})
+	h.SetActivityFlusher(rec)
+	ctx := withAdminClaims(t, context.Background(), uuid.New(), "admin")
+	req := requestWithUserID(t, http.MethodDelete, "/api/admin/users/"+target.String(), "", target.String()).WithContext(
+		chiCtxOver(t, ctx, target.String()))
+	w := httptest.NewRecorder()
+	h.DeleteUser(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	days := readArchivedDays(t, pool)
+	require.Len(t, days, 1, "the buffered day must reach the archive")
+	assert.Equal(t, "2026-10-21", days[0].ActivityDate)
+	assert.EqualValues(t, 2, days[0].Requests)
 }
 
 // The prune job's own SQL, run as pg_cron would run it: rows past the 400-day

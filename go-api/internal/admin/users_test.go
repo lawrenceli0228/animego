@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -988,6 +989,89 @@ func TestDeleteUser_DeleteDBError_500(t *testing.T) {
 	h.DeleteUser(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+// orderedFlusher is an ActivityFlusher that writes "flush" into a shared call
+// log and keeps the context it was given.
+type orderedFlusher struct {
+	mu    sync.Mutex
+	calls *[]string
+	ctxs  []context.Context
+}
+
+func (f *orderedFlusher) Flush(ctx context.Context) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	*f.calls = append(*f.calls, "flush")
+	f.ctxs = append(f.ctxs, ctx)
+}
+
+// TestDeleteUser_FlushesTheRecorderBeforeArchiving pins step 4: the recorder
+// is flushed before the archive transaction, so the account's last buffered
+// minute is in the database while the account still exists.  The flush must
+// also outlive a cancelled request -- a cancelled flush drops everybody's
+// counters, not just this account's.
+func TestDeleteUser_FlushesTheRecorderBeforeArchiving(t *testing.T) {
+	t.Parallel()
+	targetID := uuid.New()
+	var calls []string
+	db := &fakeUserDB{
+		getUserByIDFn: func(_ context.Context, id uuid.UUID) (dbgen.User, error) {
+			return fixtureDBUser(t, id, "victim"), nil
+		},
+		archiveAndDeleteUserFn: func(_ context.Context, _ uuid.UUID) (bool, error) {
+			calls = append(calls, "archive")
+			return true, nil
+		},
+	}
+	flusher := &orderedFlusher{calls: &calls}
+	h := NewUserHandlers(db, fakeEnqueuer{})
+	h.SetActivityFlusher(flusher)
+
+	base, cancel := context.WithCancel(withAdminClaims(t, context.Background(), uuid.New(), "admin"))
+	cancel() // the admin's client is already gone
+	req := requestWithUserID(t, http.MethodDelete, "/api/admin/users/"+targetID.String(), "", targetID.String()).WithContext(
+		chiCtxOver(t, base, targetID.String()))
+	rec := httptest.NewRecorder()
+	h.DeleteUser(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !reflect.DeepEqual(calls, []string{"flush", "archive"}) {
+		t.Fatalf("calls = %v, want [flush archive]", calls)
+	}
+	if err := flusher.ctxs[0].Err(); err != nil {
+		t.Fatalf("the flush context must not inherit the request's cancellation; Err() = %v", err)
+	}
+}
+
+// Nothing is flushed for a delete that is refused before it reaches the
+// archive.
+func TestDeleteUser_RefusedDeleteDoesNotFlush(t *testing.T) {
+	t.Parallel()
+	targetID := uuid.New()
+	var calls []string
+	db := &fakeUserDB{
+		getUserByIDFn: func(_ context.Context, _ uuid.UUID) (dbgen.User, error) {
+			return dbgen.User{}, pgx.ErrNoRows
+		},
+	}
+	h := NewUserHandlers(db, fakeEnqueuer{})
+	h.SetActivityFlusher(&orderedFlusher{calls: &calls})
+
+	ctx := withAdminClaims(t, context.Background(), uuid.New(), "admin")
+	req := requestWithUserID(t, http.MethodDelete, "/api/admin/users/"+targetID.String(), "", targetID.String()).WithContext(
+		chiCtxOver(t, ctx, targetID.String()))
+	rec := httptest.NewRecorder()
+	h.DeleteUser(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("calls = %v, want none", calls)
 	}
 }
 

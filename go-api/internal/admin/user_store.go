@@ -35,25 +35,35 @@ func NewUserStore(pool *pgxpool.Pool) *UserStore {
 }
 
 // ArchiveAndDeleteUser deletes the account and, in the same transaction,
-// copies what the activity statistics are built from -- its signup instant
+// moves what the activity statistics are built from -- its signup instant
 // and every recorded day -- into the anonymous archive (migration 0054).
-// Without the copy, the cascade from users would subtract the person from
+// Without the archive, the cascade from users would subtract the person from
 // every past day they were counted in.
 //
 // Reports false, with nothing written, when the account no longer exists.
 //
-// The order is the point; see activity_archive.sql.  The row lock comes
-// first and waits for any activity flush that is mid-commit for this
-// account, the copy then reads with a snapshot that includes it, and while
-// the lock is held no further activity row for the account can be written.
+// The order is the point; see activity_archive.sql.  The account's activity
+// rows are locked before its users row, the order the activity recorder's
+// flush takes them in, so a flush running at the same moment is waited for
+// instead of deadlocked with or overwritten.  READ COMMITTED is load-bearing
+// and so is stated rather than inherited: every statement takes a fresh
+// snapshot, which is how the move sees a row a flush committed while the
+// locks were being waited for.  Under REPEATABLE READ that row would be
+// invisible to the move and the cascade would delete it unarchived.
+//
+// Activity still buffered in the recorder is not in the database yet and so
+// not here; DeleteUser flushes the recorder before calling this.
 func (s *UserStore) ArchiveAndDeleteUser(ctx context.Context, id uuid.UUID) (bool, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return false, fmt.Errorf("admin: begin archive-and-delete: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	q := dbgen.New(tx)
+	if err := q.LockUserActivityForArchive(ctx, id); err != nil {
+		return false, fmt.Errorf("admin: lock activity for archive: %w", err)
+	}
 	createdAt, err := q.LockUserForArchive(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -65,7 +75,7 @@ func (s *UserStore) ArchiveAndDeleteUser(ctx context.Context, id uuid.UUID) (boo
 	if err != nil {
 		return false, fmt.Errorf("admin: archive signup: %w", err)
 	}
-	if _, err := q.ArchiveUserActivity(ctx, archiveID, id); err != nil {
+	if _, err := q.MoveUserActivityToArchive(ctx, archiveID, id); err != nil {
 		return false, fmt.Errorf("admin: archive activity: %w", err)
 	}
 	if err := q.AdminDeleteUser(ctx, id); err != nil {

@@ -110,6 +110,28 @@ type UserDB interface {
 type UserHandlers struct {
 	db  UserDB
 	enq queue.Enqueuer
+
+	// flusher, when set, is flushed before an account is archived; see
+	// SetActivityFlusher.
+	flusher ActivityFlusher
+}
+
+// ActivityFlusher is the activity recorder surface DeleteUser needs.
+// *activity.Recorder satisfies it.
+type ActivityFlusher interface {
+	// Flush writes every buffered activity counter and returns once it has
+	// been written (or the failure logged).
+	Flush(ctx context.Context)
+}
+
+// SetActivityFlusher makes DeleteUser flush the activity recorder before it
+// archives an account.  The recorder writes its buffer once a minute and skips
+// accounts that no longer exist, so without the flush up to a minute of the
+// account's activity -- possibly the only visit of its last day -- never
+// reaches the archive.  main.go wires the process's recorder; leaving it
+// unset (tests, tooling) only means that minute is not archived.
+func (h *UserHandlers) SetActivityFlusher(f ActivityFlusher) {
+	h.flusher = f
 }
 
 // NewUserHandlers constructs a UserHandlers bundle.  Pass a UserStore
@@ -373,13 +395,15 @@ type deleteUserResp struct {
 //  3. GetUserByID — if pgx.ErrNoRows → 404 NOT_FOUND.  Express does
 //     this same lookup so it can echo the deleted username in the
 //     response; we keep the read to preserve that affordance.
-//  4. ArchiveAndDeleteUser — one transaction: the signup instant and every
-//     activity day are copied into the anonymous archive (migration 0054),
+//  4. Flush the activity recorder (SetActivityFlusher), so the account's
+//     activity still buffered in memory is in the database to be archived.
+//  5. ArchiveAndDeleteUser — one transaction: the signup instant and every
+//     activity day are moved into the anonymous archive (migration 0054),
 //     then the account is deleted and Postgres ON DELETE CASCADE removes
 //     subscriptions / follows / comments / danmakus with it.  Without the
 //     archive the activity statistics would lose this person from every
 //     past day.  An account gone by the time the row is locked → 404.
-//  5. 200 with { deleted: true, username }.
+//  6. 200 with { deleted: true, username }.
 func (h *UserHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), userQueryTimeout)
 	defer cancel()
@@ -413,6 +437,16 @@ func (h *UserHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "user lookup failed"))
 		return
+	}
+
+	// The account's last minute of activity may still be in the recorder's
+	// buffer, and once the account is gone the recorder skips it.  Writing the
+	// buffer first puts that minute in the archive.  Detached from the
+	// request's cancellation: a cancelled flush drops the whole batch, and an
+	// admin's client hanging up must not cost everybody their counters.  The
+	// flush has its own time budget.
+	if h.flusher != nil {
+		h.flusher.Flush(context.WithoutCancel(r.Context()))
 	}
 
 	// Archives the account's signup and activity days before removing it, so
