@@ -322,6 +322,11 @@ jobs:
           # fall back to an empty page). Action and not the genre its spec
           # seeds: this request fills caches (the overview, the hub counts)
           # before any spec has written a row, and no spec asserts Action's.
+          #
+          # /top/warmup compiles `[lang]/top/[year]`, the yearly ranking, and
+          # answers 404 from the year check alone, before any fetch: a real
+          # year here would fill the ranking's cached list of years before
+          # top-100.spec.ts has seeded the years it opens.
           for probe in /:200 /login:200 /register:200 /forgot-password:200 \
                        /reset-password/warmup:200 /welcome:200 /library:307 \
                        /player:200 /admin:307 /admin/edits:307 /anime/0:404 \
@@ -330,7 +335,8 @@ jobs:
                        /anime/0/social/threads/warmup:404 \
                        /person/0:404 /character/0:404 \
                        /person/0/edit:404 /character/0/edit:404 \
-                       /seasonal/spring/2026:200 /genre/action:200; do
+                       /seasonal/spring/2026:200 /genre/action:200 \
+                       /top/warmup:404; do
             # Split on the LAST colon, so a path that ever contains one still
             # pairs correctly with its status.
             route="${probe%:*}"
