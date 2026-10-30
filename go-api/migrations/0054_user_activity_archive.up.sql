@@ -5,29 +5,34 @@
 -- (0025), and the admin activity panel counts signups straight out of
 -- `users`.  So deleting one account silently subtracted that person from
 -- every day they had ever been active and from the signup bar of the day they
--- registered: yesterday's DAU, last month's signups and every retention cohort
+-- registered: yesterday's active count, last month's signups and every cohort
 -- they belonged to all got smaller, after the fact, with nothing on screen to
 -- say so.  The delete button sits on the same page as the charts it was
 -- editing.
 --
 -- WHAT THIS KEEPS, AND WHAT IT DOES NOT.  When an account is deleted, the
--- delete transaction (admin.UserStore.ArchiveAndDeleteUser) copies the two
+-- delete transaction (admin.UserStore.ArchiveAndDeleteUser) moves the two
 -- facts the activity panel is built from into the tables below, under a fresh
 -- random archive_id:
 --
 --   archived_users                 the signup instant
 --   archived_user_activity_daily   one row per day the person was active
 --
--- Nothing that identifies the person survives: no user id, username, email,
--- or anything joinable back to them.  archive_id is generated here, never
--- derived from users.id.  What survives is exactly what a count needs -- that
--- somebody signed up at this instant and was here on these days -- so the
--- history stays the same size and the person is gone.
+-- No identifier of the account survives: no user id, username or email, and
+-- archive_id is generated here, never derived from users.id.  What survives
+-- is exactly what a count needs -- that somebody signed up at this instant
+-- and was here on these days -- so the history stays the same size and the
+-- person is gone from the database.  The instants are kept as they were,
+-- because the +08 day and the same-moment comparisons are computed from
+-- them, so a copy of the database taken before the delete (a backup) could
+-- still be matched against the archive; the archive does not protect against
+-- whoever holds one.
 --
 -- READ THE VIEWS, NOT THE TABLES.  activity_people and activity_days are the
 -- union of the live tables and the archive.  Every statistic that counts
--- people over time (DAU/WAU/MAU, the daily trend, signups per day, depth,
--- retention cohorts, instrumentation start) reads these two views.  Anything
+-- people over time (today and the 7/30-day windows, the daily trend, signups
+-- per day, depth, retention cohorts, instrumentation start) reads these two
+-- views.  Anything
 -- that lists ACCOUNTS (the user table, a user's detail page) reads `users` and
 -- `user_activity_daily` directly, because a deleted account is not an account.
 --
