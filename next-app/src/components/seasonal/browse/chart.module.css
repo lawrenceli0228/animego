@@ -280,3 +280,32 @@
     transform: none;
   }
 }
+
+/* ── Ranked: the top-100 pages ──────────────────────────────────────────────
+ * The show's place in the head's corner, above its score, in the show's tone. */
+
+.chRankCol {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.chRank {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+}
+
+.chRank i {
+  margin-right: 1px;
+  font-style: normal;
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.6;
+}

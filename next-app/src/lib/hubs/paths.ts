@@ -1,10 +1,13 @@
-// The URL shapes of the three hub pages, in one place so the links on the
-// detail page, the pages themselves, and the sitemap cannot disagree.
+// The URL shapes of the hub pages, in one place so the links on the detail
+// page, the pages themselves, and the sitemap cannot disagree.
 //
 //   /genre/slice-of-life   — slug of the AniList genre enum
 //   /studio/MAPPA          — the studio's name, URL-encoded (no id yet on
 //                            most rows; the name is the key the table has)
-//   /year/2024             — release year
+//   /top                   — the hundred best-rated shows of every year
+//   /top/2024              — a release year's hundred. The year's page used to
+//                            be /year/2024, every title of the year by
+//                            popularity; that address now answers 308 here.
 //
 // Bare paths, like every other href in the tree: the [lang] segment is
 // applied by the proxy for the non-default locale.
@@ -33,8 +36,14 @@ export function studioPath(name: string): string {
   return `/studio/${encodeURIComponent(name)}`;
 }
 
+/** The ranking of every year (no year), or of one release year. */
+export function topPath(year: number | null = null): string {
+  return year === null ? "/top" : `/top/${year}`;
+}
+
+/** A release year's page: its ranking. */
 export function yearPath(year: number): string {
-  return `/year/${year}`;
+  return topPath(year);
 }
 
 /** A hub page is a year between the oldest title and a little past today. */

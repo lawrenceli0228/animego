@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { FILTER_GENRES } from "@/lib/contentLabels";
-import { genreFromSlug, genrePath, genreSlug, parseHubYear, studioPath } from "./paths";
+import { genreFromSlug, genrePath, genreSlug, parseHubYear, studioPath, topPath, yearPath } from "./paths";
 
 describe("hub paths", () => {
   test("every filter genre round-trips through its slug", () => {
@@ -24,6 +24,18 @@ describe("hub paths", () => {
     expect(studioPath("Studio DEEN")).toBe("/studio/Studio%20DEEN");
     expect(studioPath("J.C.STAFF")).toBe("/studio/J.C.STAFF");
     expect(decodeURIComponent(studioPath("P.A. Works").slice("/studio/".length))).toBe("P.A. Works");
+  });
+
+  test("a year's page is its ranking; the ranking of every year has no year", () => {
+    expect(yearPath(2024)).toBe("/top/2024");
+    expect(topPath(2024)).toBe("/top/2024");
+    expect(topPath()).toBe("/top");
+    expect(topPath(null)).toBe("/top");
+  });
+
+  test("a prototype name is no genre", () => {
+    expect(genreFromSlug("constructor")).toBeNull();
+    expect(genreFromSlug("__proto__")).toBeNull();
   });
 
   test("year bounds", () => {

@@ -31,13 +31,16 @@ import {
   type ScheduleRow,
 } from "@/lib/home/viewModels";
 import { yearPath } from "@/lib/hubs/paths";
+import { fetchTopRows } from "@/lib/top/fetch";
+import type { TopRow } from "@/lib/top/items";
+import { NO_FILTERS } from "@/lib/top/query";
+import { siteYear } from "@/lib/top/years";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates, absoluteUrl, SITE_ORIGIN } from "@/lib/seo/alternates";
 import type {
   ScheduleItem,
   SeasonalAnime,
   TrendingItem,
-  YearlyTopItem,
 } from "@/lib/types";
 import styles from "./page.module.css";
 
@@ -139,18 +142,15 @@ async function safeCompletedGems(): Promise<TrendingItem[]> {
   }
 }
 
-async function safeYearlyTop(year: number): Promise<YearlyTopItem[]> {
-  try {
-    return await apiGet<YearlyTopItem[]>(
-      `/api/anime/yearly-top?year=${year}&limit=${YEAR_TOP_COUNT}`,
-      { revalidate: 300 },
-    );
-  } catch (err) {
-    if (!(err instanceof ApiError) || err.status !== 404) {
-      console.warn("[HomePage] yearly-top fetch failed:", err);
-    }
-    return [];
-  }
+/**
+ * The year's top ten: the first ten of /top/{year}, read through the very
+ * request that page makes (lib/top/fetch.ts), so the two share one cache entry
+ * and the list here is always the head of the page its 完整年榜 link opens.
+ * (/api/anime/yearly-top, which this used to read, ranks by another rule — no
+ * popularity floor, three formats — and stays as it is for its API readers.)
+ */
+async function safeYearTop(year: number): Promise<TopRow[]> {
+  return ((await fetchTopRows({ year, ...NO_FILTERS })) ?? []).slice(0, YEAR_TOP_COUNT);
 }
 
 /**
@@ -259,6 +259,9 @@ export async function generateMetadata({
 export default async function HomePage({ params }: PageProps<"/[lang]">) {
   const season = getCurrentSeason();
   const year = new Date().getFullYear();
+  // The ranking's year is the site's (China's, +08:00): the year the /top
+  // strip's newest cell names, which a server on UTC reaches eight hours late.
+  const topYear = siteYear(requestTime());
 
   const [{ dict, lang }, seasonal, trending, gems, schedule, yearlyTop, watching] =
     await Promise.all([
@@ -270,7 +273,7 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
       // window, never cached, and the signed-in reader's watching list read
       // server-side with their cookie — anonymous on any failure.
       fetchSchedule("HomePage"),
-      safeYearlyTop(year),
+      safeYearTop(topYear),
       fetchWatching(),
     ]);
 
@@ -372,10 +375,10 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
       <div className={styles.pair}>
         <GemsPanel initial={gems.map((row) => gemCard(row, lang, epCopy))} limit={COMPLETED_GEMS_LIMIT} />
         <YearTopList
-          items={yearlyTop.slice(0, YEAR_TOP_COUNT).map((row, i) => yearCard(row, i + 1, lang))}
-          title={fillTemplate(dict.home.yearTopTitle, { year })}
+          items={yearlyTop.map((row, i) => yearCard(row, row.rank ?? i + 1, lang))}
+          title={fillTemplate(dict.home.yearTopTitle, { year: topYear })}
           note={dict.home.yearTopSub}
-          link={{ href: yearPath(year), label: dict.home.yearTopAll }}
+          link={{ href: yearPath(topYear), label: dict.home.yearTopAll }}
         />
       </div>
     </HomeHueScope>

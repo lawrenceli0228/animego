@@ -857,3 +857,182 @@
     transform: none;
   }
 }
+
+/* ── Ranked covers: the top-100 pages ────────────────────────────────────────
+ *
+ * A ranking is five covers to a row on a desktop (AniList's Top 100), each
+ * with its place in a disc over the cover's corner: the show's tone for
+ * ground, the darkest step of the same hue for the figure, and a ring of the
+ * page's black between it and the cover. Here rather than in the page's own
+ * stylesheet because they select this module's classes (see .row6). */
+
+.grid5 {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 38px 34px;
+}
+
+.grid5 > [hidden] {
+  display: none;
+}
+
+.rank {
+  position: absolute;
+  top: -11px;
+  left: -11px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 20px;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  box-shadow:
+    0 0 0 3px #000,
+    0 8px 18px -8px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  animation: badgeIn 0.3s ease both;
+}
+
+.rank i {
+  margin-right: 1px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+/* Where there is no popover, the score and the year (or season) under the title. */
+.rankMeta {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.rankMeta .score {
+  gap: 3px;
+  font-size: 11.5px;
+}
+
+.rankMeta .face {
+  width: 12px;
+  height: 12px;
+}
+
+.rankWhen {
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--t4);
+  text-overflow: ellipsis;
+}
+
+/* Read, not shown: a ranked title's place, before its name. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (min-width: 1024px) {
+  .grid5 > .card:nth-child(5n + 4) .pop,
+  .grid5 > .card:nth-child(5n) .pop {
+    left: auto;
+    right: calc(100% + 18px);
+    transform-origin: 100% 36px;
+  }
+
+  .grid5 > .card:nth-child(5n + 4) .arrow,
+  .grid5 > .card:nth-child(5n) .arrow {
+    right: auto;
+    left: 100%;
+    border-right: 0;
+    border-left: 10px solid currentColor;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .grid5 {
+    gap: 30px 24px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .grid5 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 30px 20px;
+  }
+
+  .grid5 > .card:nth-child(4n + 3) .pop,
+  .grid5 > .card:nth-child(4n) .pop {
+    left: auto;
+    right: calc(100% + 18px);
+    transform-origin: 100% 36px;
+  }
+
+  .grid5 > .card:nth-child(4n + 3) .arrow,
+  .grid5 > .card:nth-child(4n) .arrow {
+    right: auto;
+    left: 100%;
+    border-right: 0;
+    border-left: 10px solid currentColor;
+  }
+}
+
+@media (max-width: 767px) {
+  .grid5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 26px 18px;
+  }
+
+  /* As the plain grid's three columns: no room for a popover either side. */
+  .grid5 > .card .pop,
+  .grid5 > .card:has(.title:focus-visible) .pop {
+    display: none;
+  }
+
+  .rankMeta {
+    display: flex;
+  }
+}
+
+@media (max-width: 600px) {
+  .grid5 {
+    gap: 24px 14px;
+  }
+
+  .rank {
+    top: -7px;
+    left: -7px;
+    min-width: 30px;
+    height: 30px;
+    padding: 0 6px;
+    border-radius: 15px;
+    font-size: 13px;
+    box-shadow:
+      0 0 0 2px #000,
+      0 6px 14px -6px rgba(0, 0, 0, 0.9);
+  }
+
+  .rank i {
+    font-size: 9px;
+  }
+}

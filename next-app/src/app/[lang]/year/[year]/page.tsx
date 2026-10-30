@@ -1,68 +1,36 @@
-// /year/[year] — every non-adult title released in a year, by the year of
-// its season or, for the quarter of the catalogue with no season (films,
-// OVAs, specials), the year of its start date.
+// /year/[year] — retired. A year's page is now its ranking, /top/[year]; the
+// old address (and any ?page=N of its old paginated listing) answers 308
+// there, so search engines move the page rather than drop it.
+//
+// A year with nothing ranked has no ranking page, so its old page is a 404
+// here too rather than a redirect to one.
+//
+// No loading.tsx: a streamed response could answer neither 308 nor 404.
 
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { HubListing } from "@/components/hubs/HubListing";
-import { fetchHub, parseHubPage } from "@/lib/hubs/fetch";
-import { yearHeading } from "@/lib/hubs/headings";
-import { parseHubYear, yearPath } from "@/lib/hubs/paths";
-import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
+import { notFound, permanentRedirect } from "next/navigation";
+import { yearPath } from "@/lib/hubs/paths";
+import { localizePath } from "@/lib/i18n/locale";
 import { resolveLocale } from "@/lib/i18n/route";
-import { buildAlternates } from "@/lib/seo/alternates";
+import { fetchTopRows, fetchTopYears } from "@/lib/top/fetch";
+import { NO_FILTERS } from "@/lib/top/query";
+import { isRankedYear, parseTopYear } from "@/lib/top/years";
 
-// A literal, not the imported HUB_REVALIDATE: Next reads segment config
-// statically and refuses an identifier here ("Unknown identifier ... at
-// revalidate" at build time -- next dev does not check). Keep in step with
-// lib/hubs/fetch.ts.
+// A literal: Next reads segment config statically.
 export const revalidate = 300;
 
 type Props = PageProps<"/[lang]/year/[year]">;
 
-export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
-  const year = parseHubYear((await params).year);
-  if (year === null) return { title: "Year" };
-  const { locale, lang, dict } = await resolveLocale(params);
-  const page = parseHubPage((await searchParams).page);
-  const heading = yearHeading(year, lang);
-  const title = page > 1 ? `${heading} · ${page}` : heading;
-  const description = `${heading} — ${dict.hub.metaSuffix}`;
-  const canonical = page > 1 ? `${yearPath(year)}?page=${page}` : yearPath(year);
-  return {
-    title: { absolute: title },
-    description,
-    alternates: buildAlternates(canonical, locale),
-    openGraph: {
-      title,
-      description,
-      siteName: "AnimeGoClub",
-      locale: OG_LOCALE[lang],
-      alternateLocale: alternateOgLocales(lang),
-      type: "website",
-      url: canonical,
-    },
-    twitter: { card: "summary", title, description },
-  };
+/** Whether `year` has a ranking page: by the list of years, or — that list lagging — by its ranking. */
+async function hasRanking(year: number): Promise<boolean> {
+  const years = await fetchTopYears();
+  if (years === null || isRankedYear(years, year)) return true;
+  return ((await fetchTopRows({ year, ...NO_FILTERS })) ?? []).length > 0;
 }
 
-export default async function YearPage({ params, searchParams }: Props) {
-  const year = parseHubYear((await params).year);
+export default async function LegacyYearPage({ params }: Props) {
+  const year = parseTopYear((await params).year);
   if (year === null) notFound();
-  const page = parseHubPage((await searchParams).page);
-  const [{ dict, lang }, { items, pagination }] = await Promise.all([
-    resolveLocale(params),
-    fetchHub("year", String(year), page),
-  ]);
-  if (pagination.total === 0) notFound();
-  return (
-    <HubListing
-      heading={yearHeading(year, lang)}
-      basePath={yearPath(year)}
-      items={items}
-      pagination={pagination}
-      lang={lang}
-      dict={dict}
-    />
-  );
+  const { locale } = await resolveLocale(params);
+  if (!(await hasRanking(year))) notFound();
+  permanentRedirect(localizePath(yearPath(year), locale));
 }

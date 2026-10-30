@@ -2471,6 +2471,10 @@ type Querier interface {
 	// reply_to_username names who a reply answers, read through its parent even
 	// when that parent was since deleted.
 	ListThreadReplies(ctx context.Context, threadID uuid.UUID, viewerID *uuid.UUID) ([]ListThreadRepliesRow, error)
+	// Every release year with a ranked title, newest first, and how many it
+	// has: the years a /top/{year} page exists for.  Same rule and same year
+	// expression as TopAnime; a title with no year is in no year's ranking.
+	ListTopYears(ctx context.Context, minPopularity int32) ([]ListTopYearsRow, error)
 	// Explainable discovery ranking for the homepage.  Participation matters more
 	// than raw volume, reactions add a smaller signal, and a smooth age divisor
 	// lets a fresh smaller conversation outrank an old thread without making the
@@ -3215,6 +3219,45 @@ type Querier interface {
 	// nothing else moves.  Either way a stored profile and its fetched_at are
 	// left alone, and an id with no row gets a stamp-only one.
 	StampPeopleChecked(ctx context.Context, checkedAt pgtype.Timestamptz, absent bool, ids []int32) error
+	// top.sql — the Top 100 pages, behind GET /api/anime/top and
+	// GET /api/anime/top/years: the all-time ranking, one year's, and the
+	// years that have one.
+	//
+	// A title is ranked when it is not adult (by the column and by the genre,
+	// as every listing excludes it -- see GetSeasonalAnime), has a score, is
+	// tracked by at least min_popularity AniList users, and is not a music
+	// video.  The popularity floor is /browse's sort=score floor (passed from
+	// browseScoreMinPopularity): below it an average rests on a handful of
+	// ratings, and a handful of 9s would head the ranking above everything
+	// people watched.  A music video is a three-minute clip scored by its
+	// fans; ranked, it would sit among the series it is the opening of.  A
+	// title with no format at all is ranked like any other.  The two queries
+	// below repeat the rule and must change together.
+	// One ranking of at most row_limit titles, best first.  Every filter is
+	// optional (NULL meaning "not asked"); the ranking is re-cut inside the
+	// filter, so its first title is first among what the filter keeps.
+	//
+	// The year is BrowseAnime's -- COALESCE(season_year, year of start_date),
+	// byte-identical to the expression migration 0039 indexes, or the planner
+	// will not use the index.  season narrows a year to one quarter by the
+	// season AniList assigned; a title without one (most films) has no
+	// quarter and is left out of every quarter.  The genre is an EXISTS for
+	// the reason BrowseAnime's genre is: written ($n IS NULL OR EXISTS ...)
+	// it keeps the statement planned for each request's own arguments (see
+	// TestTop_PG_PlannedForTheirArguments).
+	//
+	// average_score DESC, popularity DESC, anilist_id is a total order over
+	// the ranked titles (neither sort key can be NULL past the WHERE), so a
+	// tie on the score goes to the more popular title, and a tie on both to
+	// the older id: the same request always ranks the same way.
+	//
+	// The ranking is chosen first, on the ids and the sort keys alone, and
+	// only its rows are projected, as in BrowseAnime: the projection's
+	// per-row subqueries then run a hundred times rather than once per
+	// ranked title.  The projection is BrowseAnime's, column for column, so
+	// the handler sends these rows through the same item type (see
+	// topItemFromRow, which stops compiling if they drift).
+	TopAnime(ctx context.Context, arg TopAnimeParams) ([]TopAnimeRow, error)
 	// Stamp the attempt, pinned to the binding the attempt was made against.
 	//
 	// Written on every pass regardless of what the pass produced -- that is what

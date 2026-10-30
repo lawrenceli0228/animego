@@ -157,3 +157,126 @@
     display: none;
   }
 }
+
+/* ── Ranked rows: the top-100 pages ─────────────────────────────────────────
+ *
+ * On a desktop, AniList's Top 100 table: the place in a column of its own
+ * outside the row, in the show's tone. On a phone, AniList's compact row —
+ * place, cover, the title over a line of when and what, the score — where the
+ * plain table is never shown at all. The row's own entrance gives way to the
+ * line's, so the number and its row arrive together. */
+
+.ranked {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: center;
+  animation: cardInSoft 0.3s linear both;
+}
+
+.ranked > .row {
+  animation: none;
+}
+
+.rankNum {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+}
+
+.rankNum i {
+  margin-right: 2px;
+  font-style: normal;
+  font-size: 15px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.rowSub {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .rows {
+    gap: 10px;
+  }
+
+  .ranked {
+    grid-template-columns: 34px minmax(0, 1fr);
+    column-gap: 12px;
+    min-height: 80px;
+    padding: 8px 14px 8px 4px;
+    border-radius: 9px;
+    background: #0e0e10;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+
+  .ranked > .row {
+    grid-template-columns: 46px minmax(0, 1fr) auto;
+    column-gap: 12px;
+    min-height: 0;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  .ranked > .row:hover {
+    transform: none;
+  }
+
+  .ranked > .row::before {
+    display: none;
+  }
+
+  .rankNum {
+    font-size: 17px;
+    text-align: center;
+  }
+
+  .rankNum i {
+    display: none;
+  }
+
+  .ranked .rowCover {
+    width: 46px;
+    height: 64px;
+    border-radius: 4px;
+  }
+
+  .ranked .rowMain {
+    padding-left: 0;
+  }
+
+  .ranked .rowTitle {
+    display: -webkit-box;
+    font-size: 14px;
+    line-height: 19px;
+    color: rgba(235, 235, 245, 0.92);
+    white-space: normal;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .ranked .rowSub {
+    display: block;
+    margin-top: 4px;
+    overflow: hidden;
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 15px;
+    color: var(--t4);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .ranked .rowPills,
+  .ranked .colSub,
+  .ranked > .row > [data-col="format"],
+  .ranked > .row > [data-col="status"] {
+    display: none;
+  }
+}

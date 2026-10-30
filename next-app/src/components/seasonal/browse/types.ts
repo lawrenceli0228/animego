@@ -27,3 +27,23 @@ export interface SeasonTarget {
   season: string;
   year: number;
 }
+
+/**
+ * A show's place in a ranking (the top-100 pages), as its card draws it: the
+ * number on the cover, the chart card's corner or the row's left column, and
+ * what is read and shown around it. Absent everywhere else.
+ */
+export interface RankMark {
+  /** 1 for the first. */
+  n: number;
+  /** "第 3 名": read before the title, never shown. */
+  label: string;
+  /** A phone cover's line under the title, beside the score: the year, or on a year's page the season. */
+  meta: string;
+  /** The chart card's first line: when the show is from. */
+  when: string;
+  /** The chart card's second line: its format and length. */
+  info: string;
+  /** A phone row's line under the title: when, then format and length. */
+  sub: string;
+}

@@ -12,19 +12,28 @@ const SEASON = "/seasonal/fall/2026";
 const keys = (entries: NavEntry[]) => entries.map((e) => e.key);
 
 describe("navEntries", () => {
-  test("a visitor gets the five public links, in the agreed order", () => {
+  test("a visitor gets the six public links, in the agreed order", () => {
     expect(keys(navEntries("anonymous", SEASON))).toEqual([
       "home",
       "schedule",
       "season",
       "genres",
+      "top",
       "about",
     ]);
   });
 
+  test("排行 links to every year's ranking, and every ranking is its section", () => {
+    const top = navEntries("anonymous", SEASON).find((e) => e.key === "top");
+    expect(top).toMatchObject({ href: "/top", section: "/top", kind: "link", placeholder: false });
+    expect(isCurrent("/top/2019", top!)).toBe(true);
+    expect(isCurrent("/en/top", top!)).toBe(true);
+    expect(isCurrent("/topics", top!)).toBe(false);
+  });
+
   test("a signed-in reader gets 我的追番 just before 关于", () => {
     const entries = navEntries("authed", SEASON);
-    expect(keys(entries)).toEqual(["home", "schedule", "season", "genres", "myList", "about"]);
+    expect(keys(entries)).toEqual(["home", "schedule", "season", "genres", "top", "myList", "about"]);
     expect(entries.find((e) => e.key === "myList")).toMatchObject({
       href: "/profile",
       placeholder: false,

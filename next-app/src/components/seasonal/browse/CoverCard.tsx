@@ -27,11 +27,13 @@ import type { SeasonalItem } from "@/lib/seasonal/model";
 import type { BrowseState } from "@/lib/seasonal/state";
 import { Pills, Score } from "./CardBits";
 import type { BrowseCopy } from "./useBrowseCopy";
-import type { FollowSlot } from "./types";
+import type { FollowSlot, RankMark } from "./types";
 import cards from "./cards.module.css";
 
 /** The popover lists this many genres. */
 const POP_GENRES = 3;
+/** A rank disc lands this long after its cover begins to. */
+const RANK_DELAY_MS = 120;
 
 interface CoverCardProps {
   item: SeasonalItem;
@@ -53,6 +55,12 @@ interface CoverCardProps {
    * function (the card is memoised).
    */
   airing?: (item: SeasonalItem, nowMs: number, variant: AiringVariant) => string;
+  /**
+   * The show's place in a ranking: its number on the cover in place of the
+   * air-time badge, read before the title, and on a phone a line of score and
+   * year under it. Pass a stable object (the card is memoised).
+   */
+  rank?: RankMark;
 }
 
 function CoverCard({
@@ -68,11 +76,12 @@ function CoverCard({
   Follow,
   priority,
   airing,
+  rank,
 }: CoverCardProps) {
   const tone = toneLadder(item.hue);
   const pop = oklchCss(21, 0.02, item.hue);
   const href = `/anime/${item.id}`;
-  const badge = coverBadge(item, nowMs, state, mode, copy, lang, zone);
+  const badge = rank ? null : coverBadge(item, nowMs, state, mode, copy, lang, zone);
   const isNew = badge?.kind === "new";
   const bangumi = bangumiScoreText(item.bangumi);
   const when = (variant: AiringVariant) =>
@@ -95,6 +104,17 @@ function CoverCard({
             <FadeImage src={item.cover} alt="" width={190} height={272} className={cards.coverImg} priority={priority} />
           </span>
         </Link>
+        {rank ? (
+          <span
+            className={cards.rank}
+            style={{ background: tone.text, color: tone.onSolid, animationDelay: `${delayMs + RANK_DELAY_MS}ms` }}
+            aria-hidden="true"
+            data-rank={rank.n}
+          >
+            <i>#</i>
+            {rank.n}
+          </span>
+        ) : null}
         {badge ? (
           <span
             className={cards.live}
@@ -108,9 +128,17 @@ function CoverCard({
         <Follow anilistId={item.id} title={item.title} variant="cover" />
       </div>
       <Link href={href} prefetch={false} className={cards.title}>
+        {rank ? <span className={cards.srOnly}>{`${rank.label} `}</span> : null}
         {item.title}
       </Link>
-      <span className={cards.air}>{when("short")}</span>
+      {rank ? (
+        <div className={cards.rankMeta}>
+          <Score score={item.score} />
+          <span className={cards.rankWhen}>{rank.meta}</span>
+        </div>
+      ) : (
+        <span className={cards.air}>{when("short")}</span>
+      )}
       <div className={cards.pop} style={{ background: pop }} aria-hidden="true" data-popover>
         <i className={cards.arrow} style={{ color: pop }} />
         <div className={cards.popHead}>

@@ -9,6 +9,7 @@ import {
   ensureSeedUserInPostgres,
 } from "./fixtures/pg";
 import { waitForHydration } from "./fixtures/hydration";
+import { seedTopRankings } from "./fixtures/topRankings";
 
 /**
  * The AniList id the routing specs use as "a detail page".
@@ -109,6 +110,10 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     titleChinese: "E2E 路由固定装置",
     episodes: 12,
   });
+  // The rankings' catalogue (fixtures/topRankings.ts), here and not in its
+  // spec: the list of years that have a ranking is cached site-wide, and
+  // specs that run first (the hub sitemap) would cache it without them.
+  await seedTopRankings();
   // The positive probe for the `[lang]/anime/[id]` route class, which until
   // now had none anywhere in the pipeline.
   //

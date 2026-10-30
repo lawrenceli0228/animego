@@ -80,7 +80,7 @@ const zh = {
     // Language menu: the group heading + the account menu's own label.
     language: '语言', accountMenu: '账户菜单', mainNavigation: '主导航',
     // Site header (AniList-style bar + phone drawer).
-    schedule: '放送表', genres: '分类',
+    schedule: '放送表', genres: '分类', top: '排行',
     searchAnime: '搜索番剧', searchPlaceholder: '中文 / 日文 / 罗马字',
     menu: '菜单', openMenu: '打开菜单', closeMenu: '关闭菜单',
   },
@@ -613,6 +613,19 @@ const zh = {
     backShort: '返回',
     yearSeason: '{{year}} 年 {{season}}',
     released: '已上映',
+  },
+  // The top-100 pages (/top, /top/{year}). Their heading is a table in
+  // lib/hubs/headings.ts, which the <title> and the detail page's breadcrumb
+  // read too. Client components read the -spa twin; one key per visible
+  // string, in both sets so the two stay equal.
+  topPage: {
+    metaSuffix: '按评分排出的前 100 部番剧，可按格式、类型和季度筛选；评分、集数、简介一站看全。',
+    strip: '切换榜单',
+    allTime: '历代',
+    older: '更早',
+    olderYears: '更早的年份',
+    filters: '筛选',
+    wholeYear: '全年',
   },
   // Login
   login: {

@@ -18,10 +18,11 @@ const STUDIO: Record<Lang, (name: string) => string> = {
   "zh-Hant": (name) => `${name} 製作的番劇`,
 };
 
-const YEAR: Record<Lang, (year: number) => string> = {
-  zh: (year) => `${year}年番剧`,
-  en: (year) => `Anime of ${year}`,
-  "zh-Hant": (year) => `${year}年番劇`,
+/** A year's page is its ranking; the ranking with no year is every year's. */
+const TOP: Record<Lang, (year: number | null) => string> = {
+  zh: (year) => (year === null ? "历代 Top 100" : `${year} 年度 Top 100`),
+  en: (year) => (year === null ? "Top 100 Anime" : `Top 100 Anime of ${year}`),
+  "zh-Hant": (year) => (year === null ? "歷代 Top 100" : `${year} 年度 Top 100`),
 };
 
 /** "动作番剧" / "Action Anime" — takes the raw AniList genre, not a label. */
@@ -33,6 +34,7 @@ export function studioHeading(name: string, lang: Lang): string {
   return STUDIO[lang](name);
 }
 
-export function yearHeading(year: number, lang: Lang): string {
-  return YEAR[lang](year);
+/** "历代 Top 100" / "2024 年度 Top 100" — the ranking pages' heading. */
+export function topHeading(year: number | null, lang: Lang): string {
+  return TOP[lang](year);
 }

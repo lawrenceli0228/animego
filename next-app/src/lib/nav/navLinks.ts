@@ -7,11 +7,11 @@
 
 import type { AuthChrome } from "@/lib/authChrome";
 import { FILTER_GENRES, genreLabel, type FilterGenre } from "@/lib/contentLabels";
-import { genrePath } from "@/lib/hubs/paths";
+import { genrePath, topPath } from "@/lib/hubs/paths";
 import type { Lang } from "@/lib/i18n/lang";
 import { splitLocale } from "@/lib/i18n/locale";
 
-export type NavKey = "home" | "schedule" | "season" | "genres" | "myList" | "about";
+export type NavKey = "home" | "schedule" | "season" | "genres" | "top" | "myList" | "about";
 
 export interface NavEntry {
   readonly key: NavKey;
@@ -37,7 +37,7 @@ const link = (key: NavKey, href: string, section = href): NavEntry => ({
 });
 
 /**
- * The header's entries, in order: 首页 · 放送表 · 季度 · 分类 · [我的追番] · 关于.
+ * The header's entries, in order: 首页 · 放送表 · 季度 · 分类 · 排行 · [我的追番] · 关于.
  *
  * /library is deliberately absent in every state. It is the local-file player
  * (File System Access plus a granted folder, gated by proxy.ts either way), so
@@ -69,6 +69,8 @@ export function navEntries(chrome: AuthChrome, seasonHref: string): NavEntry[] {
     // Any season is the 季度 section, not only the live one the link targets.
     link("season", seasonHref, "/seasonal"),
     { key: "genres", href: "/genre", section: "/genre", kind: "menu", placeholder: false },
+    // Every ranking, every year's included, is the 排行 section.
+    link("top", topPath()),
     ...myList,
     link("about", "/welcome"),
   ];

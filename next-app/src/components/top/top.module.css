@@ -1,0 +1,622 @@
+/* The ranking pages' own chrome: the heading, the strip of rankings, the
+ * filters and the view toggle.
+ *
+ * Values are the approved artboards' (rank-canvas Top-desktop / Top-mobile,
+ * rank.css .rk-hero, .rk-strip, .rk-bar; .rkm-* for the phone). The page
+ * frame (gutter, ground, reduced motion) is the seasonal page's
+ * frame.module.css, and the cards are its card modules; nothing here styles
+ * another module's classes.
+ *
+ * The header is one grid in one source order — heading, view toggle, strip,
+ * filters, the phone's genre panel — whose areas a phone rearranges, so the
+ * server's HTML is laid out right on any screen before the script runs.
+ *
+ * The strip is equal cells and a block that slides under the current one: one
+ * cell wide, moved by whole cells (100% of its own width plus the gap), so its
+ * place is pure CSS and correct in the server's HTML. Below 1024px the cells
+ * take a fixed width and the strip scrolls.
+ *
+ * Every @media block is at the end of the file. */
+
+/* Its own layer above the results: the 更早 and genre menus open over the
+ * cards, whose rank discs and hover layers stack in the page's context. */
+.head {
+  position: relative;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title title"
+    "strip strip"
+    "filters views";
+  align-items: center;
+  animation: fadeIn 0.3s ease both;
+}
+
+/* The header the page before drew while this one loaded (carriedHeader.ts):
+ * already on screen, it stays as it is. */
+.head[data-held="true"] {
+  animation: none;
+}
+
+.h1 {
+  grid-area: title;
+  margin: 0;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+/* ── The strip ───────────────────────────────────────────────────────────── */
+
+.stripWrap {
+  position: relative;
+  z-index: 50;
+  grid-area: strip;
+  min-width: 0;
+  margin-top: 24px;
+}
+
+.strip {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--n, 15), minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #0e0e10;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.ind {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - (var(--n, 15) * 4px + 4px)) / var(--n, 15));
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+  transform: translateX(calc(var(--i, 0) * (100% + 4px)));
+  transition: transform 0.5s var(--ease);
+}
+
+.seg {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: rgba(235, 235, 245, 0.55);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+
+.seg[data-mono="true"] {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seg:hover,
+.seg[data-on="true"] {
+  color: #fff;
+}
+
+a.seg[aria-current="page"] {
+  cursor: default;
+}
+
+/* The site's one ring. The strip's 4px of padding holds it. */
+.seg:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.45);
+}
+
+.segChev {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.25s var(--ease);
+}
+
+.seg[aria-expanded="true"] .segChev {
+  transform: rotate(180deg);
+}
+
+/* 更早: a dropdown under the strip's end on a desktop, chips under it on a phone. */
+.olderMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 70;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 2px;
+  width: 390px;
+  max-width: calc(100vw - 32px);
+  max-height: 360px;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(24, 24, 28, 0.98);
+  box-shadow: 0 18px 48px -10px rgba(0, 0, 0, 0.8);
+  animation: drop 0.2s ease both;
+}
+
+.olderOpt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  border-radius: 6px;
+  color: rgba(235, 235, 245, 0.8);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.olderOpt:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.olderOpt[aria-current="page"] {
+  color: var(--accent-text);
+  cursor: default;
+}
+
+.olderPanel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  animation: drop 0.2s ease both;
+}
+
+.olderChip {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.olderChip[aria-current="page"] {
+  background: var(--accent-solid);
+  color: #fff;
+}
+
+.olderMenu[hidden],
+.olderPanel[hidden],
+.genreMenu[hidden],
+.genrePanel[hidden] {
+  display: none;
+}
+
+/* ── Filters ─────────────────────────────────────────────────────────────── */
+
+.filters {
+  position: relative;
+  z-index: 45;
+  grid-area: filters;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 22px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    transform 0.2s var(--ease);
+}
+
+.chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.chip[data-on="true"] {
+  background: var(--accent-solid);
+  color: #fff;
+}
+
+.chip[aria-current="page"] {
+  cursor: default;
+}
+
+.sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.pickWrap {
+  position: relative;
+}
+
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px 0 13px;
+  border: 0;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--t2);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.pick:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.pick[data-on="true"] {
+  background: var(--accent-solid);
+  color: #fff;
+}
+
+.pickChev {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.25s var(--ease);
+}
+
+.pick[aria-expanded="true"] .pickChev {
+  transform: rotate(180deg);
+}
+
+.genreMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 70;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  width: 320px;
+  max-height: 440px;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(24, 24, 28, 0.98);
+  box-shadow: 0 18px 48px -10px rgba(0, 0, 0, 0.8);
+  animation: drop 0.2s ease both;
+}
+
+.menuOpt {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: rgba(235, 235, 245, 0.8);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.menuOpt:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.menuOpt[data-on="true"] {
+  color: var(--accent-text);
+}
+
+.menuOpt[aria-current="page"] {
+  cursor: default;
+}
+
+.genrePanel {
+  grid-area: gpanel;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  animation: drop 0.2s ease both;
+}
+
+.chip:focus-visible,
+.pick:focus-visible,
+.menuOpt:focus-visible,
+.olderOpt:focus-visible,
+.olderChip:focus-visible,
+.view:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── View toggle ─────────────────────────────────────────────────────────── */
+
+.views {
+  grid-area: views;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  align-self: start;
+  margin: 22px 0 0 16px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.view {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: rgba(235, 235, 245, 0.32);
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    background-color 0.2s;
+}
+
+.view:hover {
+  color: rgba(235, 235, 245, 0.75);
+}
+
+.view[aria-pressed="true"] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.view svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+/* ── Results' extras ─────────────────────────────────────────────────────── */
+
+/* A table skeleton's rows leave the ranked rows' number column free. */
+.skRanked {
+  margin-left: 78px;
+}
+
+.emptyLink {
+  display: inline-flex;
+  align-items: center;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* ── Below a desktop: the strip's cells take a fixed width and it scrolls ─── */
+
+@media (max-width: 1023px) {
+  .h1 {
+    font-size: 34px;
+  }
+
+  .scroller {
+    margin: 0 calc(-1 * var(--gutter));
+    padding: 0 var(--gutter) 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .scroller::-webkit-scrollbar {
+    display: none;
+  }
+
+  .strip {
+    grid-template-columns: repeat(var(--n, 15), 64px);
+    width: max-content;
+  }
+
+  .ind {
+    width: 64px;
+  }
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .head {
+    grid-template-areas:
+      "title views"
+      "strip strip"
+      "filters filters"
+      "gpanel gpanel";
+    gap: 0 12px;
+  }
+
+  .h1 {
+    font-size: 24px;
+    line-height: 1.3;
+  }
+
+  .views {
+    align-self: center;
+    margin: 0;
+    padding: 3px;
+    border-left: 0;
+    border-radius: 10px;
+    background: #0e0e10;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+
+  .view {
+    width: 44px;
+    height: 38px;
+    border-radius: 7px;
+    color: rgba(235, 235, 245, 0.38);
+  }
+
+  .view[aria-pressed="true"] {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .view svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  /* A phone draws the grid where a chart was asked for. */
+  .view[data-view-toggle="chart"] {
+    display: none;
+  }
+
+  .stripWrap {
+    margin-top: 16px;
+  }
+
+  .seg {
+    height: 44px;
+    font-size: 13.5px;
+  }
+
+  .seg[data-mono="true"] {
+    font-size: 13px;
+  }
+
+  .filters {
+    flex-wrap: nowrap;
+    margin: 12px calc(-1 * var(--gutter)) 0;
+    padding: 0 var(--gutter);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chips {
+    flex: none;
+    flex-wrap: nowrap;
+  }
+
+  .chip {
+    flex: none;
+    height: 38px;
+    padding: 0 15px;
+    border-radius: 19px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 14px;
+  }
+
+  .sep {
+    height: 22px;
+    margin: 0 2px;
+  }
+
+  .pickWrap {
+    flex: none;
+  }
+
+  .pick {
+    height: 38px;
+    padding: 0 12px 0 15px;
+    border-radius: 19px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 14px;
+  }
+
+  .skRanked {
+    height: 80px;
+    margin-left: 0;
+    border-radius: 9px;
+  }
+}
