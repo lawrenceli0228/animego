@@ -77,7 +77,7 @@ func TestFetchGarden_HappyPath(t *testing.T) {
 				"provider": "dmhy",
 				"title": "[SubsPlease] Show - 01",
 				"magnet": "magnet:?xt=urn:btih:abc",
-				"size": 3460300,
+				"size": 3460300800,
 				"createdAt": "2026-01-01T00:00:00Z",
 				"fansub": {"name": "SubsPlease"}
 			},
@@ -86,7 +86,7 @@ func TestFetchGarden_HappyPath(t *testing.T) {
 				"provider": "moe",
 				"title": "[喵萌奶茶屋] Other Show - 02",
 				"magnet": "magnet:?xt=urn:btih:def",
-				"size": 40448,
+				"size": 40448000,
 				"createdAt": "2026-01-02T00:00:00Z",
 				"fansub": null
 			}
@@ -122,14 +122,14 @@ func TestFetchGarden_HappyPath(t *testing.T) {
 	assert.Equal(t, "SubsPlease", *items[0].Fansub)
 	require.NotNil(t, items[0].Provider)
 	assert.Equal(t, "dmhy", *items[0].Provider)
-	assert.Equal(t, "3.5 GB", items[0].Size) // 3460300 KB → 3.46... → 3.5 GB
+	assert.Equal(t, "3.5 GB", items[0].Size) // 3460300800 bytes → 3.46e9 → 3.5 GB
 	require.NotNil(t, items[0].Date)
 	assert.Equal(t, "2026-01-01T00:00:00Z", *items[0].Date)
 
 	// Second item: fansub missing in upstream → falls back to bracket parse.
 	require.NotNil(t, items[1].Fansub)
 	assert.Equal(t, "喵萌奶茶屋", *items[1].Fansub)
-	assert.Equal(t, "40 MB", items[1].Size) // 40448 KB → 40.448 MB → 40 MB
+	assert.Equal(t, "40 MB", items[1].Size) // 40448000 bytes → 40.448e6 → 40 MB
 
 	assert.Equal(t, 0, log.count(), "no warnings on happy path with results")
 }
@@ -308,6 +308,44 @@ func TestFetchGarden_EmptyFansubObjectFallsBackToBracket(t *testing.T) {
 	require.NotNil(t, items[0].Fansub)
 	assert.Equal(t, "SubsPlease", *items[0].Fansub,
 		"empty fansub.name should fall back to bracket parser")
+}
+
+// ---------------------------------------------------------------------------
+// FetchGarden — size unit
+// ---------------------------------------------------------------------------
+
+// TestMapGardenResources_SizeIsBytes pins garden's size unit with values
+// observed on 2026-10-31: the same torrents (matched by infohash) read from
+// api.animes.garden/resources?search=Sousou+no+Frieren+2nd+Season and from
+// Nyaa's RSS for the same search.  Garden's raw number is the byte count —
+// Nyaa's GiB/MiB figure times 1024^3 / 1024^2 — so formatting it as KB
+// printed a 568 MiB episode as "595.6 GB".
+func TestMapGardenResources_SizeIsBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		rawSize string // garden's size field, verbatim
+		nyaa    string // Nyaa's <nyaa:size> for the same infohash
+		want    string
+	}{
+		{"BDRip batch", "28239409152", "26.3 GiB", "28.2 GB"},
+		{"1080p HEVC episode", "595591168", "568.0 MiB", "596 MB"},
+		{"1080p HEVC episode, other group", "673710080", "642.5 MiB", "674 MB"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			items := mapGardenResources([]gardenResource{{
+				Title:  "[X] Show - 01",
+				Magnet: "magnet:?xt=urn:btih:abc",
+				Size:   []byte(tc.rawSize),
+			}})
+			require.Len(t, items, 1)
+			assert.Equal(t, tc.want, items[0].Size, "garden %s bytes is Nyaa's %s", tc.rawSize, tc.nyaa)
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
