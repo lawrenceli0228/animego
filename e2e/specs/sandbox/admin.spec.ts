@@ -1,11 +1,13 @@
 // P10 sandbox — /admin access control, and the user list.
 //
-// Three flows:
+// The flows:
 //   1. logged-in non-admin → /admin returns 403 (proxy.ts:69)
 //   2. logged-in admin     → /admin renders the dashboard
 //   3. logged-in admin     → the user list: segment chips with their sizes,
 //      the activity panel's depth hand-off, the row menu, search, and the
 //      detail drawer opening and closing with Escape
+//   4. logged-in admin     → a chip and straight back, before the first
+//      request answers, leaves the table not loading
 //
 // The globalSetup storageState user has role=null (plain user), so the
 // non-admin block uses it via the project-level storageState. The admin
@@ -209,6 +211,50 @@ test.describe("admin user list", () => {
     await expect(drawer).toHaveCount(0);
     // Focus goes back to what opened it.
     await expect(opener).toBeFocused();
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+  });
+
+  test("a chip and straight back, before the first answer, leaves nothing loading", async ({ page }) => {
+    test.setTimeout(SPEC_TIMEOUT_MS);
+    const errors = collectConsoleErrors(page);
+    await signInAsNewAdmin(page);
+
+    // Hold the 管理员 request open until the switch back has happened, so the
+    // test cannot pass by the answer simply arriving first. The page aborts
+    // it on the switch back; continuing an aborted request can throw.
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let settled = () => {};
+    const handled = new Promise<void>((resolve) => {
+      settled = resolve;
+    });
+    await page.route(/\/api\/admin\/users\?(.*&)?segment=admin(&|$)/, async (route) => {
+      await released;
+      await route.continue().catch(() => {});
+      settled();
+    });
+
+    await page.goto("/admin");
+    const users = page.locator("#users");
+    await waitForHydration(page, '#users input[type="search"]');
+
+    const asked = page.waitForRequest(/\/api\/admin\/users\?(.*&)?segment=admin(&|$)/);
+    await users.locator('[data-segment="admin"]').click();
+    await asked;
+    await users.locator('[data-segment="all"]').click();
+
+    await expect(users.locator('[data-segment="all"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(users.locator('[aria-busy="true"]')).toHaveCount(0);
+
+    // And it stays that way once the held request is let go.
+    release();
+    await handled;
+    await expect(users.locator('[aria-busy="true"]')).toHaveCount(0);
+    await expect(users.locator('[data-segment="all"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(users.locator("tbody tr[data-user-row]").first()).toBeVisible();
 
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });

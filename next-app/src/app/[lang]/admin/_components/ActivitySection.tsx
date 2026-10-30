@@ -59,13 +59,19 @@ export function ActivitySection({ initial }: ActivitySectionProps) {
   const { t } = useLang();
   const [data, setData] = useState<AdminActivityPanel | null>(() => (isActivityPanel(initial) ? initial : null));
   const [days, setDays] = useState<number>(() => (isActivityPanel(initial) ? initial.days : DEFAULT_WINDOW));
-  const [loading, setLoading] = useState(false);
   // The window whose fetch failed, while the panel keeps showing the last
   // good one. Null when nothing has failed since the last success.
   const [failedDays, setFailedDays] = useState<number | null>(null);
   // The window the payload on screen was fetched for. Compared against `days`
   // so the server-rendered payload does not trigger a refetch of itself.
   const loadedDays = data?.days;
+  // Derived, never stored. The effect below has a request out exactly while
+  // the picker and the payload disagree: a success makes them agree, and so
+  // does a failure, which puts the picker back. A stored flag needed the
+  // request to clear it, and a request superseded by a switch straight back
+  // (30 → 90 → 30) is aborted and never reports, so "加载中…" stayed for good.
+  // With no payload at all only the error box is drawn, so nothing reads it.
+  const loading = data !== null && days !== loadedDays;
 
   // Standard fetch-effect shape: everything lives inside the effect and the
   // only dependencies are the things that should cause a refetch. Every
@@ -75,7 +81,6 @@ export function ActivitySection({ initial }: ActivitySectionProps) {
     if (loadedDays === days) return;
     const ac = new AbortController();
     const run = async () => {
-      setLoading(true);
       let result: AdminActivityPanel | null = null;
       try {
         result = await fetchActivity(days, ac.signal);
@@ -95,7 +100,6 @@ export function ActivitySection({ initial }: ActivitySectionProps) {
         // the failed window again retries.
         if (loadedDays !== undefined) setDays(loadedDays);
       }
-      setLoading(false);
     };
     void run();
     return () => ac.abort();
