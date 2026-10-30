@@ -12,10 +12,15 @@
 // Validation runs client-side as a first-line guard against typos; the
 // Server Action runs the same checks again before touching go-api, so
 // these rules are defense-in-depth, not authoritative.
+//
+// A create that did not go through is reported in this form's own words
+// (lib/adminUserErrors.ts): the action returns go-api's status and message,
+// and go-api's English is never shown.
 
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { createAdminUser } from "../_actions/users";
+import { userActionErrorKey } from "@/lib/adminUserErrors";
 import { useLang } from "@/lib/lang-client";
 import s from "./users.module.css";
 
@@ -89,11 +94,17 @@ export function CreateUserForm({ id, onCreated }: CreateUserFormProps) {
       return;
     }
     try {
-      const created = await createAdminUser({
+      const result = await createAdminUser({
         username: form.username.trim(),
         email: form.email.trim(),
         password: form.password,
       });
+      // `=== false`: without strict null checks only the literal narrows.
+      if (result.ok === false) {
+        setError(t(userActionErrorKey("create", result)));
+        return;
+      }
+      const created = result.data;
       setForm(EMPTY_FORM);
       setSuccess(t("admin.createdUser").replace("{{username}}", created.username));
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
@@ -102,8 +113,9 @@ export function CreateUserForm({ id, onCreated }: CreateUserFormProps) {
         successTimerRef.current = null;
       }, SUCCESS_MS);
       onCreated?.(created.username);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("admin.createFailed"));
+    } catch {
+      // The request to Next itself failed; whatever it threw is not for display.
+      setError(t("admin.createFailed"));
     }
   };
 

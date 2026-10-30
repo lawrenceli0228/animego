@@ -12,16 +12,23 @@
 //
 // Fetching follows ActivitySection's shape: the server renders the default
 // query; the effect fetches only when the query (or the reload counter a
-// mutation bumps) differs from the one the held page answers; every setState
+// mutation bumps) differs from the last one that settled; every setState
 // happens inside the async helper, never in the effect body; and a request
-// that is superseded is aborted rather than raced.
+// that is superseded is aborted rather than raced. "Loading" is derived from
+// that difference, never stored: an aborted request reports nothing, so a
+// stored flag outlived a switch to 管理员 and straight back.
+//
+// The table only ever changes to a successful answer. A failed one puts the
+// chips, the sort, the pager and the search box back on the query those rows
+// answer — as the activity panel's window picker does — and keeps the error
+// up, with 重试 asking for the failed query again.
 //
 // The drawer is loaded with next/dynamic: it is the half of this surface
 // that calls toast(), and react-hot-toast touches `document` on import (see
 // testImportHygiene.test.ts). Nothing about it belongs in the server HTML.
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { fillTemplate } from "@/lib/home/time";
 import { useLang } from "@/lib/lang-client";
 import {
@@ -66,20 +73,43 @@ async function fetchUsersPage(query: string, signal: AbortSignal): Promise<Admin
 
 const requestKey = (query: string, reload: number) => `${query}#${reload}`;
 
+/** The page on screen and the query it answers. */
+interface Held {
+  page: AdminUsersPage;
+  query: AdminUsersQuery;
+}
+
+const subscribeNothing = () => () => {};
+
+/**
+ * False in the server's HTML and while hydrating it, true in the browser
+ * after. A request is only ever out in the browser: until then the server's
+ * failed fetch is what the section has to say.
+ */
+const useInBrowser = () =>
+  useSyncExternalStore(
+    subscribeNothing,
+    () => true,
+    () => false,
+  );
+
 export function UsersSection({ initial }: UsersSectionProps) {
   const { t } = useLang();
   const createId = useId();
+  // The query the controls show — what was last asked for.
   const [query, setQuery] = useState<AdminUsersQuery>(DEFAULT_USERS_QUERY);
   const [search, setSearch] = useState("");
-  const [data, setData] = useState<AdminUsersPage | null>(initial);
+  const [held, setHeld] = useState<Held | null>(() => (initial ? { page: initial, query: DEFAULT_USERS_QUERY } : null));
   const [reload, setReload] = useState(0);
-  // What `data` answers. Seeded with the server's query so hydration does not
-  // refetch the page it was just handed.
-  const [loaded, setLoaded] = useState<string | null>(() =>
+  // The request (query and reload count) whose answer is on screen, page or
+  // error. Seeded with the server's request so hydration does not refetch
+  // the page it was just handed.
+  const [settled, setSettled] = useState<string | null>(() =>
     initial ? requestKey(usersQueryString(DEFAULT_USERS_QUERY), 0) : null,
   );
-  const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(initial === null);
+  // The query whose fetch failed, for 重试; null once one succeeds. The
+  // server's fetch counts: it is what the error box says when there is no page.
+  const [failure, setFailure] = useState<AdminUsersQuery | null>(initial === null ? DEFAULT_USERS_QUERY : null);
   const [createOpen, setCreateOpen] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<UserDrawerTarget | null>(null);
@@ -90,32 +120,38 @@ export function UsersSection({ initial }: UsersSectionProps) {
 
   const queryString = usersQueryString(query);
   const wanted = requestKey(queryString, reload);
+  const loading = wanted !== settled;
 
   useEffect(() => {
-    if (wanted === loaded) return;
+    if (wanted === settled) return;
     const ac = new AbortController();
+    const asked = query;
     const run = async () => {
-      setLoading(true);
-      setFailed(false);
       try {
         const page = await fetchUsersPage(queryString, ac.signal);
         if (ac.signal.aborted) return;
-        setData(page);
-        setFailed(false);
+        setHeld({ page, query: asked });
+        setFailure(null);
+        setSettled(wanted);
       } catch {
-        // An abort is a newer query, not a failure.
+        // An abort is a newer query (or the unmount) taking over, not a failure.
         if (ac.signal.aborted) return;
-        setFailed(true);
-      } finally {
-        if (!ac.signal.aborted) {
-          setLoaded(wanted);
-          setLoading(false);
+        setFailure(asked);
+        if (!held) {
+          setSettled(wanted);
+          return;
         }
+        // Back to what the table still shows. The search box goes back only
+        // if it still holds the failed search: newer typing is a new query.
+        const back = held.query;
+        setQuery(back);
+        setSearch((typed) => (typed.trim() === asked.q ? back.q : typed));
+        setSettled(requestKey(usersQueryString(back), reload));
       }
     };
     void run();
     return () => ac.abort();
-  }, [wanted, loaded, queryString]);
+  }, [wanted, settled, query, queryString, held, reload]);
 
   // Debounced search: the box updates at once, the query 400ms after typing stops.
   useEffect(() => {
@@ -150,6 +186,19 @@ export function UsersSection({ initial }: UsersSectionProps) {
 
   const refetch = useCallback(() => setReload((n) => n + 1), []);
 
+  // The failed query again, with the controls showing it while it is out.
+  // The error box, 重试 with it, goes while the request is out; focus moves
+  // to the heading first rather than falling to <body> with the button.
+  const retry = () => {
+    headingRef.current?.focus({ preventScroll: true });
+    if (failure) {
+      setMenuFor(null);
+      setQuery(failure);
+      setSearch(failure.q);
+    }
+    setReload((n) => n + 1);
+  };
+
   const openDrawer = useCallback((user: AdminUserRow, mode: UserDrawerMode, opener: HTMLElement | null) => {
     openerRef.current = opener;
     setMenuFor(null);
@@ -173,15 +222,31 @@ export function UsersSection({ initial }: UsersSectionProps) {
     target?.focus({ preventScroll: true });
   }, []);
 
-  const afterDelete = useCallback(() => {
+  // A delete can finish after its drawer was closed and another account's
+  // opened. Only the drawer it was made from closes; the list refetches either
+  // way. The open drawer is read through a ref: afterDelete is made once, and
+  // a finished delete calls the copy its drawer was handed when it began.
+  const openIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    openIdRef.current = drawer?.id ?? null;
+  }, [drawer]);
+
+  const afterDelete = useCallback((id: string) => {
+    setReload((n) => n + 1);
+    if (openIdRef.current !== id) return;
     openerRef.current = headingRef.current;
     setDrawer(null);
-    setReload((n) => n + 1);
   }, []);
 
+  const data = held?.page ?? null;
   const rows = data?.data ?? [];
   const today = data?.today ?? "";
   const allUsers = data?.segments?.all ?? data?.total;
+  // A request that is out hides the last failure: there are rows to dim, or
+  // with none the loading line below. Not in the server's HTML, though, where
+  // nothing is out yet and the server's own failure is the news.
+  const inBrowser = useInBrowser();
+  const failed = failure !== null && !(loading && inBrowser);
 
   const sortHeader = (label: string, key: AdminUserSort | null, numeric = false) => {
     const sorted = key !== null && query.sort === key;
@@ -237,7 +302,7 @@ export function UsersSection({ initial }: UsersSectionProps) {
       {failed ? (
         <div role="alert" className={s.listError}>
           <span>{t("admin.userPanel.loadError")}</span>
-          <button type="button" className={s.btn} onClick={refetch}>
+          <button type="button" className={s.btn} onClick={retry}>
             {t("admin.userPanel.retry")}
           </button>
         </div>

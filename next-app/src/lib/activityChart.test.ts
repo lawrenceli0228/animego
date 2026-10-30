@@ -249,11 +249,30 @@ describe("xAxisLabels", () => {
     ]);
   });
 
-  test("90 days: every 7th day survives when today is far enough away", () => {
+  test("90 days: every 7th day, minus the one within seven slots of today", () => {
+    // A 90-day slot is a third as wide as a 30-day one; 5 slots before today
+    // (6/07) the date and 今天 / Today would touch on a 561px screen.
     const labels = shown(xAxisLabels(series(90)));
-    expect(labels.length).toBe(14);
-    expect(labels[12]).toEqual([84, "6/07"]);
-    expect(labels[13]).toEqual([89, "today"]);
+    expect(labels.length).toBe(13);
+    expect(labels.slice(-2)).toEqual([
+      [77, "5/31"],
+      [89, "today"],
+    ]);
+  });
+
+  test("90 days: every other week is marked thin, for a narrow chart to hide", () => {
+    const thin = xAxisLabels(series(90)).flatMap((l, i) => (l?.kind === "date" && l.thin ? [i] : []));
+    expect(thin).toEqual([7, 21, 35, 49, 63, 77]);
+    // What a narrow chart keeps: a date every 14 slots, and today.
+    const kept = shown(xAxisLabels(series(90))).filter(([i]) => !thin.includes(i as number));
+    expect(kept.map(([i]) => i)).toEqual([0, 14, 28, 42, 56, 70, 89]);
+  });
+
+  test("7 and 30 days: nothing thin, and today is never thin", () => {
+    for (const n of [7, 30, 45]) {
+      expect(xAxisLabels(series(n)).some((l) => l?.kind === "date" && l.thin)).toBe(false);
+    }
+    expect(xAxisLabels(series(90))[89]).toEqual({ kind: "today" });
   });
 
   test("no partial day, no today label", () => {

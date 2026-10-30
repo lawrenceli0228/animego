@@ -12,19 +12,35 @@
 // because only the list knows where it should go: the opener, or its heading
 // after a delete, when the opener's row is about to disappear.
 //
+// Keeping focus in takes two things, because parts of the drawer disappear
+// while they hold focus — a confirmation's 取消 closes the confirmation, a
+// device's row goes after its sign-out, 重试 goes once the read restarts —
+// and a browser then drops focus on <body>, outside the dialog:
+//
+//   - Escape and Tab are heard on the document, not on the dialog, so they
+//     work wherever focus is. Tab from outside enters the dialog.
+//   - Focus that has fallen out is put back inside after every change: on
+//     the button that opened a closing panel (UserDetailActions), on the
+//     next device (SessionList), or else on the dialog itself.
+//
 // After any change: a toast, the drawer reads the account again (or closes,
 // after a delete), and the list refetches its current page (onChanged /
-// onDeleted).
+// onDeleted). A change that did not go through is reported in the drawer's
+// own words (lib/adminUserErrors.ts), never in go-api's English or in what
+// a thrown action carries — in production that is React's generic sentence —
+// and as a toast when the drawer was closed before the answer came.
 //
 // Loaded by UsersSection through next/dynamic: this is the module that pulls
 // react-hot-toast, which touches `document` on import, so nothing a bun test
 // imports may reach it.
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "react-hot-toast";
 import { fillTemplate } from "@/lib/home/time";
 import { useLang } from "@/lib/lang-client";
+import { focusIsLost } from "@/lib/lostFocus";
+import { isImeKeystroke } from "@/lib/nav/navSearch";
 import { useScrollLock } from "@/lib/scrollLock";
 import {
   PASSWORD_MIN,
@@ -36,6 +52,8 @@ import {
   type UserDrawerMode,
   type UserDrawerTarget,
 } from "@/lib/adminUsers";
+import { userActionErrorKey, type UserAction } from "@/lib/adminUserErrors";
+import type { UserActionFailure } from "../_actions/_shared";
 import {
   deleteAdminUser,
   revokeAdminUserSession,
@@ -57,13 +75,42 @@ export interface UserDetailDrawerProps {
   onClose: () => void;
   /** The account changed: the list refetches its page. */
   onChanged: () => void;
-  /** The account is gone: the list closes the drawer and refetches. */
-  onDeleted: () => void;
+  /**
+   * The account `id` is gone: the list refetches, and closes the drawer if it
+   * is still this account's. A delete can finish after its drawer was closed
+   * and another account's opened, so the id is what says which.
+   */
+  onDeleted: (id: string) => void;
 }
 
-/** A thrown action's message when it carries one, else the action's own words. */
-function messageOf(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message ? err.message : fallback;
+/** A thrown action — the network to Next, or Next itself — says only that it failed. */
+const THROWN = { status: 0 };
+
+/**
+ * Tab inside the dialog, wrapping at either end. From outside it — focus
+ * fell out, or never came in — Tab enters at the first control and
+ * Shift+Tab at the last.
+ */
+function trapTab(dialog: HTMLElement, event: KeyboardEvent): void {
+  const nodes = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+  const at = document.activeElement;
+  if (nodes.length === 0) {
+    event.preventDefault();
+    dialog.focus({ preventScroll: true });
+    return;
+  }
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  if (!at || !dialog.contains(at)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey && (at === first || at === dialog)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && at === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 async function fetchDetail(
@@ -100,6 +147,15 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [ending, setEnding] = useState<ReadonlySet<string>>(() => new Set());
   useScrollLock(true);
+  // Whether the drawer is still on screen, for a change that finishes after
+  // it closed (reportFailure).
+  const openRef = useRef(true);
+  useEffect(() => {
+    openRef.current = true;
+    return () => {
+      openRef.current = false;
+    };
+  }, []);
 
   // Focus in on open — unless an autofocused field already has it — and back
   // out on close.
@@ -108,6 +164,36 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
     if (dialog && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
     return () => onRestoreFocus();
   }, [onRestoreFocus]);
+
+  // After every change: focus that fell out with whatever held it goes to the
+  // dialog itself. The action row and the device list run their own effects
+  // first (children before parents) and put it somewhere better when they can.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && focusIsLost()) dialog.focus({ preventScroll: true });
+  });
+
+  // Escape and Tab, wherever focus is, while the drawer is open. Captured on
+  // the document because a handler on the dialog only heard keys while focus
+  // was inside it, and stopped closing the drawer the moment it fell out.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      if (event.key === "Escape") {
+        // An input method (pinyin) is using Escape to cancel what it is
+        // composing; Safari says so only through the key code (isImeKeystroke).
+        if (isImeKeystroke(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      } else if (event.key === "Tab") {
+        trapTab(dialog, event);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [onClose]);
 
   // Read the account; again after every change (`reload`).
   useEffect(() => {
@@ -134,14 +220,34 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
     onChanged();
   };
 
-  /** One mutation at a time; its failure lands under the action row. */
-  const perform = async (work: () => Promise<void>, fallback: string) => {
+  /**
+   * A failed change, in the drawer's words: under the control that asked for
+   * it while the drawer is open, as a toast once it has closed. Escape and
+   * the backdrop close it mid-request, and a failure that lands after that
+   * would otherwise be written into a drawer nobody can see.
+   */
+  const reportFailure = (
+    action: UserAction,
+    failure: { status: number; message?: string },
+    show: (text: string) => void,
+  ) => {
+    const text = t(userActionErrorKey(action, failure));
+    if (openRef.current) show(text);
+    else toast.error(text);
+  };
+
+  /**
+   * One mutation at a time; its failure lands under the action row. `work`
+   * answers with the action's failure, or null once it went through.
+   */
+  const perform = async (action: UserAction, work: () => Promise<UserActionFailure | null>) => {
     setBusy(true);
     setActionError(null);
     try {
-      await work();
-    } catch (err) {
-      setActionError(messageOf(err, fallback));
+      const failure = await work();
+      if (failure) reportFailure(action, failure, setActionError);
+    } catch {
+      reportFailure(action, THROWN, setActionError);
     } finally {
       setBusy(false);
     }
@@ -166,12 +272,16 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
       chooseMode("view");
       return;
     }
-    void perform(async () => {
-      const updated = await updateAdminUser(target.id, result.patch);
-      toast.success(fillTemplate(t("admin.userPanel.updated"), { username: updated.username }));
+    void perform("update", async () => {
+      const outcome = await updateAdminUser(target.id, result.patch);
+      // `=== false`: the repo compiles without strict null checks, and only
+      // the literal comparison narrows this union.
+      if (outcome.ok === false) return outcome;
+      toast.success(fillTemplate(t("admin.userPanel.updated"), { username: outcome.data.username }));
       setMode("view");
       changed();
-    }, t("admin.updateFailed"));
+      return null;
+    });
   };
 
   const savePassword = (password: string) => {
@@ -179,19 +289,23 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
       setActionError(fillTemplate(t("admin.passwordMinLen"), { min: PASSWORD_MIN }));
       return;
     }
-    void perform(async () => {
-      await setAdminUserPassword(target.id, password);
+    void perform("password", async () => {
+      const outcome = await setAdminUserPassword(target.id, password);
+      if (outcome.ok === false) return outcome;
       // A new password also ends every session (go-api migration 0052), so
       // the device list and the row's 最近设备 change too.
       toast.success(fillTemplate(t("admin.passwordResetSuccess"), { username: current.username }));
       setMode("view");
       changed();
-    }, t("admin.passwordChangeFailed"));
+      return null;
+    });
   };
 
   const revokeAll = () => {
-    void perform(async () => {
-      const { revoked } = await revokeAdminUserSessions(target.id);
+    void perform("revokeAll", async () => {
+      const outcome = await revokeAdminUserSessions(target.id);
+      if (outcome.ok === false) return outcome;
+      const { revoked } = outcome.data;
       toast.success(
         revoked > 0
           ? fillTemplate(t("admin.userPanel.revokedAll"), { username: current.username, n: revoked })
@@ -199,18 +313,23 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
       );
       setMode("view");
       changed();
-    }, t("admin.userPanel.revokeFailed"));
+      return null;
+    });
   };
 
   const revokeSession = async (session: AdminUserSession, deviceName: string) => {
     setEnding((prev) => new Set(prev).add(session.id));
     setDeviceError(null);
     try {
-      await revokeAdminUserSession(target.id, session.id);
+      const outcome = await revokeAdminUserSession(target.id, session.id);
+      if (outcome.ok === false) {
+        reportFailure("revokeOne", outcome, setDeviceError);
+        return;
+      }
       toast.success(fillTemplate(t("admin.userPanel.signedOutDevice"), { device: deviceName }));
       changed();
-    } catch (err) {
-      setDeviceError(messageOf(err, t("admin.userPanel.revokeFailed")));
+    } catch {
+      reportFailure("revokeOne", THROWN, setDeviceError);
     } finally {
       setEnding((prev) => {
         const next = new Set(prev);
@@ -221,33 +340,15 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
   };
 
   const remove = () => {
-    void perform(async () => {
-      const result = await deleteAdminUser(target.id);
-      toast.success(fillTemplate(t("admin.userPanel.deleted"), { username: result.username || current.username }));
-      onDeleted();
-    }, t("admin.deleteFailed"));
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab" || !dialogRef.current) return;
-    const nodes = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
-    if (nodes.length === 0) return;
-    const first = nodes[0];
-    const last = nodes[nodes.length - 1];
-    const at = document.activeElement;
-    if (event.shiftKey && (at === first || at === dialogRef.current)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && at === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    void perform("delete", async () => {
+      const outcome = await deleteAdminUser(target.id);
+      if (outcome.ok === false) return outcome;
+      toast.success(
+        fillTemplate(t("admin.userPanel.deleted"), { username: outcome.data.username || current.username }),
+      );
+      onDeleted(target.id);
+      return null;
+    });
   };
 
   return (
@@ -265,7 +366,6 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        onKeyDown={onKeyDown}
         data-user-drawer={target.id}
       >
         <UserDetailPanel

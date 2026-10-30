@@ -1774,6 +1774,15 @@ const zhHant = {
       deleted: '已刪除 {{username}}',
       invalidUserId: '使用者 ID 無效',
       invalidSessionId: '裝置 ID 無效',
+      // 用户操作失败时显示的话（lib/adminUserErrors.ts 按 go-api 的状态码
+      // 和英文原文挑一条），go-api 的英文本身从不直接显示。
+      errUsernameTaken: '這個使用者名稱已被使用',
+      errEmailTaken: '這個郵箱已經被其他賬號使用',
+      errSelfDelete: '不能刪除你自己的賬號',
+      errSelfRevoke: '你自己的裝置請到設定頁登出',
+      errSessionGone: '這台裝置已經登出了',
+      errSignedOut: '登入已失效，請重新登入',
+      errForbidden: '需要管理員權限',
     },
     // Enrichment section
     enrichmentRecordsTitle: '資料富化記錄',

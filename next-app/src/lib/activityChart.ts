@@ -217,24 +217,44 @@ export function yScale(max: number): YScale {
   return { top, ticks };
 }
 
-export type AxisLabel = { kind: "today" } | { kind: "date"; text: string } | null;
+/**
+ * `thin`: a narrow chart (DailyChart.module.css) hides this one, keeping every
+ * other week. Set on dense axes only.
+ */
+export type AxisLabel = { kind: "today" } | { kind: "date"; text: string; thin: boolean } | null;
 
-/** A weekly date label this close to the "today" label would print on top of it. */
-const MIN_SLOTS_BEFORE_TODAY = 3;
+/**
+ * Above this many bars the chart is dense: the gap between bars narrows so 90
+ * days fit a phone (DailyChart), and the axis keeps fewer labels.
+ */
+export const DENSE_SERIES = 45;
 const WEEK = 7;
 
 /**
+ * How close a weekly label may come to "today" before the two would print
+ * over each other. On a dense axis a slot is a third as wide: a date and
+ * "Today" (each nearly 30px of 10.5px text) need seven slots between them on
+ * a 561px screen, the narrowest that still shows every week.
+ */
+const MIN_SLOTS_BEFORE_TODAY = 3;
+const MIN_SLOTS_BEFORE_TODAY_DENSE = 7;
+
+/**
  * Which bars get a label under them: every 7th day from the first, plus
- * "today" under the day that is not over yet. A weekly label fewer than three
- * slots before today is dropped — on a phone the two would overlap.
+ * "today" under the day that is not over yet. A weekly label too close before
+ * today is dropped. On a dense axis every other week is also marked `thin`:
+ * a phone-width 90-day chart has slots about 3px wide, and a date every 7
+ * slots would overlap the next one.
  */
 export function xAxisLabels(points: readonly Pick<AdminActivityDay, "date" | "partial">[]): AxisLabel[] {
+  const dense = points.length > DENSE_SERIES;
+  const margin = dense ? MIN_SLOTS_BEFORE_TODAY_DENSE : MIN_SLOTS_BEFORE_TODAY;
   const todayAt = points.findIndex((p) => p.partial);
   return points.map((p, i) => {
     if (p.partial) return { kind: "today" };
     if (i % WEEK !== 0) return null;
-    if (todayAt >= 0 && todayAt > i && todayAt - i < MIN_SLOTS_BEFORE_TODAY) return null;
-    return { kind: "date", text: monthDaySlash(p.date) };
+    if (todayAt >= 0 && todayAt > i && todayAt - i < margin) return null;
+    return { kind: "date", text: monthDaySlash(p.date), thin: dense && (i / WEEK) % 2 === 1 };
   });
 }
 

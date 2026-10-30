@@ -7,11 +7,16 @@
 // Presentational: the drawer runs the server actions and passes back `busy`
 // and `error`. While busy, buttons are aria-disabled rather than disabled
 // and inputs read-only, so the control that was just pressed keeps focus.
+//
+// When a panel closes — 取消, a save or confirmation that went through — the
+// control that had focus goes with it, and focus would fall to <body>,
+// outside the drawer. It goes back to the button that opened the panel.
 
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { fillTemplate } from "@/lib/home/time";
 import { useLang } from "@/lib/lang-client";
 import { PASSWORD_MIN, type UserDrawerMode } from "@/lib/adminUsers";
+import { focusIsLost } from "@/lib/lostFocus";
 import s from "./userDetail.module.css";
 
 export interface UserDetailActionsProps {
@@ -42,19 +47,31 @@ export function UserDetailActions({
 }: UserDetailActionsProps) {
   const { t } = useLang();
   const panelId = useId();
+  const blockRef = useRef<HTMLDivElement | null>(null);
+  // The panel open at the last commit, to know which one just closed.
+  const shownRef = useRef(mode);
+
+  useEffect(() => {
+    const closed = shownRef.current;
+    shownRef.current = mode;
+    if (closed === mode || closed === "view" || !focusIsLost()) return;
+    blockRef.current?.querySelector<HTMLElement>(`[data-opens="${closed}"]`)?.focus();
+  }, [mode]);
+
   const toggle = (next: UserDrawerMode) => {
     if (!busy) onMode(mode === next ? "view" : next);
   };
   const opens = (next: UserDrawerMode) => ({
     "aria-expanded": mode === next,
     "aria-controls": mode === next ? panelId : undefined,
+    "data-opens": next,
   });
   const cancel = () => {
     if (!busy) onMode("view");
   };
 
   return (
-    <div data-block="actions">
+    <div data-block="actions" ref={blockRef}>
       <div className={s.actions}>
         <button type="button" className={s.btn} {...opens("edit")} onClick={() => toggle("edit")}>
           {t("admin.userPanel.edit")}

@@ -1,11 +1,15 @@
 // P10 sandbox — /admin access control, and the user list.
 //
-// Three flows:
+// The flows:
 //   1. logged-in non-admin → /admin returns 403 (proxy.ts:69)
 //   2. logged-in admin     → /admin renders the dashboard
 //   3. logged-in admin     → the user list: segment chips with their sizes,
 //      the activity panel's depth hand-off, the row menu, search, and the
 //      detail drawer opening and closing with Escape
+//   4. logged-in admin     → the drawer after an inline confirmation is
+//      cancelled: focus stays in it, Escape closes it, focus goes back
+//   5. logged-in admin     → a chip and straight back, before the first
+//      request answers, leaves the table not loading
 //
 // The globalSetup storageState user has role=null (plain user), so the
 // non-admin block uses it via the project-level storageState. The admin
@@ -209,6 +213,95 @@ test.describe("admin user list", () => {
     await expect(drawer).toHaveCount(0);
     // Focus goes back to what opened it.
     await expect(opener).toBeFocused();
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+  });
+
+  test("after 取消 in the drawer's confirmation, Escape still closes it and focus returns to the opener", async ({
+    page,
+  }) => {
+    test.setTimeout(SPEC_TIMEOUT_MS);
+    const errors = collectConsoleErrors(page);
+
+    // An account of this run's own, found by searching for its unique name.
+    const target = makeUser();
+    await insertPgUser({
+      username: target.username,
+      email: target.email,
+      passwordHash: target.passwordHash,
+    });
+    await signInAsNewAdmin(page);
+    await page.goto("/admin");
+
+    const users = page.locator("#users");
+    await waitForHydration(page, '#users input[type="search"]');
+    await users.getByRole("searchbox", { name: "搜索用户名或邮箱" }).fill(target.username);
+    const rows = users.locator("tbody tr[data-user-row]");
+    await expect(rows).toHaveCount(1, { timeout: 15_000 });
+
+    const opener = rows.first().getByRole("button", { name: target.username, exact: true });
+    await opener.click();
+    const drawer = page.getByRole("dialog", { name: target.username });
+    await expect(drawer).toBeVisible({ timeout: DRAWER_MS });
+    await expect(drawer.locator('[data-tile="activeDays"]')).toBeVisible({ timeout: DRAWER_MS });
+
+    // The confirmation opens with focus on 取消; pressing it closes the
+    // confirmation, and focus must stay in the drawer, on what opened it.
+    const revokeAll = drawer.getByRole("button", { name: "退出全部设备", exact: true });
+    await revokeAll.click();
+    const confirm = drawer.getByRole("alertdialog", { name: "确认退出全部设备" });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(confirm).toHaveCount(0);
+    await expect(revokeAll).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(drawer).toHaveCount(0);
+    await expect(opener).toBeFocused();
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+  });
+
+  test("a chip and straight back, before the first answer, leaves nothing loading", async ({ page }) => {
+    test.setTimeout(SPEC_TIMEOUT_MS);
+    const errors = collectConsoleErrors(page);
+    await signInAsNewAdmin(page);
+
+    // Hold the 管理员 request open until the switch back has happened, so the
+    // test cannot pass by the answer simply arriving first. The page aborts
+    // it on the switch back; continuing an aborted request can throw.
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let settled = () => {};
+    const handled = new Promise<void>((resolve) => {
+      settled = resolve;
+    });
+    await page.route(/\/api\/admin\/users\?(.*&)?segment=admin(&|$)/, async (route) => {
+      await released;
+      await route.continue().catch(() => {});
+      settled();
+    });
+
+    await page.goto("/admin");
+    const users = page.locator("#users");
+    await waitForHydration(page, '#users input[type="search"]');
+
+    const asked = page.waitForRequest(/\/api\/admin\/users\?(.*&)?segment=admin(&|$)/);
+    await users.locator('[data-segment="admin"]').click();
+    await asked;
+    await users.locator('[data-segment="all"]').click();
+
+    await expect(users.locator('[data-segment="all"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(users.locator('[aria-busy="true"]')).toHaveCount(0);
+
+    // And it stays that way once the held request is let go.
+    release();
+    await handled;
+    await expect(users.locator('[aria-busy="true"]')).toHaveCount(0);
+    await expect(users.locator('[data-segment="all"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(users.locator("tbody tr[data-user-row]").first()).toBeVisible();
 
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });

@@ -7,6 +7,7 @@ import {
   afterAll,
 } from "bun:test";
 import type { Dict } from "@/lib/i18n";
+import type { UserActionFailure, UserActionResult } from "./_shared";
 
 interface ApiMutateCall {
   path: string;
@@ -85,7 +86,6 @@ const {
   revokeAdminUserSessions,
   revokeAdminUserSession,
 } = await import("./users");
-const { UserActionError } = await import("./_shared");
 
 afterAll(() => {
   mock.restore();
@@ -97,6 +97,31 @@ beforeEach(() => {
   revalidateTagCalls.length = 0;
   apiMutateImpl = async () => ({});
 });
+
+/** The failure an action answered with, so a test can read its status, code and message. */
+function failureOf(result: UserActionResult<unknown>): UserActionFailure {
+  expect(result.ok).toBe(false);
+  return result as UserActionFailure;
+}
+
+/** Every action answers; none throws, whatever happened. */
+async function answer<T>(run: () => Promise<UserActionResult<T>>): Promise<UserActionResult<T>> {
+  let result: UserActionResult<T> | undefined;
+  let thrown: unknown;
+  try {
+    result = await run();
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeUndefined();
+  return result as UserActionResult<T>;
+}
+
+/** go-api refusing: what apiMutate throws for a non-2xx answer. */
+async function apiError(code: string, message: string, status: number): Promise<Error> {
+  const { ApiError } = await import("@/lib/api");
+  return new ApiError(code, message, status);
+}
 
 describe("createAdminUser", () => {
   test("trims + POSTs to /api/admin/users with body", async () => {
@@ -110,7 +135,7 @@ describe("createAdminUser", () => {
       email: "  alice@example.com  ",
       password: "secret123",
     });
-    expect(out).toMatchObject({ _id: "u1", username: "alice" });
+    expect(out).toMatchObject({ ok: true, data: { _id: "u1", username: "alice" } });
     expect(apiMutateCalls[0]).toMatchObject({
       path: "/api/admin/users",
       method: "POST",
@@ -127,109 +152,44 @@ describe("createAdminUser", () => {
     expect(revalidatePathCalls).toContain("/admin");
   });
 
-  test("rejects empty username before the network call", async () => {
-    let thrown: unknown;
-    try {
-      await createAdminUser({
-        username: "   ",
-        email: "ok@example.com",
-        password: "secret123",
+  test("refuses each bad field before the network, as a 400 with the dictionary's words", async () => {
+    const cases: Array<[{ username: string; email: string; password: string }, string]> = [
+      [{ username: "   ", email: "ok@example.com", password: "secret123" }, "Username cannot be empty"],
+      [{ username: "ab", email: "ok@example.com", password: "secret123" }, "Username must be 3-50 chars"],
+      [{ username: "alice", email: "   ", password: "secret123" }, "Email cannot be empty"],
+      [{ username: "alice", email: "not-an-email", password: "secret123" }, "Invalid email format"],
+      [{ username: "alice", email: "ok@example.com", password: "" }, "Password cannot be empty"],
+      [{ username: "alice", email: "ok@example.com", password: "12345" }, "Password must be at least 6 chars"],
+    ];
+    for (const [input, message] of cases) {
+      expect(failureOf(await answer(() => createAdminUser(input)))).toEqual({
+        ok: false,
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message,
       });
-    } catch (err) {
-      thrown = err;
     }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
-      "VALIDATION_ERROR",
-    );
     expect(apiMutateCalls).toHaveLength(0);
     expect(revalidatePathCalls).toHaveLength(0);
+    expect(revalidateTagCalls).toHaveLength(0);
   });
 
-  test("rejects short username (< 3 chars)", async () => {
-    let thrown: unknown;
-    try {
-      await createAdminUser({
-        username: "ab",
-        email: "ok@example.com",
-        password: "secret123",
-      });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect(apiMutateCalls).toHaveLength(0);
-  });
-
-  test("rejects malformed email", async () => {
-    let thrown: unknown;
-    try {
-      await createAdminUser({
-        username: "alice",
-        email: "not-an-email",
-        password: "secret123",
-      });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect(apiMutateCalls).toHaveLength(0);
-  });
-
-  test("rejects short password (< 6 chars)", async () => {
-    let thrown: unknown;
-    try {
-      await createAdminUser({
-        username: "alice",
-        email: "ok@example.com",
-        password: "12345",
-      });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect(apiMutateCalls).toHaveLength(0);
-  });
-
-  test("rejects empty email before the network call", async () => {
-    let thrown: unknown;
-    try {
-      await createAdminUser({
-        username: "alice",
-        email: "   ",
-        password: "secret123",
-      });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
-      "VALIDATION_ERROR",
+  test("a username go-api says is taken comes back as its 409, with go-api's code and message", async () => {
+    const err = await apiError("CONFLICT", "Username already exists", 409);
+    apiMutateImpl = async () => {
+      throw err;
+    };
+    const out = await answer(() =>
+      createAdminUser({ username: "alice", email: "alice@example.com", password: "secret123" }),
     );
-    expect(apiMutateCalls).toHaveLength(0);
-  });
-
-  test("rejects empty password before the network call", async () => {
-    let thrown: unknown;
-    try {
-      await createAdminUser({
-        username: "alice",
-        email: "alice@example.com",
-        password: "",
-      });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
-      "VALIDATION_ERROR",
-    );
-    expect(apiMutateCalls).toHaveLength(0);
+    expect(out).toEqual({ ok: false, status: 409, code: "CONFLICT", message: "Username already exists" });
+    expect(revalidateTagCalls).toEqual([]);
+    expect(revalidatePathCalls).toEqual([]);
   });
 });
 
 describe("updateAdminUser", () => {
-  test("PATCHes /api/admin/users/:id with the diff", async () => {
+  test("PATCHes /api/admin/users/:id with the diff and answers with the account", async () => {
     apiMutateImpl = async () => ({
       _id: "u1",
       username: "renamed",
@@ -237,7 +197,8 @@ describe("updateAdminUser", () => {
       role: null,
       createdAt: "2026-01-01T00:00:00Z",
     });
-    await updateAdminUser("u1", { username: "renamed" });
+    const out = await updateAdminUser("u1", { username: "renamed" });
+    expect(out).toMatchObject({ ok: true, data: { username: "renamed" } });
     expect(apiMutateCalls[0]).toMatchObject({
       path: "/api/admin/users/u1",
       method: "PATCH",
@@ -277,28 +238,28 @@ describe("updateAdminUser", () => {
     expect(revalidatePathCalls).toContain("/admin");
   });
 
-  test("throws when patch is empty", async () => {
-    let thrown: unknown;
-    try {
-      await updateAdminUser("u1", {});
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
-      "VALIDATION_ERROR",
-    );
+  test("refuses an empty patch, or a missing id, before the network", async () => {
+    expect(failureOf(await answer(() => updateAdminUser("u1", {})))).toMatchObject({
+      status: 400,
+      code: "VALIDATION_ERROR",
+      message: "No fields to update",
+    });
+    expect(failureOf(await answer(() => updateAdminUser("", { username: "abc" })))).toMatchObject({
+      status: 400,
+      code: "VALIDATION_ERROR",
+      message: "Missing user ID",
+    });
     expect(apiMutateCalls).toHaveLength(0);
   });
 
-  test("throws when userId is missing", async () => {
-    let thrown: unknown;
-    try {
-      await updateAdminUser("", { username: "a" });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
+  test("an account deleted meanwhile is go-api's 404, nothing revalidated", async () => {
+    const err = await apiError("NOT_FOUND", "User not found", 404);
+    apiMutateImpl = async () => {
+      throw err;
+    };
+    const out = failureOf(await answer(() => updateAdminUser("u1", { username: "abc" })));
+    expect(out).toMatchObject({ status: 404, code: "NOT_FOUND", message: "User not found" });
+    expect(revalidateTagCalls).toEqual([]);
   });
 });
 
@@ -306,7 +267,7 @@ describe("deleteAdminUser", () => {
   test("DELETEs /api/admin/users/:id with no body", async () => {
     apiMutateImpl = async () => ({ deleted: true, username: "alice" });
     const out = await deleteAdminUser("u1");
-    expect(out).toMatchObject({ deleted: true, username: "alice" });
+    expect(out).toEqual({ ok: true, data: { deleted: true, username: "alice" } });
     expect(apiMutateCalls[0]).toMatchObject({
       path: "/api/admin/users/u1",
       method: "DELETE",
@@ -328,22 +289,31 @@ describe("deleteAdminUser", () => {
     expect(revalidatePathCalls).toContain("/admin");
   });
 
-  test("throws when userId is missing, no network call made", async () => {
-    let thrown: unknown;
-    try {
-      await deleteAdminUser("");
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
+  test("refuses a missing id, no network call made", async () => {
+    expect(failureOf(await answer(() => deleteAdminUser("")))).toMatchObject({ status: 400, code: "VALIDATION_ERROR" });
     expect(apiMutateCalls).toHaveLength(0);
+  });
+
+  test("deleting yourself is go-api's 400, with its message", async () => {
+    const err = await apiError("BAD_REQUEST", "Cannot delete yourself", 400);
+    apiMutateImpl = async () => {
+      throw err;
+    };
+    expect(await answer(() => deleteAdminUser("u1"))).toEqual({
+      ok: false,
+      status: 400,
+      code: "BAD_REQUEST",
+      message: "Cannot delete yourself",
+    });
+    expect(revalidatePathCalls).toEqual([]);
   });
 });
 
 describe("setAdminUserPassword", () => {
   test("POSTs password to /api/admin/users/:id/password", async () => {
     apiMutateImpl = async () => ({ success: true });
-    await setAdminUserPassword("u1", "newpassword");
+    const out = await setAdminUserPassword("u1", "newpassword");
+    expect(out).toEqual({ ok: true, data: null });
     expect(apiMutateCalls[0]).toMatchObject({
       path: "/api/admin/users/u1/password",
       method: "POST",
@@ -370,80 +340,40 @@ describe("setAdminUserPassword", () => {
     );
   });
 
-  test("throws VALIDATION_ERROR when userId is missing", async () => {
-    let thrown: unknown;
-    try {
-      await setAdminUserPassword("", "pw123456");
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
-      "VALIDATION_ERROR",
-    );
-    expect(apiMutateCalls).toHaveLength(0);
-  });
-
-  test("throws VALIDATION_ERROR when password is too short", async () => {
-    let thrown: unknown;
-    try {
-      await setAdminUserPassword("u1", "12345");
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
-      "VALIDATION_ERROR",
-    );
+  test("refuses a missing id, or a short password, before the network", async () => {
+    expect(failureOf(await answer(() => setAdminUserPassword("", "pw123456")))).toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: "Missing user ID",
+    });
+    expect(failureOf(await answer(() => setAdminUserPassword("u1", "12345")))).toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: "Password must be at least 6 chars",
+    });
     expect(apiMutateCalls).toHaveLength(0);
   });
 });
 
-describe("toActionError — ApiError path", () => {
-  // Verify that an upstream ApiError from the mock apiMutate is converted
-  // to a UserActionError with the same code/status (tests line 30-35 in
-  // users.ts which were previously uncovered).
-  test("re-wraps ApiError from apiMutate as UserActionError with original code", async () => {
-    const { ApiError } = await import("@/lib/api");
-    apiMutateImpl = async () => {
-      throw new ApiError("CONFLICT", "Username already exists", 409);
-    };
-    let thrown: unknown;
-    try {
-      await createAdminUser({
-        username: "alice",
-        email: "alice@example.com",
-        password: "secret123",
-      });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
-      "CONFLICT",
-    );
-    expect((thrown as InstanceType<typeof UserActionError>).status).toBe(409);
-  });
-
-  test("wraps a plain Error as UNEXPECTED UserActionError (unknown throw path)", async () => {
-    // Throw a plain Error (not ApiError, not UserActionError) from apiMutate
-    // to exercise the UNEXPECTED fallback branch in toActionError.
+describe("what a failure carries back", () => {
+  test("an unexpected error is logged on the server, and its message is not sent", async () => {
+    // Not an ApiError: something inside the action itself, which can name
+    // internals the browser has no business seeing.
     apiMutateImpl = async () => {
       throw new Error("database connection lost");
     };
-    let thrown: unknown;
-    try {
-      await deleteAdminUser("u1");
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UserActionError);
-    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
-      "UNEXPECTED",
-    );
-    expect((thrown as InstanceType<typeof UserActionError>).message).toBe(
-      "database connection lost",
-    );
+    expect(await answer(() => deleteAdminUser("u1"))).toEqual({
+      ok: false,
+      status: 500,
+      code: "UNEXPECTED",
+      message: "",
+    });
+  });
+
+  test("go-api out of reach is apiMutate's NETWORK_ERROR, status 0", async () => {
+    const err = await apiError("NETWORK_ERROR", "fetch failed", 0);
+    apiMutateImpl = async () => {
+      throw err;
+    };
+    expect(failureOf(await answer(() => deleteAdminUser("u1")))).toMatchObject({ status: 0, code: "NETWORK_ERROR" });
   });
 });
 
@@ -455,22 +385,11 @@ describe("toActionError — ApiError path", () => {
 const USER_ID = "0a1b2c3d-0000-4000-8000-00000000000a";
 const SESSION_ID = "0a1b2c3d-0000-4000-8000-0000000000b1";
 
-/** The error an action threw, so a test can read its code and status. */
-async function thrownBy(run: () => Promise<unknown>): Promise<InstanceType<typeof UserActionError>> {
-  try {
-    await run();
-  } catch (err) {
-    expect(err).toBeInstanceOf(UserActionError);
-    return err as InstanceType<typeof UserActionError>;
-  }
-  throw new Error("expected the action to throw");
-}
-
 describe("revokeAdminUserSessions", () => {
-  test("DELETEs /api/admin/users/:id/sessions with no body and returns go-api's count", async () => {
+  test("DELETEs /api/admin/users/:id/sessions with no body and answers with go-api's count", async () => {
     apiMutateImpl = async () => ({ revoked: 3 });
     const out = await revokeAdminUserSessions(USER_ID);
-    expect(out).toEqual({ revoked: 3 });
+    expect(out).toEqual({ ok: true, data: { revoked: 3 } });
     expect(apiMutateCalls).toEqual([
       { path: `/api/admin/users/${USER_ID}/sessions`, method: "DELETE", body: undefined, auth: undefined },
     ]);
@@ -484,25 +403,25 @@ describe("revokeAdminUserSessions", () => {
   });
 
   test("a refusal from go-api's admin check comes back with its status, and nothing is revalidated", async () => {
-    const { ApiError } = await import("@/lib/api");
+    const err = await apiError("FORBIDDEN", "Admin only", 403);
     apiMutateImpl = async () => {
-      throw new ApiError("FORBIDDEN", "Admin only", 403);
+      throw err;
     };
-    const err = await thrownBy(() => revokeAdminUserSessions(USER_ID));
-    expect(err.code).toBe("FORBIDDEN");
-    expect(err.status).toBe(403);
+    const out = failureOf(await answer(() => revokeAdminUserSessions(USER_ID)));
+    expect(out.code).toBe("FORBIDDEN");
+    expect(out.status).toBe(403);
     expect(revalidateTagCalls).toEqual([]);
     expect(revalidatePathCalls).toEqual([]);
   });
 
-  test("signing yourself out here is go-api's 400, surfaced as is", async () => {
-    const { ApiError } = await import("@/lib/api");
+  test("signing yourself out here is go-api's 400, with go-api's message", async () => {
+    const err = await apiError("BAD_REQUEST", "Cannot sign yourself out here", 400);
     apiMutateImpl = async () => {
-      throw new ApiError("BAD_REQUEST", "Cannot sign yourself out here", 400);
+      throw err;
     };
-    const err = await thrownBy(() => revokeAdminUserSessions(USER_ID));
-    expect(err.status).toBe(400);
-    expect(err.message).toBe("Cannot sign yourself out here");
+    const out = failureOf(await answer(() => revokeAdminUserSessions(USER_ID)));
+    expect(out.status).toBe(400);
+    expect(out.message).toBe("Cannot sign yourself out here");
   });
 
   test("revalidates the list, the profile and /admin", async () => {
@@ -514,11 +433,11 @@ describe("revokeAdminUserSessions", () => {
   });
 
   test("refuses a missing or non-uuid user id before the network", async () => {
-    expect((await thrownBy(() => revokeAdminUserSessions(""))).message).toBe("Missing user ID");
+    expect(failureOf(await answer(() => revokeAdminUserSessions(""))).message).toBe("Missing user ID");
     for (const bad of ["u1", "../users", `${USER_ID}/sessions`, `${USER_ID} `]) {
-      const err = await thrownBy(() => revokeAdminUserSessions(bad));
-      expect(err.code).toBe("VALIDATION_ERROR");
-      expect(err.message).toBe("Invalid user ID");
+      const out = failureOf(await answer(() => revokeAdminUserSessions(bad)));
+      expect(out.code).toBe("VALIDATION_ERROR");
+      expect(out.message).toBe("Invalid user ID");
     }
     expect(apiMutateCalls).toHaveLength(0);
   });
@@ -528,7 +447,7 @@ describe("revokeAdminUserSession", () => {
   test("DELETEs /api/admin/users/:id/sessions/:sessionId with no body", async () => {
     apiMutateImpl = async () => ({ revoked: 1 });
     const out = await revokeAdminUserSession(USER_ID, SESSION_ID);
-    expect(out).toEqual({ revoked: 1 });
+    expect(out).toEqual({ ok: true, data: { revoked: 1 } });
     expect(apiMutateCalls).toEqual([
       {
         path: `/api/admin/users/${USER_ID}/sessions/${SESSION_ID}`,
@@ -542,30 +461,31 @@ describe("revokeAdminUserSession", () => {
   });
 
   test("another account's session is go-api's 404, nothing revalidated", async () => {
-    const { ApiError } = await import("@/lib/api");
+    const err = await apiError("NOT_FOUND", "Session not found", 404);
     apiMutateImpl = async () => {
-      throw new ApiError("NOT_FOUND", "Session not found", 404);
+      throw err;
     };
-    const err = await thrownBy(() => revokeAdminUserSession(USER_ID, SESSION_ID));
-    expect(err.status).toBe(404);
+    const out = failureOf(await answer(() => revokeAdminUserSession(USER_ID, SESSION_ID)));
+    expect(out.status).toBe(404);
+    expect(out.message).toBe("Session not found");
     expect(revalidateTagCalls).toEqual([]);
   });
 
   test("an unauthenticated caller is go-api's 401", async () => {
-    const { ApiError } = await import("@/lib/api");
+    const err = await apiError("UNAUTHORIZED", "Not authenticated", 401);
     apiMutateImpl = async () => {
-      throw new ApiError("UNAUTHORIZED", "Not authenticated", 401);
+      throw err;
     };
-    expect((await thrownBy(() => revokeAdminUserSession(USER_ID, SESSION_ID))).status).toBe(401);
+    expect(failureOf(await answer(() => revokeAdminUserSession(USER_ID, SESSION_ID))).status).toBe(401);
   });
 
   test("refuses a bad session id, or a bad user id, before the network", async () => {
     for (const bad of ["", "s1", "../../users", `${SESSION_ID}?x=1`]) {
-      const err = await thrownBy(() => revokeAdminUserSession(USER_ID, bad));
-      expect(err.code).toBe("VALIDATION_ERROR");
-      expect(err.message).toBe("Invalid session ID");
+      const out = failureOf(await answer(() => revokeAdminUserSession(USER_ID, bad)));
+      expect(out.code).toBe("VALIDATION_ERROR");
+      expect(out.message).toBe("Invalid session ID");
     }
-    expect((await thrownBy(() => revokeAdminUserSession("nope", SESSION_ID))).message).toBe("Invalid user ID");
+    expect(failureOf(await answer(() => revokeAdminUserSession("nope", SESSION_ID))).message).toBe("Invalid user ID");
     expect(apiMutateCalls).toHaveLength(0);
   });
 });
