@@ -11,6 +11,8 @@ import (
 	"testing/synctest"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -443,4 +445,51 @@ func TestTop_RoutesDoNotCollideWithDetail(t *testing.T) {
 	assert.Equal(t, http.StatusOK, years.Code)
 	assert.Equal(t, `{"data":[{"year":2024,"count":1}]}`, years.Body.String())
 	assert.Empty(t, detailHits)
+}
+
+// argsDBTX records the arguments each statement reached the connection
+// with.
+type argsDBTX struct {
+	dbgen.DBTX
+	got [][]any
+}
+
+func (a *argsDBTX) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	a.got = append(a.got, args)
+	return pgconn.CommandTag{}, nil
+}
+
+func (a *argsDBTX) Query(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
+	a.got = append(a.got, args)
+	return nil, errors.New("not a database")
+}
+
+func (a *argsDBTX) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
+	a.got = append(a.got, args)
+	return nil
+}
+
+// TestPlanEachTime_LeadsWithTheExecMode — every statement reaches the
+// connection with pgx's unnamed-statement mode in front of its own
+// arguments, which follow unchanged.
+func TestPlanEachTime_LeadsWithTheExecMode(t *testing.T) {
+	t.Parallel()
+
+	inner := &argsDBTX{}
+	p := planEachTime{inner}
+	_, _ = p.Exec(context.Background(), "x", 1, "a")
+	_, _ = p.Query(context.Background(), "x")
+	_ = p.QueryRow(context.Background(), "x", nil)
+	assert.Equal(t, [][]any{
+		{pgx.QueryExecModeCacheDescribe, 1, "a"},
+		{pgx.QueryExecModeCacheDescribe},
+		{pgx.QueryExecModeCacheDescribe, nil},
+	}, inner.got)
+
+	_, err := NewTopDB(inner).TopAnime(context.Background(), topQuery{}.params())
+	require.Error(t, err)
+	require.Len(t, inner.got, 4)
+	assert.Equal(t, []any{pgx.QueryExecModeCacheDescribe, int32(browseScoreMinPopularity),
+		(*int32)(nil), (*string)(nil), (*string)(nil), (*string)(nil), int32(topSize)}, inner.got[3],
+		"TopAnime's own arguments, in order, behind the mode")
 }

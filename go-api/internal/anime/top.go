@@ -28,6 +28,8 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
@@ -58,9 +60,56 @@ const (
 	topYearsKey = "years"
 )
 
-// TopDB is the sqlc subset Top uses.
+// TopDB is the sqlc subset Top uses.  In production it is NewTopDB's.
 type TopDB interface {
 	TopAnime(ctx context.Context, arg dbgen.TopAnimeParams) ([]dbgen.TopAnimeRow, error)
+}
+
+// NewTopDB is the TopDB Top reads through: db's queries, each run as an
+// unnamed statement, which Postgres plans for that execution's own
+// arguments every time.
+//
+// Under pgx's default statement cache TopAnime would be a named prepared
+// statement, and Postgres's auto mode switches a prepared statement to one
+// generic plan from its sixth execution if that plan is estimated to cost
+// less than the custom plans did.  TopAnime's does, every time: with its
+// four optional filters unknown, the generic plan estimates a ranking of
+// about one row, against a hundred rows' projections for a custom plan.
+// But that plan cannot use the release-year index -- ($n IS NULL OR year =
+// $n) is not a condition an index can serve -- so one year's ranking would
+// read every title past the popularity floor instead of that year's few
+// hundred.  BrowseAnime's filters happen to keep its generic estimate high
+// (TestBrowse_PG_PlannedForTheirArguments); TopAnime's do not
+// (TestTop_PG_PlannedForTheirArguments), and an unnamed statement has no
+// plan to reuse.  Planning a statement this size costs well under a
+// millisecond, once per ranking per cache TTL.
+func NewTopDB(db dbgen.DBTX) TopDB {
+	return dbgen.New(planEachTime{db})
+}
+
+// planEachTime is a DBTX that runs every statement with pgx's
+// QueryExecModeCacheDescribe: an unnamed statement, after the one Describe
+// per connection that learns its parameter and result types.
+type planEachTime struct {
+	dbgen.DBTX
+}
+
+func (p planEachTime) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return p.DBTX.Exec(ctx, sql, unnamed(args)...)
+}
+
+func (p planEachTime) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return p.DBTX.Query(ctx, sql, unnamed(args)...)
+}
+
+func (p planEachTime) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return p.DBTX.QueryRow(ctx, sql, unnamed(args)...)
+}
+
+// unnamed is args led by the exec mode, which pgx reads off the front of a
+// statement's arguments.
+func unnamed(args []any) []any {
+	return append([]any{pgx.QueryExecModeCacheDescribe}, args...)
 }
 
 // TopYearsDB is the sqlc subset TopYears uses.

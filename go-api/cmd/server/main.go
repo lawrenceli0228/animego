@@ -882,7 +882,7 @@ func main() {
 		// years that have one.  Fixed segments, like /episodes: chi resolves
 		// them before the /{anilistId} wildcard, and /top/years before the
 		// two-segment /{anilistId}/... routes.
-		r.Get("/top", anime.Top(q, topCache))
+		r.Get("/top", anime.Top(anime.NewTopDB(pool), topCache))
 		r.Get("/top/years", anime.TopYears(q, topYearsCache))
 		r.Get("/trending", anime.Trending(q, trendingCache))
 		r.Get("/torrents", anime.Torrents(torrentsAgg, q, mikanidmap.Lookup))
