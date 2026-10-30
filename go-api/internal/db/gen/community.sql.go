@@ -159,51 +159,6 @@ func (q *Queries) DeleteCommentReactionOnly(ctx context.Context, commentID uuid.
 	return result.RowsAffected(), nil
 }
 
-const getCommunityEngagementSummary = `-- name: GetCommunityEngagementSummary :one
-SELECT
-    COALESCE(sum(event_count) FILTER (
-        WHERE event_type = 'hot_discussions_impression'
-    ), 0)::bigint AS impression_count,
-    COALESCE(sum(event_count) FILTER (
-        WHERE event_type = 'discussion_open'
-    ), 0)::bigint AS open_count,
-    COALESCE(sum(event_count) FILTER (
-        WHERE event_type = 'welcome_card_impression'
-    ), 0)::bigint AS welcome_impression_count,
-    COALESCE(sum(event_count) FILTER (
-        WHERE event_type = 'welcome_card_open'
-    ), 0)::bigint AS welcome_open_count
-FROM community_engagement_daily
-WHERE event_date >= current_date - ($1::integer - 1)
-`
-
-type GetCommunityEngagementSummaryRow struct {
-	ImpressionCount        int64 `json:"impressionCount"`
-	OpenCount              int64 `json:"openCount"`
-	WelcomeImpressionCount int64 `json:"welcomeImpressionCount"`
-	WelcomeOpenCount       int64 `json:"welcomeOpenCount"`
-}
-
-// Two independent pairs, not four interchangeable counters.  Read
-// open_count against impression_count, and welcome_open_count against
-// welcome_impression_count -- never across the pairs.  The two denominators
-// do not count the same renders: hot_discussions_impression is suppressed
-// when the rail has no discussions to show, while welcome_card_impression
-// fires on every mount, because the card it counts renders either way.
-// welcome_impression_count is therefore >= impression_count by construction,
-// and their difference is how often the rail rendered empty.
-func (q *Queries) GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (GetCommunityEngagementSummaryRow, error) {
-	row := q.db.QueryRow(ctx, getCommunityEngagementSummary, dayCount)
-	var i GetCommunityEngagementSummaryRow
-	err := row.Scan(
-		&i.ImpressionCount,
-		&i.OpenCount,
-		&i.WelcomeImpressionCount,
-		&i.WelcomeOpenCount,
-	)
-	return i, err
-}
-
 const hasCommentReaction = `-- name: HasCommentReaction :one
 SELECT EXISTS (
     SELECT 1
@@ -497,55 +452,6 @@ func (q *Queries) MarkNotificationRead(ctx context.Context, notificationID uuid.
 		&i.EditSubmissionID,
 	)
 	return i, err
-}
-
-const trackCommunityEngagement = `-- name: TrackCommunityEngagement :one
-INSERT INTO community_engagement_daily (
-    event_date,
-    event_type,
-    source,
-    anilist_id,
-    episode,
-    authenticated,
-    event_count,
-    updated_at
-) VALUES (
-    current_date,
-    $1::text,
-    $2::text,
-    $3::integer,
-    $4::integer,
-    $5::boolean,
-    1,
-    now()
-)
-ON CONFLICT (
-    event_date,
-    event_type,
-    source,
-    anilist_id,
-    episode,
-    authenticated
-) DO UPDATE
-SET event_count = community_engagement_daily.event_count + 1,
-    updated_at = now()
-RETURNING event_count
-`
-
-// Aggregate-only counters keep product telemetry useful without retaining a
-// per-user browsing history.  The handler owns the event/target allowlist;
-// matching CHECK constraints make that contract durable at the database edge.
-func (q *Queries) TrackCommunityEngagement(ctx context.Context, eventType string, source string, anilistID int32, episode int32, authenticated bool) (int64, error) {
-	row := q.db.QueryRow(ctx, trackCommunityEngagement,
-		eventType,
-		source,
-		anilistID,
-		episode,
-		authenticated,
-	)
-	var event_count int64
-	err := row.Scan(&event_count)
-	return event_count, err
 }
 
 const upsertCommentReaction = `-- name: UpsertCommentReaction :one

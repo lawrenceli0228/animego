@@ -210,34 +210,6 @@ export interface SeasonalAnime {
   isSequel?: boolean | null;
 }
 
-// ─── Community discovery (/api/community/discussions/trending) ───
-
-export interface HotDiscussion {
-  anilistId: number;
-  episode: number;
-  titleRomaji: string | null;
-  titleEnglish: string | null;
-  titleNative: string | null;
-  titleChinese: string | null;
-  titleHant?: string | null;
-  titleHantSource?: string | null;
-  /** SERP-safe projection — see the hant channel note above. */
-  titleHantSeo?: string | null;
-  coverImageUrl: string | null;
-  posterAccent: string | null;
-  commentCount: number;
-  participantCount: number;
-  reactionCount: number;
-  latest: {
-    id: string;
-    username: string;
-    avatarUrl: string | null;
-    content: string;
-    isSpoiler: boolean;
-    createdAt: string;
-  };
-}
-
 // ─── AnimeDetail (/api/anime/:id) ──────────────────────────────────
 // Phase 5 consumer; included here so lib/types.ts is the single source.
 

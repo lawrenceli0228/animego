@@ -42,6 +42,10 @@ import (
 var allTables = []string{
 	// Application tables (migrations 0001).
 	"users",
+	// Deleted accounts' activity (0054), unlinked from users on purpose,
+	// so CASCADE from "users" does not reach them.
+	"archived_users",
+	"archived_user_activity_daily",
 	// Per-device refresh sessions (migration 0052).  CASCADE from users
 	// would reach it anyway; listed to keep the inventory true.
 	"user_sessions",
@@ -92,8 +96,6 @@ var allTables = []string{
 	"anime_threads",
 	"community_replies",
 	"activity_likes",
-	// Community discovery aggregate (migration 0020).
-	"community_engagement_daily",
 	// Activity rollup (migration 0025).  The CASCADE from users would reach
 	// it anyway; listing it keeps this the readable inventory it claims to be.
 	"user_activity_daily",

@@ -1,6 +1,7 @@
 "use client";
 
-// Client Component for the admin "create user" form.
+// Client Component for the admin "create user" form, shown under the user
+// list's 创建用户 button (UsersSection owns the open/closed state).
 //
 // Three controlled inputs (username / email / password) + submit. The
 // form action is a Server Action so React's <form action={...}>
@@ -11,11 +12,17 @@
 // Validation runs client-side as a first-line guard against typos; the
 // Server Action runs the same checks again before touching go-api, so
 // these rules are defense-in-depth, not authoritative.
+//
+// A create that did not go through is reported in this form's own words
+// (lib/adminUserErrors.ts): the action returns go-api's status and message,
+// and go-api's English is never shown.
 
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { createAdminUser } from "../_actions/users";
+import { userActionErrorKey } from "@/lib/adminUserErrors";
 import { useLang } from "@/lib/lang-client";
+import s from "./users.module.css";
 
 const SUCCESS_MS = 3000;
 
@@ -49,17 +56,20 @@ function validate(form: FormState, tFn: (key: string) => string): string | null 
 function SubmitButton({ tFn }: { tFn: (key: string) => string }) {
   const { pending } = useFormStatus();
   return (
-    <button
-      type="submit"
-      disabled={pending}
-      style={pending ? { ...styles.submitBtn, ...styles.submitDisabled } : styles.submitBtn}
-    >
+    <button type="submit" disabled={pending} className={s.primary}>
       {pending ? tFn("admin.creatingUser") : tFn("admin.createUser")}
     </button>
   );
 }
 
-export function CreateUserForm() {
+interface CreateUserFormProps {
+  /** The wrapper's id, for the toggle's aria-controls. */
+  id?: string;
+  /** After a successful create, so the list can fetch the page again. */
+  onCreated?: (username: string) => void;
+}
+
+export function CreateUserForm({ id, onCreated }: CreateUserFormProps) {
   const { t } = useLang();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
@@ -84,11 +94,17 @@ export function CreateUserForm() {
       return;
     }
     try {
-      const created = await createAdminUser({
+      const result = await createAdminUser({
         username: form.username.trim(),
         email: form.email.trim(),
         password: form.password,
       });
+      // `=== false`: without strict null checks only the literal narrows.
+      if (result.ok === false) {
+        setError(t(userActionErrorKey("create", result)));
+        return;
+      }
+      const created = result.data;
       setForm(EMPTY_FORM);
       setSuccess(t("admin.createdUser").replace("{{username}}", created.username));
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
@@ -96,14 +112,16 @@ export function CreateUserForm() {
         setSuccess(null);
         successTimerRef.current = null;
       }, SUCCESS_MS);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("admin.createFailed"));
+      onCreated?.(created.username);
+    } catch {
+      // The request to Next itself failed; whatever it threw is not for display.
+      setError(t("admin.createFailed"));
     }
   };
 
   return (
-    <div style={styles.wrap}>
-      <form action={onSubmit} style={styles.form}>
+    <div id={id} className={s.createWrap}>
+      <form action={onSubmit} className={s.createForm}>
         <input
           type="text"
           name="username"
@@ -111,7 +129,7 @@ export function CreateUserForm() {
           onChange={(e) => setForm({ ...form, username: e.target.value })}
           placeholder={t("admin.usernamePlaceholder")}
           autoComplete="off"
-          style={styles.input}
+          className={s.input}
           aria-label={t("admin.usernameLabel")}
         />
         <input
@@ -121,7 +139,7 @@ export function CreateUserForm() {
           onChange={(e) => setForm({ ...form, email: e.target.value })}
           placeholder={t("admin.emailPlaceholder")}
           autoComplete="off"
-          style={styles.input}
+          className={s.input}
           aria-label={t("admin.emailLabel")}
         />
         <input
@@ -131,79 +149,21 @@ export function CreateUserForm() {
           onChange={(e) => setForm({ ...form, password: e.target.value })}
           placeholder={t("admin.passwordPlaceholder")}
           autoComplete="new-password"
-          style={{ ...styles.input, ...styles.passwordInput }}
+          className={`${s.input} ${s.inputNarrow}`}
           aria-label={t("admin.passwordLabel")}
         />
         <SubmitButton tFn={t} />
       </form>
       {error && (
-        <p role="alert" style={styles.error}>
+        <p role="alert" className={s.formError}>
           {error}
         </p>
       )}
       {success && (
-        <p role="status" style={styles.success}>
+        <p role="status" className={s.formOk}>
           {success}
         </p>
       )}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  wrap: {
-    background: "#15151f",
-    border: "1px solid #1f1f2a",
-    borderRadius: 10,
-    padding: "16px 18px",
-    marginBottom: 20,
-  },
-  form: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 10,
-    alignItems: "center",
-  },
-  input: {
-    flex: "1 1 200px",
-    minWidth: 160,
-    padding: "9px 12px",
-    borderRadius: 6,
-    border: "1px solid #2a2a38",
-    background: "#0d0d14",
-    color: "#e7e7ef",
-    fontSize: 13,
-    outline: "none",
-  },
-  passwordInput: {
-    flex: "0 1 200px",
-    maxWidth: 220,
-  },
-  submitBtn: {
-    padding: "9px 18px",
-    borderRadius: 6,
-    border: "1px solid #3b82f6",
-    background: "#3b82f6",
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
-  submitDisabled: {
-    background: "#1f2a44",
-    borderColor: "#1f2a44",
-    color: "#7c7c8c",
-    cursor: "not-allowed",
-  },
-  error: {
-    margin: "10px 0 0",
-    fontSize: 12,
-    color: "#ff453a",
-  },
-  success: {
-    margin: "10px 0 0",
-    fontSize: 12,
-    color: "#30d158",
-  },
-};

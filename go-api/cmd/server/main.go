@@ -688,10 +688,11 @@ func main() {
 		return snap, nil
 	}
 	adminReadHandlers := admin.NewHandlers(pool, q, queueStatusFn, nil)
-	adminUserHandlers := admin.NewUserHandlers(q, enqueuer)
+	adminUserHandlers := admin.NewUserHandlers(admin.NewUserStore(pool), enqueuer)
+	adminSessionHandlers := admin.NewUserSessionHandlers(admin.NewUserStore(pool))
 	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
 	adminHantHandlers := admin.NewHantHandlers(q, enqueuer)
-	adminActivityHandlers := admin.NewActivityHandlers(q, slog.Default())
+	adminActivityHandlers := admin.NewActivityHandlers(pool)
 
 	// Presence recording (migration 0025).  The recorder buffers in memory and
 	// flushes on a ticker; nothing it does touches the database on a request
@@ -707,6 +708,9 @@ func main() {
 	// A login is the one presence event the recorder's middleware structurally
 	// cannot see: nobody holds a valid token at the moment they are logging in.
 	authHandlers.SetLoginObserver(activityRecorder)
+	// Deleting an account archives its activity; the flush first puts the
+	// minute still in this buffer into what gets archived.
+	adminUserHandlers.SetActivityFlusher(activityRecorder)
 
 	// P2.4 — subscriptions + social.  Subscriptions handler depends on
 	// anime.EnsureCached for the FK pre-fill (POST /api/subscriptions
@@ -992,7 +996,6 @@ func main() {
 
 	r.Route("/api/community", func(r chi.Router) {
 		r.With(jwtx.OptionalAuth(signer)).Get("/discussions/trending", commentsHandlers.ListTrendingDiscussions)
-		r.With(jwtx.OptionalAuth(signer)).Post("/engagement", commentsHandlers.TrackCommunityEngagement)
 	})
 
 	r.Route("/api/notifications", func(r chi.Router) {
@@ -1033,16 +1036,15 @@ func main() {
 		r.Get("/stats", adminReadHandlers.GetStats)
 		r.Get("/enrichment", adminReadHandlers.ListEnrichment)
 		r.Get("/users", adminReadHandlers.ListUsers)
+		r.Get("/users/{userId}", adminReadHandlers.GetUser)
 		r.Get("/reports", safetyHandlers.ListReports)
 		r.Patch("/reports/{id}", safetyHandlers.UpdateReport)
 		// Removing a reported review, thread or reply (soft; deleted_by is
 		// the admin).
 		communityHandlers.MountAdmin(r)
-		r.Get("/community-metrics", commentsHandlers.CommunityMetrics)
-		// The user-activity panel: DAU/WAU/MAU, the daily trend, retention
-		// cohorts and the surface breakdown.  Distinct from
-		// /community-metrics, which is one rail's impressions and is
-		// aggregate-only by construction.
+		// The user-activity panel: today against the same moment of earlier
+		// days, returning vs signup-day-only people per window, the daily
+		// trend, how many days people came back, and weekly signup cohorts.
 		r.Get("/activity", adminActivityHandlers.GetActivity)
 
 		// Enrichment writes — static paths first to keep chi happy.
@@ -1085,6 +1087,10 @@ func main() {
 		r.Patch("/users/{userId}", adminUserHandlers.UpdateUser)
 		r.Post("/users/{userId}/password", adminUserHandlers.SetUserPassword)
 		r.Delete("/users/{userId}", adminUserHandlers.DeleteUser)
+		// Signing an account out from the admin page: every device, or one.
+		// The admin's own account is refused; its devices are on /settings.
+		r.Delete("/users/{userId}/sessions", adminSessionHandlers.RevokeUserSessions)
+		r.Delete("/users/{userId}/sessions/{sessionId}", adminSessionHandlers.RevokeUserSession)
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

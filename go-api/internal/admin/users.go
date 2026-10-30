@@ -69,6 +69,7 @@ const (
 	msgEmailConflict      = "Email already exists"
 	msgUserNotFound       = "User not found"
 	msgCannotDeleteSelf   = "Cannot delete yourself"
+	msgCannotRevokeSelf   = "Cannot sign yourself out here" // own devices: the settings page
 	msgInvalidUserID      = "Invalid user ID"
 	msgInvalidRequestBody = "Invalid request body"
 	msgPasswordTooShort   = "Password must be at least 6 characters"
@@ -80,13 +81,16 @@ const (
 // into the test setup.
 //
 // GetUserByID is included even though sqlc only generates one method by
-// that name on the Querier — DeleteUser needs an existence check before
-// calling AdminDeleteUser so it can return 404 (the DELETE statement
-// alone returns no error on a no-op match).
+// that name on the Querier — DeleteUser looks the account up first so it can
+// return 404 and log the username.
+//
+// ArchiveAndDeleteUser is not a sqlc method: it is the one transactional
+// operation here, implemented by UserStore (user_store.go).  It reports false
+// when the account was already gone.
 type UserDB interface {
 	AdminCreateUser(ctx context.Context, username, email, password string) (dbgen.AdminCreateUserRow, error)
 	AdminUpdateUser(ctx context.Context, username, email *string, userID uuid.UUID) (dbgen.AdminUpdateUserRow, error)
-	AdminDeleteUser(ctx context.Context, id uuid.UUID) error
+	ArchiveAndDeleteUser(ctx context.Context, id uuid.UUID) (bool, error)
 	AdminSetUserPassword(ctx context.Context, id uuid.UUID, password string) error
 	AdminFindUserByUsernameOrEmail(ctx context.Context, username, email *string) (dbgen.AdminFindUserByUsernameOrEmailRow, error)
 	AdminFindUserByUsernameOrEmailExcluding(ctx context.Context, username, email *string, excludeID uuid.UUID) (dbgen.AdminFindUserByUsernameOrEmailExcludingRow, error)
@@ -106,11 +110,32 @@ type UserDB interface {
 type UserHandlers struct {
 	db  UserDB
 	enq queue.Enqueuer
+
+	// flusher, when set, is flushed before an account is archived; see
+	// SetActivityFlusher.
+	flusher ActivityFlusher
 }
 
-// NewUserHandlers constructs a UserHandlers bundle.  Pass the live
-// dbgen.Queries (which satisfies UserDB) and the application's
-// Enqueuer.  Both are required at boot — a nil dependency would crash
+// ActivityFlusher is the activity recorder surface DeleteUser needs.
+// *activity.Recorder satisfies it.
+type ActivityFlusher interface {
+	// Flush writes every buffered activity counter and returns once it has
+	// been written (or the failure logged).
+	Flush(ctx context.Context)
+}
+
+// SetActivityFlusher makes DeleteUser flush the activity recorder before it
+// archives an account.  The recorder writes its buffer once a minute and skips
+// accounts that no longer exist, so without the flush up to a minute of the
+// account's activity -- possibly the only visit of its last day -- never
+// reaches the archive.  main.go wires the process's recorder; leaving it
+// unset (tests, tooling) only means that minute is not archived.
+func (h *UserHandlers) SetActivityFlusher(f ActivityFlusher) {
+	h.flusher = f
+}
+
+// NewUserHandlers constructs a UserHandlers bundle.  Pass a UserStore
+// (which satisfies UserDB) and the application's Enqueuer.  Both are required at boot — a nil dependency would crash
 // on the first request, so we fail fast with a panic here to flag
 // the misconfiguration during startup smoke tests rather than at
 // request time.
@@ -370,11 +395,15 @@ type deleteUserResp struct {
 //  3. GetUserByID — if pgx.ErrNoRows → 404 NOT_FOUND.  Express does
 //     this same lookup so it can echo the deleted username in the
 //     response; we keep the read to preserve that affordance.
-//  4. AdminDeleteUser — Postgres ON DELETE CASCADE removes
-//     subscriptions / follows / comments / danmakus in one statement
-//     (Express had to run four parallel deleteMany calls; PG schema
-//     made that unnecessary, see migrations/0001_init.up.sql).
-//  5. 200 with { deleted: true, username }.
+//  4. Flush the activity recorder (SetActivityFlusher), so the account's
+//     activity still buffered in memory is in the database to be archived.
+//  5. ArchiveAndDeleteUser — one transaction: the signup instant and every
+//     activity day are moved into the anonymous archive (migration 0054),
+//     then the account is deleted and Postgres ON DELETE CASCADE removes
+//     subscriptions / follows / comments / danmakus with it.  Without the
+//     archive the activity statistics would lose this person from every
+//     past day.  An account gone by the time the row is locked → 404.
+//  6. 200 with { deleted: true, username }.
 func (h *UserHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), userQueryTimeout)
 	defer cancel()
@@ -410,8 +439,26 @@ func (h *UserHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.AdminDeleteUser(ctx, userID); err != nil {
+	// The account's last minute of activity may still be in the recorder's
+	// buffer, and once the account is gone the recorder skips it.  Writing the
+	// buffer first puts that minute in the archive.  Detached from the
+	// request's cancellation: a cancelled flush drops the whole batch, and an
+	// admin's client hanging up must not cost everybody their counters.  The
+	// flush has its own time budget.
+	if h.flusher != nil {
+		h.flusher.Flush(context.WithoutCancel(r.Context()))
+	}
+
+	// Archives the account's signup and activity days before removing it, so
+	// the history the activity panel draws keeps this person in it.
+	deleted, err := h.db.ArchiveAndDeleteUser(ctx, userID)
+	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "delete user failed"))
+		return
+	}
+	if !deleted {
+		// Deleted by someone else between the lookup above and the lock.
+		httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
 		return
 	}
 

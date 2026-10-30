@@ -1,4 +1,5 @@
-import { apiGet, apiGetPaged } from "@/lib/api";
+import { apiGet, apiGetEnvelope, apiGetPaged } from "@/lib/api";
+import { readUsersPage } from "@/lib/adminUsers";
 import { resolveLocale } from "@/lib/i18n/route";
 import type { Dict } from "@/lib/i18n";
 import { ActivitySection } from "./_components/ActivitySection";
@@ -8,14 +9,14 @@ import { HantDriftSection } from "./_components/HantDriftSection";
 import { StatCard } from "./_components/StatCard";
 import { UsersSection } from "./_components/UsersSection";
 import ReportsSection, { type AdminReportsData } from "./_components/ReportsSection";
+import type { AdminActivityPanel } from "./_types/activity";
 import type {
-  AdminActivity,
   AdminStats,
-  AdminUser,
   EnrichmentRow as EnrichmentRowData,
   HantDriftStats,
   PagedResponse,
 } from "./_types";
+import type { AdminUsersPage } from "./_types/users";
 
 // Monolithic single-page admin (one /admin route, three sections).
 //
@@ -36,20 +37,6 @@ const EMPTY_PAGE: PagedResponse<unknown> = {
   page: 1,
 };
 
-interface CommunityMetrics {
-  days: number;
-  impressions: number;
-  opens: number;
-  openRate: number;
-  // The pinned /welcome card in the same grid.  Its own pair, because it is
-  // shown on renders where `impressions` is not recorded at all — see the
-  // comment on GetCommunityEngagementSummary.  Never take a ratio across the
-  // two pairs.
-  welcomeImpressions: number;
-  welcomeOpens: number;
-  welcomeOpenRate: number;
-}
-
 async function safeGet<T>(promise: Promise<T>, fallback: T): Promise<T> {
   try {
     return await promise;
@@ -59,7 +46,7 @@ async function safeGet<T>(promise: Promise<T>, fallback: T): Promise<T> {
 }
 
 export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) {
-  const [{ dict }, stats, activity, hantDrift, communityMetrics, enrichment, users, pendingReports, reviewingReports] = await Promise.all([
+  const [{ dict }, stats, activity, hantDrift, enrichment, users, pendingReports, reviewingReports] = await Promise.all([
     resolveLocale(params),
     safeGet<AdminStats | null>(
       apiGet<AdminStats>("/api/admin/stats", { cache: "no-store" }),
@@ -68,8 +55,8 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
     // Null on failure, for the same reason as the drift block below: a zero
     // on the activity panel says "nobody used the site today", which is the
     // one reading a fetch error must not be able to produce.
-    safeGet<AdminActivity | null>(
-      apiGet<AdminActivity>("/api/admin/activity?days=30", { cache: "no-store" }),
+    safeGet<AdminActivityPanel | null>(
+      apiGet<AdminActivityPanel>("/api/admin/activity?days=30", { cache: "no-store" }),
       null,
     ),
     // Null on failure rather than zeroes: a zero in this payload is the
@@ -79,10 +66,6 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
       apiGet<HantDriftStats>("/api/admin/hant/stats", { cache: "no-store" }),
       null,
     ),
-    safeGet<CommunityMetrics | null>(
-      apiGet<CommunityMetrics>("/api/admin/community-metrics?days=7", { cache: "no-store" }),
-      null,
-    ),
     safeGet<PagedResponse<EnrichmentRowData>>(
       apiGetPaged<EnrichmentRowData>(
         "/api/admin/enrichment?page=1&sort=cachedAt&order=desc",
@@ -90,9 +73,12 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
       ),
       EMPTY_PAGE as PagedResponse<EnrichmentRowData>,
     ),
-    safeGet<PagedResponse<AdminUser>>(
-      apiGetPaged<AdminUser>("/api/admin/users?page=1", { cache: "no-store" }),
-      EMPTY_PAGE as PagedResponse<AdminUser>,
+    // Null on failure, not an empty page: "共 0 个用户" with every chip at 0
+    // would be the list asserting the site has no accounts. The section says
+    // it could not load and tries again from the browser.
+    safeGet<AdminUsersPage | null>(
+      apiGetEnvelope<unknown>("/api/admin/users?page=1", { cache: "no-store" }).then(readUsersPage),
+      null,
     ),
     safeGet<AdminReportsData>(
       apiGet<AdminReportsData>("/api/admin/reports?status=pending&limit=50", { cache: "no-store" }),
@@ -112,10 +98,10 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
 
   return (
     <div style={styles.page}>
-      <Overview stats={stats} communityMetrics={communityMetrics} dict={dict} />
+      <Overview stats={stats} dict={dict} />
       <hr style={styles.divider} />
       {/* Directly under the overview because it answers the question the
-          overview's own "注册用户 802" invites and cannot answer: how many of
+          overview's registered-users card invites and cannot answer: how many of
           them are still here. Everything below this line is about the
           catalogue rather than the audience. */}
       <ActivitySection initial={activity} />
@@ -136,11 +122,9 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
 
 function Overview({
   stats,
-  communityMetrics,
   dict,
 }: {
   stats: AdminStats | null;
-  communityMetrics: CommunityMetrics | null;
   dict: Dict;
 }) {
   if (!stats) {
@@ -200,38 +184,6 @@ function Overview({
           value={queueTotal}
           hint={`phase1 ${stats.queue.phase1} · phase4 ${stats.queue.phase4} · v3 ${stats.queue.v3}`}
         />
-        {communityMetrics && (
-          <>
-            <StatCard
-              label={dict.admin.statDiscussionImpressions}
-              value={communityMetrics.impressions}
-              hint={dict.admin.communityMetricsHint
-                .replace("{{days}}", String(communityMetrics.days))
-                .replace("{{opens}}", String(communityMetrics.opens))}
-            />
-            <StatCard
-              label={dict.admin.statDiscussionOpenRate}
-              value={`${(communityMetrics.openRate * 100).toFixed(1)}%`}
-              hint={dict.admin.communityMetricsRatio
-                .replace("{{opens}}", String(communityMetrics.opens))
-                .replace("{{impressions}}", String(communityMetrics.impressions))}
-            />
-            {/* Its own denominator, deliberately.  welcomeImpressions counts
-                every render of the rail; impressions above counts only the
-                renders that had discussions in them.  The gap between the two
-                numbers is how often the rail came up empty. */}
-            <StatCard
-              label={dict.admin.statWelcomeCardOpenRate}
-              value={`${(communityMetrics.welcomeOpenRate * 100).toFixed(1)}%`}
-              hint={dict.admin.communityMetricsRatio
-                .replace("{{opens}}", String(communityMetrics.welcomeOpens))
-                .replace(
-                  "{{impressions}}",
-                  String(communityMetrics.welcomeImpressions),
-                )}
-            />
-          </>
-        )}
       </div>
       <div style={styles.barWrap}>
         <h3 style={styles.subTitle}>{dict.admin.dataEnrichment}</h3>

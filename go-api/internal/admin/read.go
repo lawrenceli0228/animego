@@ -1,14 +1,17 @@
 package admin
 
-// read.go — the three /api/admin/* read handlers:  GetStats,
-// ListEnrichment, ListUsers.  Each handler is a method on Handlers
-// so the chi router can bind it directly.
+// read.go — the /api/admin/* read handlers:  GetStats, ListEnrichment,
+// ListUsers, GetUser.  Each handler is a method on Handlers so the chi
+// router can bind it directly.
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/activity"
+	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
 
@@ -198,50 +201,68 @@ func (h *Handlers) ListEnrichment(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ListUsers implements GET /api/admin/users?page=&q= — replaces
-// server/controllers/admin.controller.js listUsers (lines 268-317).
+// ListUsers implements GET /api/admin/users?page=&q=&segment=&sort=
+// &depthDays=&depthMin=&depthMax= (users.ts AdminUsersPage).
 //
-// Filters:
-//   - empty q             → no filter
-//   - otherwise           → ILIKE on username / email
+// Filters, all optional and combined with AND:
+//   - q          ILIKE on username / email, wildcards escaped
+//   - segment    all | active7 | returned | neverReturned | subscribed | admin
+//   - depth      recorded on depthMin..depthMax distinct days in the last
+//     depthDays (7 | 30 | 90) days — the activity panel's depth rows
 //
-// Sort: created_at DESC (fixed — Express has no ?sort param on this
-// endpoint).
+// Sort: lastSeen (default) | joined | activeDays | subscriptions | watched,
+// all descending with NULLs last, then created_at DESC, id DESC.  Unknown
+// or partial values fall back silently (parseUsersListParams).
 //
-// Pagination:  page≥1, limit=30, skip=(page-1)*30.
+// Pagination:  page≥1, limit=30, skip=(page-1)*30; total counts the rows
+// matching every filter.  segments counts each segment over all accounts.
 //
-// Two-step fetch:
-//  1. Page of users (raw pgxpool) + COUNT(*) of the same filter, run
-//     in parallel.
-//  2. Batch sub_count + follower_count for the page's user ids via
-//     dbgen.GetAdminUserSubFollowCounts.
-//
-// The maps from (2) merge into each row to produce the final
-// userItem slice.
+// The reporting day is taken once here and passed to every statement, so
+// the strip, the segments and `today` describe the same day.
 func (h *Handlers) ListUsers(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 
-	qs := r.URL.Query()
-	page := parsePage(qs.Get("page"))
-	q := qs.Get("q")
+	today := activity.Day(h.clock())
+	params := parseUsersListParams(r.URL.Query(), today)
 
-	items, total, err := runUsersList(ctx, h.Pool, h.Queries, usersListParams{
-		Page:  page,
-		Query: q,
-	})
+	res, err := runUsersList(ctx, h.Pool, params)
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "admin users list failed"))
 		return
 	}
 
-	skip := (page - 1) * pageSize
-	hasMore := int64(skip+pageSize) < total
+	skip := int64(params.Page-1) * pageSize
+	hasMore := skip+pageSize < res.Total
 
 	writeListEnvelope(w, http.StatusOK, userListResponse{
-		Data:    items,
-		HasMore: hasMore,
-		Total:   total,
-		Page:    page,
+		Data:     res.Items,
+		HasMore:  hasMore,
+		Total:    res.Total,
+		Page:     params.Page,
+		Today:    today.Format(userDayLayout),
+		Segments: res.Segments,
 	})
+}
+
+// GetUser implements GET /api/admin/users/{userId}: one account's detail
+// drawer (users.ts AdminUserDetail).  400 on a malformed id, 404 when no
+// such account exists.
+func (h *Handlers) GetUser(w http.ResponseWriter, r *http.Request) {
+	userID, ok := parseUserID(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+
+	detail, err := loadUserDetail(ctx, dbgen.New(h.Pool), userID, activity.Day(h.clock()))
+	switch {
+	case errors.Is(err, errUserNotFound):
+		httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
+	case err != nil:
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "admin user detail failed"))
+	default:
+		httpx.Data(w, http.StatusOK, detail)
+	}
 }

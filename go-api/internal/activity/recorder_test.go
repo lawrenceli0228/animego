@@ -1,10 +1,14 @@
 package activity
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -377,5 +381,243 @@ func TestRecorder_OverflowKicksTheLoopOnceNotPerRequest(t *testing.T) {
 	rec.mu.Unlock()
 	if size != maxBufferedUsers {
 		t.Fatalf("buffer grew past the cap to %d", size)
+	}
+}
+
+// scriptedExecer answers each Exec from a script -- the i-th call returns
+// script[i], calls past the end succeed -- and records every attempt, failed
+// ones included, so a test can tell a single call from a retry.
+type scriptedExecer struct {
+	mu       sync.Mutex
+	script   []error
+	sqls     []string
+	attempts []fakeCall
+}
+
+func (s *scriptedExecer) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sqls = append(s.sqls, sql)
+	s.attempts = append(s.attempts, fakeCall{
+		UserIDs:   args[0].([]uuid.UUID),
+		FirstSeen: args[1].([]time.Time),
+		LastSeen:  args[2].([]time.Time),
+		Requests:  args[3].([]int64),
+		Logins:    args[4].([]int64),
+	})
+	if i := len(s.attempts) - 1; i < len(s.script) {
+		return pgconn.CommandTag{}, s.script[i]
+	}
+	return pgconn.CommandTag{}, nil
+}
+
+func (s *scriptedExecer) snapshot() ([]string, []fakeCall) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.sqls...), append([]fakeCall(nil), s.attempts...)
+}
+
+// TestRecorder_FlushRetriesOnlyARaceWithAnotherTransaction.
+//
+// An account deleted while a flush is running makes the flush's foreign-key
+// check fail with 23503 for the WHOLE batch, after the statement's WHERE
+// EXISTS guard has already let the account through; a lock cycle with another
+// transaction fails it with 40P01, again for the whole batch.  The recorder
+// runs the statement once more in exactly those cases: a failed statement
+// wrote nothing, so the retry cannot double-count, and its fresh snapshot
+// skips the account that is gone.  Nothing else is retried, and neither is a
+// failed retry.
+func TestRecorder_FlushRetriesOnlyARaceWithAnotherTransaction(t *testing.T) {
+	fkRace := func() error {
+		return &pgconn.PgError{Code: "23503", Message: "violates foreign key constraint"}
+	}
+	deadlock := func() error {
+		return &pgconn.PgError{Code: "40P01", Message: "deadlock detected"}
+	}
+
+	cases := []struct {
+		name         string
+		script       []error
+		wantAttempts int
+		wantLost     bool
+	}{
+		{"a foreign-key race is retried and the batch lands",
+			[]error{fkRace()}, 2, false},
+		{"a wrapped foreign-key race is recognised",
+			[]error{fmt.Errorf("flush: %w", fkRace())}, 2, false},
+		{"a failing retry is not retried again",
+			[]error{fkRace(), errors.New("connection reset by peer")}, 2, true},
+		{"a second foreign-key failure is not retried again",
+			[]error{fkRace(), fkRace()}, 2, true},
+		{"a deadlock victim is retried and the batch lands",
+			[]error{deadlock()}, 2, false},
+		{"a wrapped deadlock is recognised",
+			[]error{fmt.Errorf("flush: %w", deadlock())}, 2, false},
+		{"a deadlock on the retry is not retried again",
+			[]error{fkRace(), deadlock()}, 2, true},
+		{"another SQLSTATE is not retried",
+			[]error{&pgconn.PgError{Code: "57014", Message: "canceling statement due to statement timeout"}}, 1, true},
+		{"a non-database error is not retried",
+			[]error{errors.New("connection reset by peer")}, 1, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := &scriptedExecer{script: tc.script}
+			var logs bytes.Buffer
+			rec := newRecorder(exec, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
+
+			alice, bob := uuid.New(), uuid.New()
+			at := time.Date(2026, 8, 27, 9, 0, 0, 0, reportingZone)
+			rec.Touch(alice, at)
+			rec.Touch(alice, at.Add(time.Second))
+			rec.Touch(bob, at)
+			rec.Login(bob, at)
+			rec.Flush(context.Background())
+
+			sqls, attempts := exec.snapshot()
+			if len(attempts) != tc.wantAttempts {
+				t.Fatalf("attempts = %d, want %d", len(attempts), tc.wantAttempts)
+			}
+			for i, sql := range sqls {
+				if sql != recordUserActivitySQL {
+					t.Fatalf("attempt %d ran a different statement", i)
+				}
+			}
+			if tc.wantAttempts == 2 {
+				// The same batch, not a re-read of the buffer: identical rows
+				// in identical order.
+				if !reflect.DeepEqual(attempts[0], attempts[1]) {
+					t.Fatalf("the retry must resend the same batch:\nfirst  %+v\nsecond %+v", attempts[0], attempts[1])
+				}
+				if !strings.Contains(logs.String(), "retrying once") {
+					t.Fatalf("a retry should be visible in the log; got %q", logs.String())
+				}
+			}
+			if lost := strings.Contains(logs.String(), "counters are lost"); lost != tc.wantLost {
+				t.Fatalf("batch lost = %v, want %v; log %q", lost, tc.wantLost, logs.String())
+			}
+
+			// Retried or dropped, the batch has left the buffer: the next
+			// flush must not send it again.
+			rec.Flush(context.Background())
+			if _, after := exec.snapshot(); len(after) != tc.wantAttempts {
+				t.Fatalf("a later flush resent the batch: %d attempts, want %d", len(after), tc.wantAttempts)
+			}
+		})
+	}
+}
+
+// TestRecorder_RetrySendsEveryBufferedRow pins what a successful retry
+// delivers: the whole batch, counters intact.  (The real statement skips the
+// deleted account by itself; this fake cannot, so every row comes back.)
+func TestRecorder_RetrySendsEveryBufferedRow(t *testing.T) {
+	exec := &scriptedExecer{script: []error{&pgconn.PgError{Code: "23503"}}}
+	rec := quietRecorder(t, exec)
+
+	alice, bob := uuid.New(), uuid.New()
+	at := time.Date(2026, 8, 27, 9, 0, 0, 0, reportingZone)
+	rec.Touch(alice, at)
+	rec.Touch(alice, at)
+	rec.Touch(bob, at)
+	rec.Login(bob, at)
+	rec.Flush(context.Background())
+
+	_, attempts := exec.snapshot()
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(attempts))
+	}
+	retry := attempts[1]
+	got := map[uuid.UUID][2]int64{}
+	for i, id := range retry.UserIDs {
+		got[id] = [2]int64{retry.Requests[i], retry.Logins[i]}
+	}
+	want := map[uuid.UUID][2]int64{alice: {2, 0}, bob: {1, 1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("retried rows = %v, want %v", got, want)
+	}
+}
+
+// gatedExecer holds every statement until release is closed, and records how
+// many ran at once.
+type gatedExecer struct {
+	release chan struct{}
+	entered chan struct{}
+
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+	calls       []fakeCall
+}
+
+func (g *gatedExecer) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	g.mu.Lock()
+	g.inFlight++
+	if g.inFlight > g.maxInFlight {
+		g.maxInFlight = g.inFlight
+	}
+	g.mu.Unlock()
+	g.entered <- struct{}{}
+	<-g.release
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.inFlight--
+	g.calls = append(g.calls, fakeCall{
+		UserIDs:   args[0].([]uuid.UUID),
+		FirstSeen: args[1].([]time.Time),
+		LastSeen:  args[2].([]time.Time),
+		Requests:  args[3].([]int64),
+		Logins:    args[4].([]int64),
+	})
+	return pgconn.CommandTag{}, nil
+}
+
+// TestRecorder_FlushWaitsForTheFlushAlreadyRunning pins flushMu.  A Flush
+// called while another flush's statement is still running must not start a
+// second statement next to it (two upserts over overlapping rows can deadlock
+// each other), and must not return before what was buffered at the call has
+// been written -- the account delete relies on that to get the account's last
+// minute into the database before archiving it.
+func TestRecorder_FlushWaitsForTheFlushAlreadyRunning(t *testing.T) {
+	exec := &gatedExecer{release: make(chan struct{}), entered: make(chan struct{}, 2)}
+	rec := quietRecorder(t, exec)
+
+	alice, bob := uuid.New(), uuid.New()
+	at := time.Date(2026, 8, 27, 9, 0, 0, 0, reportingZone)
+
+	rec.Touch(alice, at)
+	firstDone := make(chan struct{})
+	go func() { rec.Flush(context.Background()); close(firstDone) }()
+	<-exec.entered // the first statement is running with alice's batch
+
+	rec.Touch(bob, at)
+	secondDone := make(chan struct{})
+	go func() { rec.Flush(context.Background()); close(secondDone) }()
+
+	select {
+	case <-exec.entered:
+		t.Fatal("a second flush statement started while the first was still running")
+	case <-secondDone:
+		t.Fatal("Flush returned before the activity buffered at the call was written")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(exec.release)
+	<-firstDone
+	<-secondDone
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if exec.maxInFlight != 1 {
+		t.Fatalf("statements in flight at once = %d, want 1", exec.maxInFlight)
+	}
+	if len(exec.calls) != 2 {
+		t.Fatalf("statements = %d, want 2", len(exec.calls))
+	}
+	if got := exec.calls[0].UserIDs; len(got) != 1 || got[0] != alice {
+		t.Fatalf("first statement wrote %v, want only alice", got)
+	}
+	if got := exec.calls[1].UserIDs; len(got) != 1 || got[0] != bob {
+		t.Fatalf("second statement wrote %v, want only bob", got)
 	}
 }

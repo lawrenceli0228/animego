@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,12 +39,12 @@ type fakeUserDB struct {
 
 	adminCreateUserFn         func(ctx context.Context, username, email, password string) (dbgen.AdminCreateUserRow, error)
 	adminUpdateUserFn         func(ctx context.Context, username, email *string, userID uuid.UUID) (dbgen.AdminUpdateUserRow, error)
-	adminDeleteUserFn         func(ctx context.Context, id uuid.UUID) error
+	archiveAndDeleteUserFn    func(ctx context.Context, id uuid.UUID) (bool, error)
 	adminFindFn               func(ctx context.Context, username, email *string) (dbgen.AdminFindUserByUsernameOrEmailRow, error)
 	adminFindExcludingFn      func(ctx context.Context, username, email *string, excludeID uuid.UUID) (dbgen.AdminFindUserByUsernameOrEmailExcludingRow, error)
 	getUserByIDFn             func(ctx context.Context, id uuid.UUID) (dbgen.User, error)
 	adminSetPasswordFn        func(ctx context.Context, id uuid.UUID, password string) error
-	adminDeleteUserCallCount  int32
+	archiveDeleteCallCount    int32
 	adminCreateUserCallCount  int32
 	adminUpdateUserCallCount  int32
 	adminSetPasswordCallCount int32
@@ -65,12 +66,12 @@ func (f *fakeUserDB) AdminUpdateUser(ctx context.Context, username, email *strin
 	return f.adminUpdateUserFn(ctx, username, email, userID)
 }
 
-func (f *fakeUserDB) AdminDeleteUser(ctx context.Context, id uuid.UUID) error {
-	atomic.AddInt32(&f.adminDeleteUserCallCount, 1)
-	if f.adminDeleteUserFn == nil {
-		panic("fakeUserDB.AdminDeleteUser not set")
+func (f *fakeUserDB) ArchiveAndDeleteUser(ctx context.Context, id uuid.UUID) (bool, error) {
+	atomic.AddInt32(&f.archiveDeleteCallCount, 1)
+	if f.archiveAndDeleteUserFn == nil {
+		panic("fakeUserDB.ArchiveAndDeleteUser not set")
 	}
-	return f.adminDeleteUserFn(ctx, id)
+	return f.archiveAndDeleteUserFn(ctx, id)
 }
 
 func (f *fakeUserDB) AdminFindUserByUsernameOrEmail(ctx context.Context, username, email *string) (dbgen.AdminFindUserByUsernameOrEmailRow, error) {
@@ -843,8 +844,8 @@ func TestDeleteUser_HappyPath_200(t *testing.T) {
 			}
 			return user, nil
 		},
-		adminDeleteUserFn: func(_ context.Context, _ uuid.UUID) error {
-			return nil
+		archiveAndDeleteUserFn: func(_ context.Context, _ uuid.UUID) (bool, error) {
+			return true, nil
 		},
 	}
 	h := NewUserHandlers(db, fakeEnqueuer{})
@@ -867,8 +868,8 @@ func TestDeleteUser_HappyPath_200(t *testing.T) {
 		t.Errorf("response = %+v, want {Deleted: true, Username: victim}", got)
 	}
 
-	if atomic.LoadInt32(&db.adminDeleteUserCallCount) != 1 {
-		t.Errorf("AdminDeleteUser called %d times, want 1", db.adminDeleteUserCallCount)
+	if atomic.LoadInt32(&db.archiveDeleteCallCount) != 1 {
+		t.Errorf("ArchiveAndDeleteUser called %d times, want 1", db.archiveDeleteCallCount)
 	}
 }
 
@@ -895,8 +896,8 @@ func TestDeleteUser_SelfDelete_400_ChineseExact(t *testing.T) {
 	h.DeleteUser(rec, req)
 
 	assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "Cannot delete yourself")
-	if atomic.LoadInt32(&db.adminDeleteUserCallCount) != 0 {
-		t.Errorf("AdminDeleteUser called despite self-delete check, want 0 calls")
+	if atomic.LoadInt32(&db.archiveDeleteCallCount) != 0 {
+		t.Errorf("ArchiveAndDeleteUser called despite self-delete check, want 0 calls")
 	}
 }
 
@@ -918,8 +919,8 @@ func TestDeleteUser_UserNotFound_404_ChineseExact(t *testing.T) {
 	h.DeleteUser(rec, req)
 
 	assertErrorEnvelope(t, rec, http.StatusNotFound, "NOT_FOUND", "User not found")
-	if atomic.LoadInt32(&db.adminDeleteUserCallCount) != 0 {
-		t.Errorf("AdminDeleteUser called despite missing user, want 0 calls")
+	if atomic.LoadInt32(&db.archiveDeleteCallCount) != 0 {
+		t.Errorf("ArchiveAndDeleteUser called despite missing user, want 0 calls")
 	}
 }
 
@@ -975,8 +976,8 @@ func TestDeleteUser_DeleteDBError_500(t *testing.T) {
 		getUserByIDFn: func(_ context.Context, id uuid.UUID) (dbgen.User, error) {
 			return fixtureDBUser(t, id, "victim"), nil
 		},
-		adminDeleteUserFn: func(_ context.Context, _ uuid.UUID) error {
-			return errors.New("cascade failed")
+		archiveAndDeleteUserFn: func(_ context.Context, _ uuid.UUID) (bool, error) {
+			return false, errors.New("cascade failed")
 		},
 	}
 	h := NewUserHandlers(db, fakeEnqueuer{})
@@ -988,6 +989,116 @@ func TestDeleteUser_DeleteDBError_500(t *testing.T) {
 	h.DeleteUser(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+// orderedFlusher is an ActivityFlusher that writes "flush" into a shared call
+// log and keeps the context it was given.
+type orderedFlusher struct {
+	mu    sync.Mutex
+	calls *[]string
+	ctxs  []context.Context
+}
+
+func (f *orderedFlusher) Flush(ctx context.Context) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	*f.calls = append(*f.calls, "flush")
+	f.ctxs = append(f.ctxs, ctx)
+}
+
+// TestDeleteUser_FlushesTheRecorderBeforeArchiving pins step 4: the recorder
+// is flushed before the archive transaction, so the account's last buffered
+// minute is in the database while the account still exists.  The flush must
+// also outlive a cancelled request -- a cancelled flush drops everybody's
+// counters, not just this account's.
+func TestDeleteUser_FlushesTheRecorderBeforeArchiving(t *testing.T) {
+	t.Parallel()
+	targetID := uuid.New()
+	var calls []string
+	db := &fakeUserDB{
+		getUserByIDFn: func(_ context.Context, id uuid.UUID) (dbgen.User, error) {
+			return fixtureDBUser(t, id, "victim"), nil
+		},
+		archiveAndDeleteUserFn: func(_ context.Context, _ uuid.UUID) (bool, error) {
+			calls = append(calls, "archive")
+			return true, nil
+		},
+	}
+	flusher := &orderedFlusher{calls: &calls}
+	h := NewUserHandlers(db, fakeEnqueuer{})
+	h.SetActivityFlusher(flusher)
+
+	base, cancel := context.WithCancel(withAdminClaims(t, context.Background(), uuid.New(), "admin"))
+	cancel() // the admin's client is already gone
+	req := requestWithUserID(t, http.MethodDelete, "/api/admin/users/"+targetID.String(), "", targetID.String()).WithContext(
+		chiCtxOver(t, base, targetID.String()))
+	rec := httptest.NewRecorder()
+	h.DeleteUser(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !reflect.DeepEqual(calls, []string{"flush", "archive"}) {
+		t.Fatalf("calls = %v, want [flush archive]", calls)
+	}
+	if err := flusher.ctxs[0].Err(); err != nil {
+		t.Fatalf("the flush context must not inherit the request's cancellation; Err() = %v", err)
+	}
+}
+
+// Nothing is flushed for a delete that is refused before it reaches the
+// archive.
+func TestDeleteUser_RefusedDeleteDoesNotFlush(t *testing.T) {
+	t.Parallel()
+	targetID := uuid.New()
+	var calls []string
+	db := &fakeUserDB{
+		getUserByIDFn: func(_ context.Context, _ uuid.UUID) (dbgen.User, error) {
+			return dbgen.User{}, pgx.ErrNoRows
+		},
+	}
+	h := NewUserHandlers(db, fakeEnqueuer{})
+	h.SetActivityFlusher(&orderedFlusher{calls: &calls})
+
+	ctx := withAdminClaims(t, context.Background(), uuid.New(), "admin")
+	req := requestWithUserID(t, http.MethodDelete, "/api/admin/users/"+targetID.String(), "", targetID.String()).WithContext(
+		chiCtxOver(t, ctx, targetID.String()))
+	rec := httptest.NewRecorder()
+	h.DeleteUser(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("calls = %v, want none", calls)
+	}
+}
+
+// TestDeleteUser_GoneBeforeLock_404 covers the account being deleted by
+// someone else between the existence lookup and the archive transaction's row
+// lock.  ArchiveAndDeleteUser reports false and wrote nothing; answering 200
+// "deleted" would claim an action this request did not take.
+func TestDeleteUser_GoneBeforeLock_404(t *testing.T) {
+	t.Parallel()
+	targetID := uuid.New()
+	db := &fakeUserDB{
+		getUserByIDFn: func(_ context.Context, id uuid.UUID) (dbgen.User, error) {
+			return fixtureDBUser(t, id, "victim"), nil
+		},
+		archiveAndDeleteUserFn: func(_ context.Context, _ uuid.UUID) (bool, error) {
+			return false, nil
+		},
+	}
+	h := NewUserHandlers(db, fakeEnqueuer{})
+	adminID := uuid.New()
+	ctx := withAdminClaims(t, context.Background(), adminID, "admin")
+	req := requestWithUserID(t, http.MethodDelete, "/api/admin/users/"+targetID.String(), "", targetID.String()).WithContext(
+		chiCtxOver(t, ctx, targetID.String()))
+	rec := httptest.NewRecorder()
+	h.DeleteUser(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
 }
 

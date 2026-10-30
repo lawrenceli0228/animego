@@ -1,484 +1,306 @@
 "use client";
 
-// Per-row Client Component for the admin user management table.
+// One account in the admin user list.
 //
-// Three render modes inside the same <tr>:
-//   - read mode (default): displays user fields + edit/delete buttons.
-//   - edit mode: inputs for username/email + save/cancel buttons.
-//   - delete-confirm mode: 2-click confirmation pattern with a 5s
-//     auto-reset window (matches the legacy AdminDashboard behaviour
-//     without the React Query useMutation churn).
+// Columns: who (initial, name, email, ADMIN), when they registered, when they
+// were last seen, the 30-day strip, three counts, the newest live device, and
+// a ⋯ menu. Every date is on the +08 reporting clock and every relative label
+// is measured against the payload's `today` — the old row printed UTC dates,
+// so an account registered at 07:30 in Shanghai showed the previous day.
 //
-// All mutations route through Server Actions in _actions/users.ts.
-// useTransition tracks pending state — the UI stays interactive but the
-// row is visually dimmed and inputs/buttons disabled while a mutation
-// is in flight.
+// The row changes nothing itself. 查看详情 and the username open the detail
+// drawer; the other menu items open it with that action already in front —
+// the edit form, the password form, or an inline confirmation — so a
+// destructive step always happens with the account's whole picture in view.
+//
+// The menu is portalled to <body> with fixed coordinates: inside the table's
+// horizontal scroller it would be clipped on a short result list.
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import { toast } from "react-hot-toast";
-import {
-  deleteAdminUser,
-  setAdminUserPassword,
-  updateAdminUser,
-} from "../_actions/users";
-import type { AdminUser } from "../_types";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { fillTemplate } from "@/lib/home/time";
 import { useLang } from "@/lib/lang-client";
+import {
+  activityStrip,
+  avatarColor,
+  avatarInitial,
+  countryCode,
+  formatCount,
+  menuPlacement,
+  shanghaiDate,
+  shortDateTime,
+  type MenuPlacement,
+  type UserDrawerMode,
+} from "@/lib/adminUsers";
+import type { AdminUserRow } from "../_types/users";
+import { useUserWords } from "./userWords";
+import s from "./users.module.css";
 
-const PASSWORD_MIN = 6;
+/** Five items and a separator at 13px, padding included; used only to decide up or down. */
+const MENU_HEIGHT_ESTIMATE = 214;
 
-interface UserRowProps {
-  user: AdminUser;
+export interface UserRowProps {
+  user: AdminUserRow;
+  /** The payload's reporting day: the strip's last cell and every relative label. */
+  today: string;
+  menuOpen: boolean;
+  /** Open this row's menu (its id) or close whichever is open (null). */
+  onMenu: (userId: string | null) => void;
+  /** Open the drawer; `opener` gets focus back when it closes. */
+  onOpen: (user: AdminUserRow, mode: UserDrawerMode, opener: HTMLElement | null) => void;
 }
 
-interface EditFormState {
-  username: string;
-  email: string;
-}
-
-const USERNAME_MIN = 3;
-const USERNAME_MAX = 50;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const CONFIRM_WINDOW_MS = 5000;
-
-function initialForm(user: AdminUser): EditFormState {
-  return { username: user.username, email: user.email };
-}
-
-// Compute the minimum patch: only fields the user actually changed get
-// sent. Returns null if nothing changed. Validation errors come back as
-// `{ error }`; the caller decides whether to short-circuit the call.
-function buildPatch(
-  form: EditFormState,
-  user: AdminUser,
-  tFn: (key: string) => string,
-): {
-  patch: { username?: string; email?: string } | null;
-  error: string | null;
-} {
-  const usernameTrim = form.username.trim();
-  const emailTrim = form.email.trim();
-
-  if (usernameTrim.length < USERNAME_MIN || usernameTrim.length > USERNAME_MAX) {
-    return {
-      patch: null,
-      error: tFn("admin.usernameMinMax")
-        .replace("{{min}}", String(USERNAME_MIN))
-        .replace("{{max}}", String(USERNAME_MAX)),
-    };
-  }
-  if (!EMAIL_RE.test(emailTrim)) {
-    return { patch: null, error: tFn("admin.invalidEmail") };
-  }
-
-  const patch: { username?: string; email?: string } = {};
-  if (usernameTrim !== user.username) patch.username = usernameTrim;
-  if (emailTrim !== user.email) patch.email = emailTrim;
-
-  if (Object.keys(patch).length === 0) {
-    return { patch: null, error: null };
-  }
-  return { patch, error: null };
-}
-
-function RoleBadge({ role }: { role: string | null }) {
-  if (role !== "admin") return <span style={styles.dim}>user</span>;
-  return <span style={{ ...styles.badge, ...styles.badgeAdmin }}>ADMIN</span>;
-}
-
-function formatDate(iso: string): string {
-  // Locale-independent YYYY-MM-DD avoids hydration drift between
-  // server (UTC) and the user's browser timezone.
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-export function UserRow({ user }: UserRowProps) {
-  const { t } = useLang();
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState<EditFormState>(() => initialForm(user));
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [pwMode, setPwMode] = useState(false);
-  const [pw, setPw] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Auto-reset the delete confirm prompt after CONFIRM_WINDOW_MS so an
-  // admin who clicks "删除" then walks away doesn't accidentally
-  // confirm on their next click.
-  useEffect(() => {
-    if (!confirmingDelete) return;
-    confirmTimerRef.current = setTimeout(() => {
-      setConfirmingDelete(false);
-      confirmTimerRef.current = null;
-    }, CONFIRM_WINDOW_MS);
-    return () => {
-      if (confirmTimerRef.current) {
-        clearTimeout(confirmTimerRef.current);
-        confirmTimerRef.current = null;
-      }
-    };
-  }, [confirmingDelete]);
-
-  const startEdit = () => {
-    setForm(initialForm(user));
-    setConfirmingDelete(false);
-    setError(null);
-    setEditing(true);
-  };
-
-  const cancelEdit = () => {
-    setEditing(false);
-    setError(null);
-  };
-
-  const handleSave = () => {
-    const { patch, error: validationError } = buildPatch(form, user, t);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    if (patch === null) {
-      // Nothing changed — exit edit mode without a network call.
-      setEditing(false);
-      setError(null);
-      return;
-    }
-    setError(null);
-    startTransition(async () => {
-      try {
-        await updateAdminUser(user._id, patch);
-        setEditing(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t("admin.updateFailed"));
-      }
-    });
-  };
-
-  const handleDeleteClick = () => {
-    if (!confirmingDelete) {
-      setConfirmingDelete(true);
-      setError(null);
-      return;
-    }
-    // Second click within the window — actually delete.
-    setError(null);
-    startTransition(async () => {
-      try {
-        await deleteAdminUser(user._id);
-        // Don't reset confirmingDelete — RSC re-render will drop this
-        // row from the table entirely.
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t("admin.deleteFailed"));
-        setConfirmingDelete(false);
-      }
-    });
-  };
-
-  const cancelDelete = () => {
-    setConfirmingDelete(false);
-    setError(null);
-  };
-
-  const startPw = () => {
-    setPw("");
-    setEditing(false);
-    setConfirmingDelete(false);
-    setError(null);
-    setPwMode(true);
-  };
-
-  const cancelPw = () => {
-    setPwMode(false);
-    setPw("");
-    setError(null);
-  };
-
-  const handleSavePw = () => {
-    if (pw.length < PASSWORD_MIN) {
-      setError(
-        t("admin.passwordMinLen").replace("{{min}}", String(PASSWORD_MIN)),
-      );
-      return;
-    }
-    setError(null);
-    startTransition(async () => {
-      try {
-        await setAdminUserPassword(user._id, pw);
-        setPwMode(false);
-        setPw("");
-        // Password isn't a displayed field, so the row won't visibly
-        // change — a toast is the only success signal.
-        toast.success(
-          t("admin.passwordResetSuccess").replace("{{username}}", user.username),
-        );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t("admin.passwordChangeFailed"));
-      }
-    });
-  };
-
-  const rowStyle: React.CSSProperties = {
-    ...styles.row,
-    ...(editing ? styles.editingRow : null),
-    ...(pending ? { opacity: 0.6, pointerEvents: "none" } : null),
-  };
-
+function Count({ n }: { n: number }) {
+  const zero = !n;
   return (
-    <>
-      <tr style={rowStyle}>
-        <td style={{ ...styles.td, ...styles.titleCell }}>
-          {editing ? (
-            <input
-              type="text"
-              value={form.username}
-              onChange={(e) => setForm({ ...form, username: e.target.value })}
-              placeholder={t("admin.usernameLabel")}
-              style={styles.input}
-              disabled={pending}
-              aria-label={t("admin.usernameLabel")}
-            />
-          ) : pwMode ? (
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              placeholder={t("admin.newPasswordPlaceholder")
-                .replace("{{username}}", user.username)
-                .replace("{{min}}", String(PASSWORD_MIN))}
-              style={styles.input}
-              disabled={pending}
-              aria-label={t("admin.newPasswordLabel").replace("{{username}}", user.username)}
-              autoFocus
-            />
-          ) : (
-            user.username
-          )}
-        </td>
-        <td style={styles.td}>
-          {editing ? (
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              placeholder={t("admin.emailLabel")}
-              style={styles.input}
-              disabled={pending}
-              aria-label={t("admin.emailLabel")}
-            />
-          ) : (
-            user.email
-          )}
-        </td>
-        <td style={styles.td}>
-          <RoleBadge role={user.role} />
-        </td>
-        <td style={styles.td}>{formatDate(user.createdAt)}</td>
-        <td style={styles.td}>
-          {user.lastSeenAt ? (
-            formatDate(user.lastSeenAt)
-          ) : (
-            // An em dash, never a date. Null means nothing was ever recorded
-            // for this account — which for one created before instrumentation
-            // began is a statement about our records, not about the person.
-            // Substituting the signup date would assert something we do not
-            // know, and an epoch would print 1970 and read as a real visit.
-            <span style={styles.dim} title={t("admin.lastSeenNever")}>
-              —
-            </span>
-          )}
-        </td>
-        <td style={{ ...styles.td, ...styles.numCell }}>{user.activeDays}</td>
-        <td style={{ ...styles.td, ...styles.numCell }}>{user.logins}</td>
-        <td style={{ ...styles.td, ...styles.numCell }}>{user.subscriptions}</td>
-        <td style={{ ...styles.td, ...styles.numCell }}>{user.followers}</td>
-        <td style={styles.td}>
-          <div style={styles.actions}>
-            {pwMode ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleSavePw}
-                  disabled={pending}
-                  style={styles.saveBtn}
-                >
-                  {t("admin.savePassword")}
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelPw}
-                  disabled={pending}
-                  style={styles.btn}
-                >
-                  {t("admin.cancel")}
-                </button>
-              </>
-            ) : editing ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={pending}
-                  style={styles.saveBtn}
-                >
-                  {t("admin.save")}
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelEdit}
-                  disabled={pending}
-                  style={styles.btn}
-                >
-                  {t("admin.cancel")}
-                </button>
-              </>
-            ) : confirmingDelete ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleDeleteClick}
-                  disabled={pending}
-                  style={styles.confirmDeleteBtn}
-                >
-                  {t("admin.clickToConfirmDelete")}
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelDelete}
-                  disabled={pending}
-                  style={styles.btn}
-                >
-                  {t("admin.cancel")}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={startEdit}
-                  disabled={pending}
-                  style={styles.btn}
-                >
-                  {t("admin.edit")}
-                </button>
-                <button
-                  type="button"
-                  onClick={startPw}
-                  disabled={pending}
-                  style={styles.btn}
-                >
-                  {t("admin.changePassword")}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeleteClick}
-                  disabled={pending}
-                  style={styles.deleteBtn}
-                >
-                  {t("admin.delete")}
-                </button>
-              </>
-            )}
-          </div>
-        </td>
-      </tr>
-      {error && (
-        <tr style={styles.errorRow}>
-          <td colSpan={10} style={styles.errorCell}>
-            {error}
-          </td>
-        </tr>
-      )}
-    </>
+    <span className={zero ? s.zero : undefined} data-zero={zero || undefined}>
+      {formatCount(n)}
+    </span>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  row: { background: "#15151f", borderBottom: "1px solid #1f1f2a" },
-  editingRow: { background: "#1a1a26" },
-  td: {
-    padding: "10px 12px",
-    fontSize: 13,
-    color: "#cfcfdc",
-    verticalAlign: "middle",
-  },
-  titleCell: { color: "#f4f4f8", fontWeight: 500 },
-  numCell: {
-    fontFeatureSettings: '"tnum"',
-    textAlign: "right",
-    color: "#a8a8b8",
-  },
-  dim: { fontSize: 12, color: "#5c5c6e" },
-  badge: {
-    display: "inline-block",
-    padding: "2px 8px",
-    borderRadius: 99,
-    fontSize: 11,
-    fontWeight: 600,
-  },
-  badgeAdmin: { background: "#3a1f25", color: "#ff453a" },
-  input: {
-    padding: "5px 9px",
-    borderRadius: 6,
-    fontSize: 13,
-    border: "1px solid #2a2a38",
-    background: "#0d0d14",
-    color: "#f4f4f8",
-    outline: "none",
-    width: "100%",
-    minWidth: 140,
-  },
-  actions: { display: "flex", flexWrap: "wrap", gap: 6 },
-  btn: {
-    padding: "4px 10px",
-    borderRadius: 6,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-    border: "1px solid #2a2a38",
-    background: "transparent",
-    color: "#a8a8b8",
-  },
-  saveBtn: {
-    padding: "4px 10px",
-    borderRadius: 6,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-    border: "1px solid rgba(10,132,255,0.4)",
-    background: "rgba(10,132,255,0.12)",
-    color: "#5ac8fa",
-  },
-  deleteBtn: {
-    padding: "4px 10px",
-    borderRadius: 6,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-    border: "1px solid rgba(255,69,58,0.4)",
-    background: "rgba(255,69,58,0.08)",
-    color: "#ff453a",
-  },
-  confirmDeleteBtn: {
-    padding: "4px 10px",
-    borderRadius: 6,
-    fontSize: 12,
-    fontWeight: 700,
-    cursor: "pointer",
-    border: "1px solid #ff453a",
-    background: "#ff453a",
-    color: "#ffffff",
-  },
-  errorRow: { background: "rgba(255,69,58,0.06)" },
-  errorCell: {
-    padding: "8px 12px",
-    fontSize: 12,
-    color: "#ff453a",
-    borderBottom: "1px solid #1f1f2a",
-  },
-};
+export function UserRow({ user, today, menuOpen, onMenu, onOpen }: UserRowProps) {
+  const { t } = useLang();
+  const words = useUserWords();
+  const dotsRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [placement, setPlacement] = useState<MenuPlacement | null>(null);
+
+  const cells = activityStrip(user.recentActiveDates, today);
+  const recent = cells.filter((c) => c.active).length;
+  const seen = words.lastSeen(user, today);
+  const device = user.lastDevice;
+  const country = countryCode(device?.country);
+
+  // Outside press, scroll or resize closes the menu: its coordinates were
+  // taken when it opened and would no longer sit under the button.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && (menuRef.current?.contains(target) || dotsRef.current?.contains(target))) return;
+      onMenu(null);
+    };
+    const onMove = () => onMenu(null);
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [menuOpen, onMenu]);
+
+  const toggleMenu = (button: HTMLButtonElement) => {
+    if (menuOpen) {
+      onMenu(null);
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    setPlacement(
+      menuPlacement(rect, { width: window.innerWidth, height: window.innerHeight }, MENU_HEIGHT_ESTIMATE),
+    );
+    onMenu(user._id);
+  };
+
+  const closeMenu = (refocus: boolean) => {
+    onMenu(null);
+    if (refocus) dotsRef.current?.focus({ preventScroll: true });
+  };
+
+  const choose = (mode: UserDrawerMode) => {
+    onMenu(null);
+    onOpen(user, mode, dotsRef.current);
+  };
+
+  return (
+    <tr className={s.tr} data-user-row={user._id}>
+      <td className={s.td}>
+        <div className={s.who}>
+          <span className={s.avatar} style={{ background: avatarColor(user.username) }} aria-hidden="true">
+            {avatarInitial(user.username)}
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <button type="button" className={s.uname} onClick={(event) => onOpen(user, "view", event.currentTarget)}>
+              {user.username}
+            </button>
+            {user.role === "admin" ? <span className={s.badge}>{t("admin.userPanel.adminBadge")}</span> : null}
+            <span className={s.mail}>{user.email}</span>
+          </div>
+        </div>
+      </td>
+      <td className={`${s.td} ${s.time}`}>{shanghaiDate(user.createdAt)}</td>
+      <td className={s.td} title={seen ? seen.title : t("admin.lastSeenNever")}>
+        {seen ? (
+          <>
+            <span className={`${s.time} ${s.timeMain}`}>{seen.main}</span>
+            {seen.sub ? <span className={s.subLine}>{seen.sub}</span> : null}
+          </>
+        ) : (
+          // An em dash, never a date: nothing was ever recorded for this
+          // account, which for one older than the instrumentation is a
+          // statement about our records, not about the person.
+          <span className={s.dim}>—</span>
+        )}
+      </td>
+      <td className={s.td}>
+        <span
+          className={s.strip}
+          role="img"
+          aria-label={fillTemplate(t("admin.userPanel.stripLabel"), { n: recent })}
+          data-strip
+        >
+          {cells.map((cell) => (
+            <span key={cell.date} className={s.cell} data-active={cell.active} data-today={cell.today || undefined} />
+          ))}
+        </span>
+        <span className={s.days}>
+          {fillTemplate(t("admin.userPanel.stripDays"), { n: recent, total: formatCount(user.activeDays) })}
+        </span>
+      </td>
+      <td className={`${s.td} ${s.num}`}>
+        <Count n={user.subscriptions} />
+      </td>
+      <td className={`${s.td} ${s.num}`}>
+        <Count n={user.ratings} />
+      </td>
+      <td className={`${s.td} ${s.num}`}>
+        <Count n={user.watchedEpisodes} />
+      </td>
+      <td
+        className={`${s.td} ${s.device}`}
+        title={
+          device ? fillTemplate(t("admin.userPanel.deviceUsed"), { time: shortDateTime(device.lastUsedAt, today) }) : undefined
+        }
+      >
+        {device ? (
+          <>
+            {words.device(device.os, device.browser)}
+            {country ? <span className={s.cc}>{country}</span> : null}
+          </>
+        ) : (
+          <span className={s.dim}>—</span>
+        )}
+      </td>
+      <td className={`${s.td} ${s.moreCell}`}>
+        <button
+          ref={dotsRef}
+          type="button"
+          className={s.dots}
+          aria-label={fillTemplate(t("admin.userPanel.more"), { username: user.username })}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={(event) => toggleMenu(event.currentTarget)}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        </button>
+        {menuOpen && placement
+          ? createPortal(
+              <UserRowMenu
+                username={user.username}
+                menuRef={menuRef}
+                style={{
+                  top: placement.top ?? undefined,
+                  bottom: placement.bottom ?? undefined,
+                  right: placement.right,
+                }}
+                onChoose={choose}
+                onClose={closeMenu}
+              />,
+              document.body,
+            )
+          : null}
+      </td>
+    </tr>
+  );
+}
+
+export interface UserRowMenuProps {
+  username: string;
+  menuRef?: RefObject<HTMLDivElement | null>;
+  style?: CSSProperties;
+  onChoose: (mode: UserDrawerMode) => void;
+  /** Escape or Tab: close, and put focus back on the ⋯ button. */
+  onClose: (refocus: boolean) => void;
+}
+
+/**
+ * The ⋯ menu's items. Focus lands on the first one; ↑/↓, Home and End move
+ * between them; Escape and Tab close it and return focus to the button.
+ */
+export function UserRowMenu({ username, menuRef, style, onChoose, onClose }: UserRowMenuProps) {
+  const { t } = useLang();
+  const ownRef = useRef<HTMLDivElement | null>(null);
+  const ref = menuRef ?? ownRef;
+
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+  }, [ref]);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    if (items.length === 0) return;
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const move = (index: number) => {
+      event.preventDefault();
+      items[(index + items.length) % items.length].focus();
+    };
+    switch (event.key) {
+      case "Escape":
+      case "Tab":
+        event.preventDefault();
+        event.stopPropagation();
+        onClose(true);
+        return;
+      case "ArrowDown":
+        move(at + 1);
+        return;
+      case "ArrowUp":
+        move(at < 0 ? items.length - 1 : at - 1);
+        return;
+      case "Home":
+        move(0);
+        return;
+      case "End":
+        move(items.length - 1);
+        return;
+    }
+  };
+
+  const item = (mode: UserDrawerMode, label: string, danger = false) => (
+    <button
+      type="button"
+      role="menuitem"
+      tabIndex={-1}
+      className={danger ? `${s.menuItem} ${s.menuDanger}` : s.menuItem}
+      data-menu-item={mode}
+      onClick={() => onChoose(mode)}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      aria-label={fillTemplate(t("admin.userPanel.more"), { username })}
+      className={s.menu}
+      style={style}
+      onKeyDown={onKeyDown}
+      data-user-menu
+    >
+      {item("view", t("admin.userPanel.view"))}
+      {item("edit", t("admin.userPanel.edit"))}
+      {item("password", t("admin.userPanel.password"))}
+      {item("revokeAll", t("admin.userPanel.revokeAll"))}
+      <div className={s.menuSep} role="separator" />
+      {item("delete", t("admin.userPanel.remove"), true)}
+    </div>
+  );
+}

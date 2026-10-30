@@ -1059,14 +1059,6 @@ func (f *fakeDB) ListTrendingDiscussions(context.Context, int32, int32, *uuid.UU
 	panic("fakeDB.ListTrendingDiscussions: use the PG-backed harness")
 }
 
-func (f *fakeDB) TrackCommunityEngagement(context.Context, string, string, int32, int32, bool) (int64, error) {
-	panic("fakeDB.TrackCommunityEngagement: use the PG-backed harness")
-}
-
-func (f *fakeDB) GetCommunityEngagementSummary(context.Context, int32) (dbgen.GetCommunityEngagementSummaryRow, error) {
-	panic("fakeDB.GetCommunityEngagementSummary: use the PG-backed harness")
-}
-
 func stubHandlers(t *testing.T, db CommentsDB) *Handlers {
 	t.Helper()
 	pool := testutil.NewWebPool(t, context.Background(), pgURI)

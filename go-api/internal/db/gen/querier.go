@@ -18,6 +18,7 @@ type Querier interface {
 	// cannot see the row this statement inserts, hence the + inserted (the same
 	// arithmetic UpsertCommentReactionWithNotification does).
 	AddReviewHelpfulVote(ctx context.Context, reviewID uuid.UUID, userID uuid.UUID) (int64, error)
+	// ==================== User management ====================
 	// POST /api/admin/users — create-by-admin path.  Caller bcrypts password
 	// before passing it in.  RETURNING only the projection Express's
 	// response uses ({ _id, username, email }) — handler maps to {id, ...}.
@@ -487,6 +488,20 @@ type Querier interface {
 	// LockUserForNewSession, in its transaction.
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) error
 	DecideEditItem(ctx context.Context, status string, rejectNote *string, iD uuid.UUID, submissionID uuid.UUID) (int64, error)
+	// "Sign this account out everywhere", from the admin page.  Runs in
+	// admin.UserStore.RevokeAllUserSessions' transaction after LockUserForRevoke
+	// and ClearLegacyRefreshTokens -- the same order, for the same reason, as
+	// auth.Store.RevokeOtherSessions, except that no session is kept: the admin
+	// is not one of this account's devices.  Each device notices on its next
+	// request, when jwtx's session check (UserSessionLive) no longer finds the
+	// session its access token names.
+	//
+	// Every row goes, expired ones included, but only the live ones are counted:
+	// the count is "devices signed out", and the drawer's device list
+	// (ListAdminUserLiveSessions) shows only live sessions.  An expired row stays
+	// in the table until its owner next signs in, so counting it would report a
+	// device for an account that has not been signed in anywhere for months.
+	DeleteAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error)
 	// Wipe child tables when Reset clears a row.  Express puts characters /
 	// episode_titles back to `undefined` in the document — Postgres mirrors
 	// that with a DELETE inside the reset transaction.
@@ -690,48 +705,11 @@ type Querier interface {
 	// DISTINCT ON keeps the first row per root, and the ORDER BY makes that the
 	// deepest one — the end of that chain, which is where completeness is decided.
 	GetAbsoluteEpisodeOffsets(ctx context.Context, ids []int32) ([]GetAbsoluteEpisodeOffsetsRow, error)
-	// What the reply and like paths need to know about an event: its anime, its
-	// owner, whether it is a kind the tab lists, and whether its owner is public.
-	GetActivityEventMeta(ctx context.Context, id uuid.UUID) (GetActivityEventMetaRow, error)
-	// Next-day, day-7, and ever-returned retention for the signup cohorts inside
-	// the window.
-	//
-	// THE DENOMINATORS ARE NOT THE SAME NUMBER, AND THAT IS THE WHOLE POINT.
-	// Somebody who registered this morning has not failed to return tomorrow --
-	// tomorrow has not happened.  Counting them in the day-1 denominator drags the
-	// rate down by exactly the share of the window that is too young to answer,
-	// which makes every retention figure look worse on the days you launch
-	// something and gain signups.  So each horizon carries its own eligibility
-	// gate: a cohort day counts toward d1 only once it is at least one day old,
-	// toward d7 only once it is at least seven.  d1_cohort > d7_cohort is normal
-	// and expected; they are different populations.
-	//
-	// "Returned" is DAY-EXACT for d1 and d7 -- active on precisely signup + 1 /
-	// signup + 7 -- which is the definition every analytics product in this market
-	// uses and the one an operator will assume.  At this scale it is also a very
-	// thin number: a handful of eligible accounts per week means a single person
-	// moves the rate by ten points, so it is reported alongside a count and never
-	// alone.
-	//
-	// returned_ever is the honest companion, and the one worth reading first: any
-	// activity on any day strictly after signup, over the whole window, with no
-	// eligibility gate beyond having signed up at all.  It answers "did this
-	// account ever come back", which at a few hundred signups is a number with
-	// enough mass to mean something, and it is what makes a 0/3 day-7 figure
-	// legible as sparsity rather than as catastrophe.
-	//
-	// The three EXISTS probes hit (activity_date, user_id) -- the primary key --
-	// so this stays index probes per cohort member rather than a scan, and needs
-	// no index of its own.
-	//
-	// Reads the backfilled rows as well as the recorded ones, which is correct
-	// and worth naming: for a cohort older than `instrumented_since` the answer to
-	// "did they come back" is really "did they come back AND leave a trace", so
-	// historical retention is a floor, not a measurement.  Cohorts after the seam
-	// are measured properly.
-	GetActivityRetention(ctx context.Context, windowDays int32) (GetActivityRetentionRow, error)
-	// Queries over the migration-0025 activity rollup: the five reads behind
-	// GET /api/admin/activity, plus the per-user batch the admin user table needs.
+	// The reads behind GET /api/admin/activity (internal/admin/activity.go).  The
+	// admin user table's per-account reads live in admin_users.sql.  The wire
+	// contract and the definitions every number uses (person, signup day,
+	// returning, signup-only, reconstructed) are in
+	// next-app/src/app/[lang]/admin/_types/activity.ts.
 	//
 	// THE DAY BOUNDARY IS DEFINED ONCE, HERE, AND IT IS +08.
 	// Every query in this file buckets on `AT TIME ZONE 'Asia/Shanghai'` and every
@@ -742,8 +720,35 @@ type Querier interface {
 	// the eight hours between the two midnights -- which is most of a Chinese
 	// evening, i.e. exactly when the numbers are worth looking at.
 	//
+	// PEOPLE, NOT ACCOUNTS.  Every panel query reads the views activity_people and
+	// activity_days (0054): the live tables plus the anonymous archive of deleted
+	// accounts.  Deleting an account must not change any number about the past,
+	// so no panel query reads `users` or `user_activity_daily` directly.  The
+	// per-user batch at the bottom of the file is the deliberate exception: it
+	// describes accounts, and a deleted account is not one.
+	//
+	// ONE SNAPSHOT, ONE CLOCK.  The handler runs every panel query inside one
+	// REPEATABLE READ READ ONLY transaction.  now() is the transaction's start
+	// time, so each query below derives the same today from it on its own, and
+	// every query reads the same snapshot: the parts of one response cannot
+	// disagree with each other.  GetActivityClock hands that today to Go, which
+	// fills the gaps in the daily series and judges the reconstructed flags
+	// against it, never against the application server's clock.
+	//
+	// ROWS ARE PEOPLE ON ONE DAY.  Both halves of activity_days have a primary key
+	// leading with the date ((activity_date, user_id) and (activity_date,
+	// archive_id)), so on a single date a row count is a count of people.  Across
+	// several days the queries group by person.
+	//
+	// NOTHING AFTER TODAY COUNTS.  Every range is closed at today, including the
+	// "came back later" probes.  A row can be dated after the transaction's today
+	// (a flush that commits right after midnight, or a clock a second ahead of the
+	// database's); bounding everything at today keeps it out of every part of the
+	// response at once instead of out of some parts only.
+	//
 	// Conventions follow admin.sql: counts cast to ::bigint so sqlc emits int64,
-	// and every read is a single round-trip.
+	// and dates read through the views cast to ::date (the views hide the column
+	// types from sqlc).
 	// THE WRITE IS NOT IN THIS FILE -- ON PURPOSE.
 	//
 	// The flush statement is a multi-array unnest (`unnest(uuid[], timestamptz[],
@@ -761,33 +766,63 @@ type Querier interface {
 	// timestamp, or a counter this process accumulated.  The statement is quoted
 	// in full there, including the WHERE EXISTS guard that keeps one deleted
 	// account from discarding everybody else's counters.
-	// The four headline numbers, in one round-trip.
+	// The snapshot's clock and the instrumentation seam.  The handler reads this
+	// first and uses its today for everything it computes in Go.
 	//
-	// DAU / WAU / MAU are ROLLING windows ending today, not calendar week and
-	// month.  Calendar buckets make the first of the month look like a collapse
-	// and the last like a peak, and at this scale (tens of active accounts) that
-	// artefact is larger than any real movement they would show.
+	// instrumented_since: rows seeded by 0026's backfill carry request_count = 0
+	// and the live recorder never leaves one there, so the earliest date with a
+	// non-zero request_count is exactly the day per-request recording began.
+	// Read over the union, so deleting the account that produced the earliest
+	// live row does not move the seam (0054 copies request_count unchanged).
+	// NULL means recording has not started -- a container running the migrations
+	// but not yet serving -- and the caller must render that as "not
+	// instrumented" rather than as a date.  Everything before this date counts
+	// interaction days and everything after it visits; the date itself is both,
+	// because recording began during it, and the handler treats it as
+	// reconstructed.  See 0026's header.
+	// Closed at today like every other range here: a row dated after today
+	// cannot start the seam on its own.
+	GetActivityClock(ctx context.Context) (GetActivityClockRow, error)
+	// What the reply and like paths need to know about an event: its anime, its
+	// owner, whether it is a kind the tab lists, and whether its owner is public.
+	GetActivityEventMeta(ctx context.Context, id uuid.UUID) (GetActivityEventMetaRow, error)
+	// People whose signup day falls in the window of `days` days ending today,
+	// the same count for the window before it, and how many of the first group
+	// were active on any day after their signup day (up to today).
 	//
-	// The windows are inclusive of today and closed at the other end: DAU is today
-	// alone, WAU is today and the six days before it, MAU today and the
-	// twenty-nine before it.  Written as `>= today - 6` rather than `> today - 7`
-	// because the first form is the one a reader can check against a calendar
-	// without deciding whether the endpoint is open.
+	// Signups are never reconstructed -- created_at is a recorded instant -- but
+	// returned_after is read from activity_days and undercounts for signups whose
+	// days after signup predate instrumented_since.
+	GetActivitySignups(ctx context.Context, days int32) (GetActivitySignupsRow, error)
+	// Today so far, against the same moment of yesterday and of seven days ago.
 	//
-	// count(DISTINCT user_id) is not redundant on the DAU arm even though
-	// (activity_date, user_id) is unique: it is written the same way in all three
-	// so the three read as one measurement at three widths.  The planner
-	// collapses it.
+	// "The same moment" is a first_seen_at no later than exactly 24 (168) hours
+	// before now().  Hours rather than '1 day' because day arithmetic on a
+	// timestamptz follows the session's time zone and comes out at 23 or 25 hours
+	// across a daylight-saving change there; the reporting zone has none, so 24
+	// hours earlier is the same wall-clock time on the previous reporting day,
+	// whatever zone the session happens to run in.
 	//
-	// instrumented_since is the seam.  Rows seeded by 0026's backfill carry
-	// request_count = 0 and the live recorder never leaves one there, so the
-	// earliest date with a non-zero request_count is exactly the day per-request
-	// recording began.  NULL means it has not started -- a container running the
-	// migrations but not yet serving, or a rolled-back deploy -- and the caller
-	// must render that as "not instrumented" rather than as a date.  Everything
-	// before this date counts interaction days; everything after counts visits.
-	// See 0026's header.
-	GetActivitySnapshot(ctx context.Context) (GetActivitySnapshotRow, error)
+	// Both same-moment counts are returned unconditionally.  Whether the day they
+	// describe is instrumented enough for a time of day to mean anything (0026's
+	// rows carry the time of an interaction, not of a visit) is the handler's
+	// call, made against instrumented_since.
+	GetActivityTodayActive(ctx context.Context) (GetActivityTodayActiveRow, error)
+	// One window of `days` days ending today, [today-(days-1), today], and the
+	// window of the same length right before it, [today-(2*days-1), today-days],
+	// each split into returning and signup-only people.  Called once per window
+	// (7 and 30); the handler derives the reconstructed flags from the same
+	// `days`, so the ranges have one definition.
+	//
+	// Per person and window: RETURNING if any of their rows in the window is not
+	// on their signup day; SIGNUP-ONLY if they have rows in the window and every
+	// one of them is on their signup day.  The two are complementary among the
+	// people with a row in the window, so active = returning + signupOnly is a
+	// partition, not an approximation, and the handler adds them up rather than
+	// counting active a third time.  created_at is NOT NULL on both halves of
+	// activity_people, so `<> signup_day` never yields NULL and nobody falls
+	// between the two counts.
+	GetActivityWindow(ctx context.Context, days int32) (GetActivityWindowRow, error)
 	// Queries for /api/admin/* (P2.3).
 	//
 	// Most admin reads are single-row aggregates or list-by-version batches.
@@ -807,29 +842,23 @@ type Querier interface {
 	// Replaces Promise.all() of 10 Mongo countDocuments calls.  All counts
 	// run as correlated subqueries so we get one row, one fetch.
 	GetAdminStats(ctx context.Context) (GetAdminStatsRow, error)
-	// Last-seen, visit days, and logins for one page of the admin user table.
+	// Every scalar the detail drawer shows, in one round-trip.  pgx.ErrNoRows
+	// means the account does not exist (404).
 	//
-	// Same batch shape as GetAdminUserSubFollowCounts in admin.sql, and for the
-	// same reason: thirty ids in, one round-trip, LEFT JOIN so an account with no
-	// recorded activity comes back as a row of zeroes instead of vanishing from
-	// the page.  (A missing row would silently drop the user from the table --
-	// the exact failure mode a LEFT JOIN exists to prevent.)
+	// Activity is all time: active_days counts every row (before
+	// instrumented_since a row is a reconstructed interaction day, after it a
+	// recorded visit -- the same caveat as the list column), recorded_days only
+	// the rows the live recorder wrote: a request or a login counted.  0026 writes
+	// both counters as zero, and a day with only a password login (nothing
+	// requested after it) is still a day the recorder saw.
 	//
-	// last_seen_at is nullable and the NULL is meaningful: it says nothing has
-	// ever been recorded for this account, which for an account created before
-	// instrumentation began is a statement about our records and not about the
-	// person.  The handler passes it through as null rather than substituting an
-	// epoch or the signup date.
+	// score_sum is returned instead of an average so the mean is computed in Go
+	// from two NOT NULL integers: "no rated subscriptions" stays an explicit
+	// null instead of depending on how a nullable float survives a cast.
 	//
-	// active_days counts rows, so before the seam it is interaction days and after
-	// it, visit days -- the same caveat that applies to the chart.  It is the
-	// honest ceiling on "how many days do we know this account was here".
-	GetAdminUserActivityCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]GetAdminUserActivityCountsRow, error)
-	// ==================== User management ====================
-	// Batch fetch sub_count + follower_count for a slice of user ids.
-	// Replaces the two Promise.all aggregate pipelines in listUsers.
-	// Returns 0 for users with no rows on either side via LEFT JOIN.
-	GetAdminUserSubFollowCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]GetAdminUserSubFollowCountsRow, error)
+	// Community counts skip soft-deleted rows where the table has deleted_at
+	// (threads, replies, reviews); the other tables delete for real.
+	GetAdminUserDetail(ctx context.Context, id uuid.UUID) (GetAdminUserDetailRow, error)
 	// Exact siteAnime resolution for the Phase 1 hit path.  dandanplay's
 	// /api/v2/bangumi/:animeId response carries the entry's AniList URL in
 	// `onlineDatabases`, which the client parses into EpisodeData.AniListID.
@@ -1032,15 +1061,6 @@ type Querier interface {
 	// reply abuse (someone passing a random comment id from a different
 	// episode).  ErrNoRows → handler 400 "Parent comment not found".
 	GetCommentParentForValidation(ctx context.Context, iD uuid.UUID, anilistID int32, episode int32) (uuid.UUID, error)
-	// Two independent pairs, not four interchangeable counters.  Read
-	// open_count against impression_count, and welcome_open_count against
-	// welcome_impression_count -- never across the pairs.  The two denominators
-	// do not count the same renders: hot_discussions_impression is suppressed
-	// when the rail has no discussions to show, while welcome_card_impression
-	// fires on every mount, because the card it counts renders either way.
-	// welcome_impression_count is therefore >= impression_count by construction,
-	// and their difference is how often the rail rendered empty.
-	GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (GetCommunityEngagementSummaryRow, error)
 	// One live reply in the list shape, for a write to answer with what it wrote.
 	GetCommunityReply(ctx context.Context, id uuid.UUID) (GetCommunityReplyRow, error)
 	GetCommunityReplyMeta(ctx context.Context, id uuid.UUID) (GetCommunityReplyMetaRow, error)
@@ -1485,6 +1505,10 @@ type Querier interface {
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string, studioID *int32, isMain bool) error
 	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
 	InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error
+	// The signup instant under a fresh random id.  The id is generated by the
+	// column default, never passed in, so nothing derived from users.id can end
+	// up in the archive.
+	InsertArchivedUser(ctx context.Context, createdAt pgtype.Timestamptz) (uuid.UUID, error)
 	InsertBgmCharacterMap(ctx context.Context, arg []InsertBgmCharacterMapParams) (int64, error)
 	// Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
 	// updated_at takes its column DEFAULT now().  anidb_id is last to match the
@@ -1553,7 +1577,25 @@ type Querier interface {
 	// transaction carries that transaction's.  The final SELECT still reads the
 	// upsert's RETURNING, so the DO UPDATE guarantee above is untouched.
 	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (InsertSubscriptionIfAbsentRow, error)
-	// One row per day that has any activity, within the window.
+	// Signup cohorts by Monday-start week: the current week and the `weeks - 1`
+	// before it, newest first, one row per week whether or not anybody signed up
+	// in it.
+	//
+	// A member is a person whose signup day falls in [week_start, week_start+6].
+	// returned_N counts members active on some day d with
+	// signup_day < d <= signup_day + N, read as "their first day back is no later
+	// than signup_day + N".  N is 1, 7, 14 and 30; the handler lists the horizons
+	// in that order and must change with these columns.  A horizon still open
+	// for some member is counted here all the same -- eligibility is judged in Go
+	// from last_signup and today, and a still-growing count is never shown as a
+	// rate.
+	//
+	// The week is truncated on a timestamp WITHOUT time zone, so the Monday comes
+	// from the calendar alone and not from the session's zone.
+	ListActivityCohorts(ctx context.Context, weeks int32) ([]ListActivityCohortsRow, error)
+	// One row per day that has any activity in [today-(day_count-1), today]: the
+	// people active that day split by whether it is their signup day, and the
+	// day's request and login totals.
 	//
 	// Days with nothing in them are ABSENT here and are filled in by the caller
 	// (internal/admin/activity.go), not by a generate_series join.  That is a
@@ -1562,15 +1604,74 @@ type Querier interface {
 	// which is logic worth unit-testing without a database attached.  The SQL
 	// reports what happened; Go decides how to render an absence.
 	//
-	// active_users is count(*) rather than count(DISTINCT user_id) because within
-	// a single activity_date the primary key already guarantees one row per user.
-	// The DISTINCT in GetActivitySnapshot is doing real work (its windows span
-	// days); here it would only cost a sort.
-	ListActivityDailyTotals(ctx context.Context, dayCount int32) ([]ListActivityDailyTotalsRow, error)
+	// The inner join to activity_people loses no row: each half of activity_days
+	// has a foreign key into its half of activity_people.  So returning +
+	// signup_day is the day's row count and the request and login sums cover
+	// every row.
+	ListActivityDaily(ctx context.Context, dayCount int32) ([]ListActivityDailyRow, error)
+	// How many distinct days each person active in [today-(day_count-1), today]
+	// was active in it, as a histogram: one row per day count, with how many
+	// people have it and how many of those are signup-only (their only day in
+	// the window is their signup day, which also makes their day count 1).
+	//
+	// The handler folds the histogram into the panel's buckets.  Its people sum
+	// is the window's active count -- the same set GetActivityWindow partitions
+	// -- so the two agree whenever day_count is one of the fixed windows.
+	ListActivityDepth(ctx context.Context, dayCount int32) ([]ListActivityDepthRow, error)
 	// The replies under a page of activity events, oldest first, at most
 	// per_event_limit for each.  One query for the whole page rather than one
 	// per event.
 	ListActivityReplies(ctx context.Context, eventIds []uuid.UUID, viewerID *uuid.UUID, perEventLimit int32) ([]ListActivityRepliesRow, error)
+	// The detail drawer's 90-day calendar: every recorded day of the account in
+	// [today-89, today], ascending.  recorded = the live recorder wrote the row
+	// (a request or a login counted; see recorded_days above); false means
+	// migration 0026 reconstructed it from other tables.
+	ListAdminUserActivityDays(ctx context.Context, userID uuid.UUID, today pgtype.Date) ([]ListAdminUserActivityDaysRow, error)
+	// The most recently used LIVE session of each account on the page.  Expired
+	// rows stay in user_sessions until the owner's next login prunes them, so
+	// the expiry predicate is what keeps a device that can no longer refresh off
+	// the "last device" column.  Ties on last_used_at break on id, the same order
+	// the settings page lists devices in (ListUserSessions).
+	ListAdminUserLastDevices(ctx context.Context, userIds []uuid.UUID) ([]ListAdminUserLastDevicesRow, error)
+	// The account's live sessions, most recently used first: the settings
+	// page's device list (ListUserSessions) as an admin sees it, plus expiry.
+	ListAdminUserLiveSessions(ctx context.Context, userID uuid.UUID) ([]ListAdminUserLiveSessionsRow, error)
+	// The admin user table's per-page batches, one account's detail drawer, and
+	// the admin's "sign this account out" action.
+	//
+	// These describe ACCOUNTS, so they read `users` and `user_activity_daily`
+	// directly rather than the activity_people / activity_days views (migration
+	// 0054): a deleted account is not an account, and the views exist for
+	// statistics about people over time.  The one exception is
+	// instrumented_since below, which is a fact about the recorder rather than
+	// about this account and is therefore read from the union like every other
+	// seam on the admin page.
+	//
+	// The page query itself (filters, sort, pagination, the segment counts) is
+	// NOT here: its WHERE and ORDER BY are composed from a whitelist at request
+	// time, which sqlc cannot express -- see internal/admin/list_users.go.
+	//
+	// `today` is always a parameter, never derived from now() here.  The handler
+	// computes the reporting day once per request (activity.Day, +08) and passes
+	// the same value to the page query, the segment counts and the batches below,
+	// so the strip, the segments and the response's `today` cannot disagree
+	// across a midnight that falls between two statements.  Session liveness is
+	// the exception and uses now(): expiry is an instant, not a reporting day.
+	//
+	// Conventions follow admin.sql: counts are cast to ::bigint so sqlc emits
+	// int64, and nullable aggregates are cast so sqlc can type them.
+	// The 30-day strip for one page of the user table: every recorded day in
+	// [today-29, today], ascending per user.  One round-trip for the whole page.
+	// An account with no row in the window simply contributes no rows; the
+	// handler starts every account with an empty strip.
+	ListAdminUserRecentDays(ctx context.Context, userIds []uuid.UUID, today pgtype.Date) ([]ListAdminUserRecentDaysRow, error)
+	// The account's most recently updated subscriptions, same title fields.
+	ListAdminUserRecentSubscriptions(ctx context.Context, userID uuid.UUID, rowLimit int32) ([]ListAdminUserRecentSubscriptionsRow, error)
+	// The account's newest episode marks with the title fields pickTitle()
+	// reads.  Marks backfilled by migration 0024 share one watched_at, so the
+	// tie-break (show, then episode, both descending) is what keeps the order
+	// stable between two loads of the drawer.
+	ListAdminUserRecentWatches(ctx context.Context, userID uuid.UUID, rowLimit int32) ([]ListAdminUserRecentWatchesRow, error)
 	// Rows due for an AniList rating read, most urgent first.
 	//
 	// Two populations, one query, because they are the same work with
@@ -2208,19 +2309,6 @@ type Querier interface {
 	// every referencing column once.  Each referenced URL then looks its row up
 	// through the primary key.
 	ListImageWarmBatch(ctx context.Context, recheckAfter pgtype.Interval, rowLimit int32) ([]string, error)
-	// Signups per day, bucketed on the same +08 boundary so the "new" series and
-	// the "active" series above line up bar for bar.  Bucketing these two
-	// differently is the kind of mistake that produces a chart where a cohort
-	// appears the day before it exists.
-	//
-	// The predicate is deliberately non-sargable (it casts the column before
-	// comparing, so no index on users.created_at can serve it).  users is a
-	// four-figure table and this runs once per dashboard load; the alternative --
-	// converting the local date bound back into a timestamptz range -- is two
-	// casts in the opposite direction and one more place for the boundary to be
-	// written down slightly differently.  Legibility wins until the table is
-	// large enough for it not to.
-	ListNewUserCountsByDay(ctx context.Context, dayCount int32) ([]ListNewUserCountsByDayRow, error)
 	// Episode-comment notifications read their anime and excerpt through
 	// comment_id; the community tab's reply notifications (migration 0046)
 	// through reply_id, which also names the thread or activity event the reply
@@ -2469,6 +2557,43 @@ type Querier interface {
 	// holding the row: the session being kept cannot be revoked or rotated away
 	// between being checked and the others being deleted.
 	LockHeldUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID, presentedHash string) (uuid.UUID, error)
+	// Archiving a deleted account's activity (migration 0054).
+	//
+	// The statements below run in ONE READ COMMITTED transaction, in this order,
+	// inside admin.UserStore.ArchiveAndDeleteUser, followed by AdminDeleteUser.
+	//
+	// The activity recorder (internal/activity) may be flushing this account's
+	// counters at the same moment, and the order is what keeps that flush from
+	// being lost or from deadlocking with the delete.  A flush is one
+	// INSERT ... ON CONFLICT DO UPDATE.  For a day that already has a row it locks
+	// that row and adds to it; the foreign key is unchanged, so Postgres checks
+	// nothing and the users row is not locked at all.  For a new day it inserts,
+	// and the foreign-key check at the end of the statement takes a KEY SHARE
+	// lock on the users row.  A flush therefore always locks activity rows first
+	// and the users row last, and the archive takes them in the same order:
+	//
+	//   1. LockUserActivityForArchive waits for a flush that is adding to one of
+	//      the account's rows.
+	//   2. LockUserForArchive waits for a flush that inserted a row and is
+	//      committing.  From here on no new row for the account can be written.
+	//   3. MoveUserActivityToArchive deletes the rows and archives what it
+	//      deleted.  A DELETE waits for a row that is still being updated and
+	//      returns the version that update committed, so the archive gets each
+	//      day's counters as they finally stand.
+	//
+	// Locking the users row first instead would let a flush that adds to
+	// yesterday's row and inserts today's (one batch across +08 midnight) hold the
+	// row the delete needs while waiting for the lock the delete holds.  And
+	// copying with INSERT ... SELECT instead of moving would read a row as it was
+	// before a concurrent update and then let the cascade delete the updated one,
+	// so that flush's counters would be in neither table.
+	// Step 1: the account's activity rows, before its users row (see above).
+	LockUserActivityForArchive(ctx context.Context, userID uuid.UUID) error
+	// Step 2: holds the account for the rest of the transaction.  While it is
+	// held no new activity row for it can be written: the recorder's insert needs
+	// a KEY SHARE lock on this row for its foreign key, which FOR UPDATE excludes.
+	// pgx.ErrNoRows means the account is already gone.
+	LockUserForArchive(ctx context.Context, id uuid.UUID) (pgtype.Timestamptz, error)
 	// user_sessions: one refresh session per device (migration 0052).
 	//
 	// Every hash here is the sha256 hex digest of a refresh token
@@ -2785,6 +2910,9 @@ type Querier interface {
 	// failures, so failures goes back to 0.
 	MarkImageWarmed(ctx context.Context, url string) error
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error)
+	// Step 3: every recorded day of the account, moved unchanged under
+	// archive_id.  The cascade from AdminDeleteUser then finds nothing left.
+	MoveUserActivityToArchive(ctx context.Context, archiveID uuid.UUID, userID uuid.UUID) (int64, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error
@@ -3091,10 +3219,6 @@ type Querier interface {
 	// binding it now holds instead of resting on an attempt made against the old
 	// one.
 	TouchEpisodeTitlesAt(ctx context.Context, anilistID int32, bgmID int32) (int64, error)
-	// Aggregate-only counters keep product telemetry useful without retaining a
-	// per-user browsing history.  The handler owns the event/target allowlist;
-	// matching CHECK constraints make that contract durable at the database edge.
-	TrackCommunityEngagement(ctx context.Context, eventType string, source string, anilistID int32, episode int32, authenticated bool) (int64, error)
 	// anidb_id_map.sql — queries for the vendored AniList->AniDB map.
 	// Generated by cmd/bgmmap from Fribb/anime-lists, embedded via
 	// internal/bgmidmap, and seeded at boot (migration 0041).
