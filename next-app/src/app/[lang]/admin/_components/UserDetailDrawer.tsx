@@ -27,7 +27,8 @@
 // after a delete), and the list refetches its current page (onChanged /
 // onDeleted). A change that did not go through is reported in the drawer's
 // own words (lib/adminUserErrors.ts), never in go-api's English or in what
-// a thrown action carries — in production that is React's generic sentence.
+// a thrown action carries — in production that is React's generic sentence —
+// and as a toast when the drawer was closed before the answer came.
 //
 // Loaded by UsersSection through next/dynamic: this is the module that pulls
 // react-hot-toast, which touches `document` on import, so nothing a bun test
@@ -39,6 +40,7 @@ import { toast } from "react-hot-toast";
 import { fillTemplate } from "@/lib/home/time";
 import { useLang } from "@/lib/lang-client";
 import { focusIsLost } from "@/lib/lostFocus";
+import { isImeKeystroke } from "@/lib/nav/navSearch";
 import { useScrollLock } from "@/lib/scrollLock";
 import {
   PASSWORD_MIN,
@@ -145,6 +147,15 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [ending, setEnding] = useState<ReadonlySet<string>>(() => new Set());
   useScrollLock(true);
+  // Whether the drawer is still on screen, for a change that finishes after
+  // it closed (reportFailure).
+  const openRef = useRef(true);
+  useEffect(() => {
+    openRef.current = true;
+    return () => {
+      openRef.current = false;
+    };
+  }, []);
 
   // Focus in on open — unless an autofocused field already has it — and back
   // out on close.
@@ -170,8 +181,9 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
       const dialog = dialogRef.current;
       if (!dialog) return;
       if (event.key === "Escape") {
-        // An input method (pinyin) is using Escape to cancel what it is composing.
-        if (event.isComposing) return;
+        // An input method (pinyin) is using Escape to cancel what it is
+        // composing; Safari says so only through the key code (isImeKeystroke).
+        if (isImeKeystroke(event)) return;
         event.preventDefault();
         event.stopPropagation();
         onClose();
@@ -208,8 +220,21 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
     onChanged();
   };
 
-  const failureText = (action: UserAction, failure: { status: number; message?: string }) =>
-    t(userActionErrorKey(action, failure));
+  /**
+   * A failed change, in the drawer's words: under the control that asked for
+   * it while the drawer is open, as a toast once it has closed. Escape and
+   * the backdrop close it mid-request, and a failure that lands after that
+   * would otherwise be written into a drawer nobody can see.
+   */
+  const reportFailure = (
+    action: UserAction,
+    failure: { status: number; message?: string },
+    show: (text: string) => void,
+  ) => {
+    const text = t(userActionErrorKey(action, failure));
+    if (openRef.current) show(text);
+    else toast.error(text);
+  };
 
   /**
    * One mutation at a time; its failure lands under the action row. `work`
@@ -220,9 +245,9 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
     setActionError(null);
     try {
       const failure = await work();
-      if (failure) setActionError(failureText(action, failure));
+      if (failure) reportFailure(action, failure, setActionError);
     } catch {
-      setActionError(failureText(action, THROWN));
+      reportFailure(action, THROWN, setActionError);
     } finally {
       setBusy(false);
     }
@@ -298,13 +323,13 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
     try {
       const outcome = await revokeAdminUserSession(target.id, session.id);
       if (outcome.ok === false) {
-        setDeviceError(failureText("revokeOne", outcome));
+        reportFailure("revokeOne", outcome, setDeviceError);
         return;
       }
       toast.success(fillTemplate(t("admin.userPanel.signedOutDevice"), { device: deviceName }));
       changed();
     } catch {
-      setDeviceError(failureText("revokeOne", THROWN));
+      reportFailure("revokeOne", THROWN, setDeviceError);
     } finally {
       setEnding((prev) => {
         const next = new Set(prev);

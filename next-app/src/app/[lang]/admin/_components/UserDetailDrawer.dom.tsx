@@ -59,6 +59,16 @@ mock.module("../_actions/users", () => ({
   revokeAdminUserSession: held("revokeAdminUserSession"),
 }));
 
+// The toasts the drawer raises, as [kind, text].
+const toasts: Array<[string, string]> = [];
+mock.module("react-hot-toast", () => {
+  const toast = Object.assign((text: string) => toasts.push(["blank", text]), {
+    success: (text: string) => toasts.push(["success", text]),
+    error: (text: string) => toasts.push(["error", text]),
+  });
+  return { toast, default: toast, Toaster: () => null };
+});
+
 const { default: UserDetailDrawer } = await import("./UserDetailDrawer");
 
 // ─── Fixtures ──────────────────────────────────────────────────────────
@@ -125,6 +135,7 @@ const onDeleted = mock((...ids: unknown[]) => ids);
 
 beforeEach(() => {
   actionCalls.length = 0;
+  toasts.length = 0;
   for (const fn of [onRestoreFocus, onClose, onChanged, onDeleted]) fn.mockClear();
   net = holdFetch();
 });
@@ -259,6 +270,14 @@ describe("Escape and Tab work wherever focus is", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  test("so is Safari's, which has ended the composition but still sends key code 229", async () => {
+    await open("edit");
+
+    await press("Escape", { keyCode: 229 } as KeyboardEventInit);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   test("Tab from outside the drawer enters it at the first control, Shift+Tab at the last", async () => {
     const dialog = await open();
     const controls = Array.from(dialog.querySelectorAll<HTMLElement>("button"));
@@ -343,5 +362,16 @@ describe("a failed action is reported in the drawer's own words", () => {
     await actionCalls[0].resolve({ ok: true, data: { deleted: true, username: "fixture-a" } });
 
     expect(onDeleted.mock.calls).toEqual([[USER_ID]]);
+  });
+
+  test("one that fails after the drawer was closed is a toast, in the drawer's words", async () => {
+    const dialog = await open("delete");
+    await click(button(dialog, "确认删除"));
+    // Escape or the backdrop: the drawer goes while the delete is out.
+    await unmountAll();
+
+    await actionCalls[0].resolve({ ok: false, status: 400, code: "BAD_REQUEST", message: "Cannot delete yourself" });
+
+    expect(toasts).toEqual([["error", "不能删除你自己的账号"]]);
   });
 });
