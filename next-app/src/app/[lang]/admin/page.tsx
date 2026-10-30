@@ -8,8 +8,8 @@ import { HantDriftSection } from "./_components/HantDriftSection";
 import { StatCard } from "./_components/StatCard";
 import { UsersSection } from "./_components/UsersSection";
 import ReportsSection, { type AdminReportsData } from "./_components/ReportsSection";
+import type { AdminActivityPanel } from "./_types/activity";
 import type {
-  AdminActivity,
   AdminStats,
   AdminUser,
   EnrichmentRow as EnrichmentRowData,
@@ -68,8 +68,8 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
     // Null on failure, for the same reason as the drift block below: a zero
     // on the activity panel says "nobody used the site today", which is the
     // one reading a fetch error must not be able to produce.
-    safeGet<AdminActivity | null>(
-      apiGet<AdminActivity>("/api/admin/activity?days=30", { cache: "no-store" }),
+    safeGet<AdminActivityPanel | null>(
+      apiGet<AdminActivityPanel>("/api/admin/activity?days=30", { cache: "no-store" }),
       null,
     ),
     // Null on failure rather than zeroes: a zero in this payload is the

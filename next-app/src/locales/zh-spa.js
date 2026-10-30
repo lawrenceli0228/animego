@@ -1720,57 +1720,80 @@ const zh = {
     colActiveDays: '活跃天数',
     colLogins: '登录次数',
     lastSeenNever: '没有任何活跃记录。注意这说的是我们的记录，不是这个人没来过。',
-    // 这块回答的是总览那句「注册用户 802」自己引出、又自己答不了的问题：
-    // 这 802 个人还有多少在。
+    // 用户活跃度面板：ActivitySection 和 _components/activity/ 下的四块。
     //
-    // 四个可信度层级必须分开读，别混：
-    //   DAU/WAU/MAU、留存  服务端从签名 token 推的，伪造不了 —— 拿这几个做决策。
-    //   每日活跃柱          同一来源，但埋点上线日之前的部分只是下界。
-    //   页面访问 / 播放 / 板块  公开 beacon 上报的，谁都能调，只看趋势。
-    //   埋点上线日之前      是从别的表里能看见的痕迹倒推出来的「有互动的天」，
-    //                       是真实到访天数的一个很小的子集。
+    // 口径全在 admin/_types/activity.ts 的文件头：「人」含已删除账号的匿名存档，
+    // 按北京时间切日，「回访」= 在注册日以外的某天来过，「只在注册当天」= 窗口里
+    // 只有注册那一天来过。埋点上线日之前的数字是从互动痕迹回推的，只是下界：
+    // 界面上一律标「含回推」或画斜纹，别当测量值读。
     activity: {
       title: '用户活跃度',
       loadError: '活跃度数据读取失败',
-      // lede 不是装饰。没有它，「DAU 41」会被读成对整站的完整测量 ——
-      // 而所有按 user id 统计的数字，对没登录的那大半流量都是瞎的。
-      lede: '所有按用户统计的数字都只覆盖已登录访问；本站大部分流量来自没有登录的搜索访客，那部分只出现在下面的板块分布里。',
+      switchError: '切换到 {{n}} 天失败，下面仍是 {{m}} 天的数据',
+      meta: '只统计已登录用户 · 按北京时间切日 · 截至 {{asOf}}',
       windowLabel: '时间窗口',
       windowDays: '{{n}} 天',
       loading: '加载中',
-      dau: '日活 DAU',
-      dauHint: '今天来过的人数',
-      wau: '周活 WAU',
-      wauHint: '含今天在内的近 7 天',
-      mau: '月活 MAU',
-      mauHint: '含今天在内的近 30 天',
-      stickiness: '粘性 DAU/MAU',
-      stickinessHint: '这个月用过的人里，今天用了的占比',
-      trendTitle: '每日趋势',
-      legendActive: '活跃用户',
-      legendReconstructed: '倒推（非埋点）',
-      legendSignups: '新注册',
-      chartAlt: '最近 {{n}} 天的每日活跃用户柱状图，峰值 {{max}} 人。',
-      logins: '登录',
-      requests: 'API 请求',
-      reconstructedDay: '这一天的数字是倒推的，只含有互动痕迹的用户',
-      // 说出来，别只靠图例那个色块。不知道有这条缝的人，会把交界处那一跳
-      // 读成增长 —— 这是整块面板最容易骗人的地方。
-      seamNote: '{{date}} 起才有逐请求埋点。左边 {{n}} 天是从评论、关注、订阅等痕迹倒推的「有互动的天」，只是真实到访的一个下界，两段不可直接比。',
-      notInstrumented: '逐请求埋点还没产生数据，图上所有柱子都是从历史痕迹倒推的，只能当下界看。',
-      retentionTitle: '新用户留存',
-      retentionUnavailable: '留存数据读取失败',
-      retentionWindow: '近 {{n}} 天注册的用户',
-      // 写出来是因为三个分母确实不一样，而不一样看起来像 bug。
-      // 今天早上注册的人，并没有「没在第二天回来」。
-      retentionNote: '三个分母不同是有意的：注册不满一天的人不计入次日留存，不满七天的不计入 7 日留存 —— 否则每次拉新都会把留存率往下拽。',
-      retentionD1: '次日留存',
-      retentionD1Hint: '注册后第 1 天当天有活跃（不是「7 天内」）',
-      retentionD7: '7 日留存',
-      retentionD7Hint: '注册后第 7 天当天有活跃',
-      retentionEver: '回访率',
-      retentionEverHint: '注册日之后任意一天有过活跃。样本量最大，先看这个',
-      noCohort: '样本为空',
+      withReconstructed: '{{text}}（含回推）',
+      deltaFlat: '持平',
+      kpiToday: '今日活跃',
+      sameTime: '昨日同一时刻 {{yesterday}} · 上周同一时刻 {{lastWeek}}',
+      kpiTodayHint: '截至 {{time}}；昨日全天 {{total}}',
+      kpiReturning: '近 {{n}} 天回访',
+      kpiPrev: '前 {{n}} 天 {{count}}',
+      kpiReturningHint: '共 {{active}} 人来过，其中 {{signupOnly}} 人只在注册当天出现',
+      kpiSignups: '近 {{n}} 天新注册',
+      kpiSignupsHint: '之后回来过 {{n}} 人',
+      dailyTitle: '每日活跃',
+      legendReturning: '回访（注册日以外）',
+      legendSignupDay: '注册当天',
+      legendToday: '今天，还没过完',
+      legendReconstructed: '回推的天，只是下界',
+      dateLabel: '{{m}}月{{d}}日',
+      dayLabel: '{{date}} 周{{wd}}',
+      // 周日在前，和 getUTCDay() 的 0–6 对齐。
+      weekdays: '日,一,二,三,四,五,六',
+      readoutToday: '{{day}} · 今天，截至 {{time}}',
+      readoutActive: '活跃 {{n}}',
+      readoutReturning: '回访 {{n}}',
+      readoutSignupDay: '注册当天 {{n}}',
+      readoutRequests: 'API 请求 {{n}}',
+      readoutReconstructed: '回推的数字，只是下界',
+      barLabel: '{{date}}：活跃 {{total}}，回访 {{returning}}，注册当天 {{signupDay}}',
+      barToday: '（今天还没过完）',
+      barReconstructed: '（回推，只是下界）',
+      today: '今天',
+      sumAvgReturning: '不含今天，回访日均 {{n}} 人',
+      sumAvgSignupDay: '注册当天日均 {{n}} 人',
+      sumPeak: '回访最多 {{n}} 人（{{date}}）',
+      sumReconstructed: '含回推的天，均值只是下界',
+      depthTitle: '近 {{n}} 天来过几天',
+      depthTotal: '共 {{n}} 人',
+      depthOnlyOne: '只来过 1 天',
+      depthOneDay: '1 天',
+      depthDays: '{{n}} 天',
+      depthRange: '{{min}}–{{max}} 天',
+      depthRowLabel: '近 {{days}} 天来过 {{range}}的 {{n}} 人，在用户管理里查看',
+      depthFoot: '只来过 1 天的 {{one}} 人里，{{n}} 人那一天就是注册当天',
+      cohortTitle: '新用户留存 · 按注册周',
+      cohortMeta: '注册后 N 天内回来过',
+      cohortWeek: '注册周',
+      cohortSignups: '注册',
+      cohortNextDay: '次日',
+      cohortWithin: '{{n}} 天内',
+      cohortCount: '{{n}} 人',
+      cohortPending: '已 {{n}} 人',
+      cohortCellTitle: '{{week}} 那周注册的 {{signups}} 人里，{{returned}} 人在{{horizon}}回来过',
+      cohortCellReconstructed: '（{{date}} 前的回访只算得到留过互动痕迹的）',
+      cohortCellReconstructedAll: '（回访只算得到留过互动痕迹的）',
+      // 「还没满期」的格子不给比例：这周最晚注册的人还在期内，人数还会涨，
+      // 这时算出来的比例会被当成结论读。
+      cohortPendingTitle: '这周最晚注册的人还没满 {{n}} 天，人数还会涨，先不算比例',
+      cohortNoneTitle: '还没满期',
+      cohortEmptyTitle: '这周没有人注册',
+      cohortLegendPending: '还没满期，人数还会涨',
+      cohortLegendReconstructed: '含 {{date}} 前回推的数据',
+      cohortLegendReconstructedAll: '含回推的数据',
     },
     // 这块看的不是「缺内容」，是「内容在骗人」：富化 worker 一直在写简体列，
     // title_hant / description_hant 只有回填跑的时候才动，掉队了也不会自愈。
