@@ -1,18 +1,26 @@
 import { test, expect, type Page } from "@playwright/test";
 import { waitForHydration } from "../../fixtures/hydration";
-import { closePg, getSql } from "../../fixtures/pg";
+import { closePg } from "../../fixtures/pg";
+import {
+  TOP_BASE_ID,
+  TOP_NEVER,
+  TOP_NO_RANKING_YEAR,
+  TOP_OLD,
+  TOP_OLD_YEAR,
+  TOP_RANKED,
+  TOP_YEAR,
+  seedTopRankings,
+  topTitle,
+  type TopShow,
+} from "../../fixtures/topRankings";
 import { collectConsoleErrors, navbar } from "../_helpers";
 
 /**
- * The rankings (/top, /top/{year}) on a catalogue of this file's own: a 2019
- * no other spec seeds a rankable show in, and a 1955 for the 更早 menu.
- *
- *   27 rankable 2019 shows — scores falling in pairs, so a tie is decided by
- *   popularity, and one pair tied on both, decided by id; TVs, movies and
- *   ONAs, all four seasons, every one Action and every third Comedy; one film
- *   with no season (its year is its premiere's) and one show with no format;
- *   and five that must never be ranked: a 9.9 tracked by 999 users, a music
- *   video, an adult title, one with no score and one scored 0.
+ * The rankings (/top, /top/{year}) on a catalogue of their own: 27 rankable
+ * 2019 shows, five 2019 shows that must never be ranked, and a 1955 for the
+ * 更早 menu (fixtures/topRankings.ts says what each one is for). globalSetup
+ * seeds it before any spec runs: the list of ranked years is one cached answer
+ * for the whole site, and other specs ask for it first.
  *
  * The leaders score 95 and up, above anything another spec seeds (94 at
  * most), so the all-time ranking opens on them whatever else is in the
@@ -26,100 +34,29 @@ test.describe.configure({ mode: "default" });
 // would be offered the English page in a card over the content.
 test.use({ locale: "zh-CN" });
 
-const BASE_ID = 990_800_000;
-const YEAR = 2019;
-const OLD_YEAR = 1955;
-const NO_RANKING_YEAR = 1901;
-const SEASONS = ["WINTER", "SPRING", "SUMMER", "FALL"] as const;
-
-interface Show {
-  id: number;
-  score: number | null;
-  popularity: number;
-  format: string | null;
-  season: string | null;
-  seasonYear: number | null;
-  startDate: string | null;
-  genres: string[];
-  adult?: boolean;
-}
-
-function mainShow(i: number): Show {
-  return {
-    id: BASE_ID + i,
-    score: 99 - Math.floor(i / 2),
-    // Shows 2 and 3 tie on popularity too: their order is their ids'.
-    popularity: i === 3 ? 50_000 - 2 * 100 : 50_000 - i * 100,
-    format: i % 5 === 1 ? "MOVIE" : i % 5 === 3 ? "ONA" : "TV",
-    season: SEASONS[i % 4] ?? null,
-    seasonYear: YEAR,
-    startDate: `${YEAR}-0${1 + (i % 4) * 3}-05`,
-    genres: i % 3 === 0 ? ["Action", "Comedy"] : ["Action"],
-  };
-}
-
-const RANKED: Show[] = [
-  ...Array.from({ length: 25 }, (_, i) => mainShow(i)),
-  // A film with no season: filed under the year it premiered.
-  { id: BASE_ID + 30, score: 96, popularity: 99_999, format: "MOVIE", season: null, seasonYear: null, startDate: `${YEAR}-08-01`, genres: ["Drama"] },
-  // No format: ranked all the same.
-  { id: BASE_ID + 31, score: 70, popularity: 20_000, format: null, season: "SPRING", seasonYear: YEAR, startDate: null, genres: ["Drama"] },
-];
-
-const NEVER: Show[] = [
-  { id: BASE_ID + 40, score: 99, popularity: 999, format: "TV", season: "SPRING", seasonYear: YEAR, startDate: null, genres: ["Action"] },
-  { id: BASE_ID + 41, score: 99, popularity: 90_000, format: "MUSIC", season: "SPRING", seasonYear: YEAR, startDate: null, genres: ["Action"] },
-  { id: BASE_ID + 42, score: 99, popularity: 90_000, format: "TV", season: "SPRING", seasonYear: YEAR, startDate: null, genres: ["Action"], adult: true },
-  { id: BASE_ID + 43, score: null, popularity: 90_000, format: "TV", season: "SPRING", seasonYear: YEAR, startDate: null, genres: ["Action"] },
-  { id: BASE_ID + 44, score: 0, popularity: 90_000, format: "TV", season: "SPRING", seasonYear: YEAR, startDate: null, genres: ["Action"] },
-];
-
-const OLD: Show[] = [
-  { id: BASE_ID + 50, score: 80, popularity: 5_000, format: "TV", season: "SPRING", seasonYear: OLD_YEAR, startDate: null, genres: ["Drama"] },
-  { id: BASE_ID + 51, score: 79, popularity: 5_000, format: "MOVIE", season: "FALL", seasonYear: OLD_YEAR, startDate: null, genres: ["Drama"] },
-];
-
-const ALL = [...RANKED, ...NEVER, ...OLD];
-const title = (id: number) => `排行测试 ${id - BASE_ID}`;
+const BASE_ID = TOP_BASE_ID;
+const YEAR = TOP_YEAR;
+const OLD_YEAR = TOP_OLD_YEAR;
+const NO_RANKING_YEAR = TOP_NO_RANKING_YEAR;
+const RANKED = TOP_RANKED;
+const NEVER = TOP_NEVER;
+const OLD = TOP_OLD;
+const title = topTitle;
 
 /** The ranking rule, written out: score, then popularity, then id. */
-function ranked(shows: readonly Show[]): number[] {
+function ranked(shows: readonly TopShow[]): number[] {
   return [...shows]
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || b.popularity - a.popularity || a.id - b.id)
     .map((s) => s.id);
 }
 
-async function seed(): Promise<void> {
-  const sql = getSql();
-  for (const s of ALL) {
-    await sql`
-      INSERT INTO anime_cache (
-        anilist_id, title_romaji, title_chinese, average_score, popularity, format, season, season_year,
-        start_date, status, episodes, is_adult, bangumi_version, trailer_checked_at, detail_fetched_at,
-        facts_checked_at, cached_at
-      )
-      VALUES (
-        ${s.id}, ${`Top Test ${s.id - BASE_ID}`}, ${title(s.id)}, ${s.score}, ${s.popularity}, ${s.format},
-        ${s.season}, ${s.seasonYear}, ${s.startDate}, 'FINISHED', 12, ${s.adult ?? false}, 2, now(), now(), now(), now()
-      )
-      ON CONFLICT (anilist_id) DO UPDATE SET
-        title_romaji = EXCLUDED.title_romaji, title_chinese = EXCLUDED.title_chinese,
-        average_score = EXCLUDED.average_score, popularity = EXCLUDED.popularity, format = EXCLUDED.format,
-        season = EXCLUDED.season, season_year = EXCLUDED.season_year, start_date = EXCLUDED.start_date,
-        is_adult = EXCLUDED.is_adult, updated_at = now()
-    `;
-    for (const g of s.genres) {
-      await sql`INSERT INTO anime_genres (anime_id, genre) VALUES (${s.id}, ${g}) ON CONFLICT (anime_id, genre) DO NOTHING`;
-    }
-  }
-}
-
+// globalSetup has seeded these already; seeding again (an upsert) keeps the
+// spec whole when it is run on a database whose setup predates the fixture.
 test.beforeAll(async () => {
-  await seed();
+  await seedTopRankings();
 });
 
 test.afterAll(async () => {
-  await getSql()`DELETE FROM anime_cache WHERE anilist_id IN ${getSql()(ALL.map((s) => s.id))}`;
   await closePg();
 });
 
