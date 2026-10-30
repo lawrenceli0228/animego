@@ -18,6 +18,7 @@ type Querier interface {
 	// cannot see the row this statement inserts, hence the + inserted (the same
 	// arithmetic UpsertCommentReactionWithNotification does).
 	AddReviewHelpfulVote(ctx context.Context, reviewID uuid.UUID, userID uuid.UUID) (int64, error)
+	// ==================== User management ====================
 	// POST /api/admin/users — create-by-admin path.  Caller bcrypts password
 	// before passing it in.  RETURNING only the projection Express's
 	// response uses ({ _id, username, email }) — handler maps to {id, ...}.
@@ -851,11 +852,6 @@ type Querier interface {
 	// Community counts skip soft-deleted rows where the table has deleted_at
 	// (threads, replies, reviews); the other tables delete for real.
 	GetAdminUserDetail(ctx context.Context, id uuid.UUID) (GetAdminUserDetailRow, error)
-	// ==================== User management ====================
-	// Batch fetch sub_count + follower_count for a slice of user ids.
-	// Replaces the two Promise.all aggregate pipelines in listUsers.
-	// Returns 0 for users with no rows on either side via LEFT JOIN.
-	GetAdminUserSubFollowCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]GetAdminUserSubFollowCountsRow, error)
 	// Exact siteAnime resolution for the Phase 1 hit path.  dandanplay's
 	// /api/v2/bangumi/:animeId response carries the entry's AniList URL in
 	// `onlineDatabases`, which the client parses into EpisodeData.AniListID.

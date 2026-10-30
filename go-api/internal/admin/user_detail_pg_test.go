@@ -65,13 +65,15 @@ func TestGetUser_EveryBlock_PG(t *testing.T) {
 	archiveSeedDay(t, pool, user, dayOf(today, 0), localAt(today, 0, 0, 10), lastSeen, 3, 0)
 	// Recording began before this account's first recorded day: the seam is
 	// read across live and archived people, and a deleted account is where
-	// the earliest recorded day lives here.
+	// the earliest recorded day lives here.  Its even older reconstructed day
+	// (request_count 0) is not a recorded one and must not move the seam.
 	var archiveID uuid.UUID
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`INSERT INTO archived_users (created_at) VALUES ($1) RETURNING archive_id`, localAt(today, -130, 9, 0)).Scan(&archiveID))
+		`INSERT INTO archived_users (created_at) VALUES ($1) RETURNING archive_id`, localAt(today, -160, 9, 0)).Scan(&archiveID))
 	execOK(t, pool, `
 		INSERT INTO archived_user_activity_daily (archive_id, activity_date, first_seen_at, last_seen_at, request_count)
-		VALUES ($1, $2::date, $3, $3, 2)`, archiveID, dayOf(today, -120), localAt(today, -120, 10, 0))
+		VALUES ($1, $2::date, $3, $3, 0), ($1, $4::date, $5, $5, 2)`,
+		archiveID, dayOf(today, -150), localAt(today, -150, 10, 0), dayOf(today, -120), localAt(today, -120, 10, 0))
 
 	// Seven subscriptions, so the six most recent leave the oldest out.
 	type sub struct {
@@ -118,19 +120,20 @@ func TestGetUser_EveryBlock_PG(t *testing.T) {
 		seedWatch(t, pool, user, m.anime, m.episode, m.at)
 	}
 
-	// Sessions: two live, one expired.
+	// Sessions: two live, one expired.  The one used most recently was opened
+	// first, so "most recently used first" and "newest first" disagree.
 	windows, iphone, mac := uaWindowsChrome, uaIPhoneSafari, uaMacFirefox
 	jp := "JP"
-	older := sessionSeed{UserAgent: &windows, Country: &jp,
+	recent := sessionSeed{UserAgent: &iphone,
 		CreatedAt: now.Add(-48 * time.Hour).Truncate(time.Microsecond),
-		LastUsed:  now.Add(-time.Hour).Truncate(time.Microsecond),
-		Expires:   now.Add(29 * 24 * time.Hour).Truncate(time.Microsecond)}
-	newer := sessionSeed{UserAgent: &iphone,
-		CreatedAt: now.Add(-24 * time.Hour).Truncate(time.Microsecond),
 		LastUsed:  now.Add(-5 * time.Minute).Truncate(time.Microsecond),
 		Expires:   now.Add(30 * 24 * time.Hour).Truncate(time.Microsecond)}
-	olderID := seedSession(t, pool, user, older)
-	newerID := seedSession(t, pool, user, newer)
+	earlier := sessionSeed{UserAgent: &windows, Country: &jp,
+		CreatedAt: now.Add(-24 * time.Hour).Truncate(time.Microsecond),
+		LastUsed:  now.Add(-time.Hour).Truncate(time.Microsecond),
+		Expires:   now.Add(29 * 24 * time.Hour).Truncate(time.Microsecond)}
+	recentID := seedSession(t, pool, user, recent)
+	earlierID := seedSession(t, pool, user, earlier)
 	seedSession(t, pool, user, sessionSeed{UserAgent: &mac, LastUsed: now.Add(-30 * time.Second), Expires: now.Add(-time.Hour)})
 
 	// Community: soft-deleted threads, replies and reviews do not count.
@@ -230,12 +233,12 @@ func TestGetUser_EveryBlock_PG(t *testing.T) {
 
 	require.Len(t, got.Sessions, 2, "the expired session is not listed")
 	assert.Equal(t, userSessionView{
-		ID: newerID, Kind: "phone", OS: "iPhone", Browser: "Safari", Country: nil,
-		CreatedAt: newer.CreatedAt.UTC(), LastUsedAt: newer.LastUsed.UTC(), ExpiresAt: newer.Expires.UTC(),
+		ID: recentID, Kind: "phone", OS: "iPhone", Browser: "Safari", Country: nil,
+		CreatedAt: recent.CreatedAt.UTC(), LastUsedAt: recent.LastUsed.UTC(), ExpiresAt: recent.Expires.UTC(),
 	}, normaliseSession(got.Sessions[0]))
 	assert.Equal(t, userSessionView{
-		ID: olderID, Kind: "desktop", OS: "Windows", Browser: "Chrome", Country: &jp,
-		CreatedAt: older.CreatedAt.UTC(), LastUsedAt: older.LastUsed.UTC(), ExpiresAt: older.Expires.UTC(),
+		ID: earlierID, Kind: "desktop", OS: "Windows", Browser: "Chrome", Country: &jp,
+		CreatedAt: earlier.CreatedAt.UTC(), LastUsedAt: earlier.LastUsed.UTC(), ExpiresAt: earlier.Expires.UTC(),
 	}, normaliseSession(got.Sessions[1]))
 
 	assert.Equal(t, userDetailCommunity{

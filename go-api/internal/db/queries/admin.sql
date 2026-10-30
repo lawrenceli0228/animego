@@ -457,26 +457,6 @@ DELETE FROM anime_episode_titles WHERE anime_id = $1;
 
 -- ==================== User management ====================
 
--- name: GetAdminUserSubFollowCounts :many
--- Batch fetch sub_count + follower_count for a slice of user ids.
--- Replaces the two Promise.all aggregate pipelines in listUsers.
--- Returns 0 for users with no rows on either side via LEFT JOIN.
-SELECT
-    u.id                                                                AS user_id,
-    COALESCE(sub_counts.cnt, 0)::bigint                                  AS subscriptions,
-    COALESCE(fol_counts.cnt, 0)::bigint                                  AS followers
-FROM unnest($1::uuid[]) AS u(id)
-LEFT JOIN (
-    SELECT user_id, count(*) AS cnt
-    FROM subscriptions
-    GROUP BY user_id
-) sub_counts ON sub_counts.user_id = u.id
-LEFT JOIN (
-    SELECT followee_id, count(*) AS cnt
-    FROM follows
-    GROUP BY followee_id
-) fol_counts ON fol_counts.followee_id = u.id;
-
 -- name: AdminCreateUser :one
 -- POST /api/admin/users — create-by-admin path.  Caller bcrypts password
 -- before passing it in.  RETURNING only the projection Express's

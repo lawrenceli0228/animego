@@ -295,9 +295,10 @@ type enrichmentListResponse struct {
 // `username email role createdAt`:  _id, username, email, role,
 // createdAt, then the two injected counts.
 //
-// The three activity fields are appended after the historical prefix rather
-// than interleaved, so the Express-era field order stays intact for the
-// assertions that check it.
+// Everything after the two counts (the activity columns, then the user
+// table's ratings / watchedEpisodes / returned / strip / device) is appended
+// after the historical prefix rather than interleaved, so the Express-era
+// field order stays intact for the assertions that check it.
 type userItem struct {
 	ID            uuid.UUID `json:"_id"`
 	Username      string    `json:"username"`

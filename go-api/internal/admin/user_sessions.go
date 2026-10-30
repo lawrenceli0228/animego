@@ -76,7 +76,7 @@ func (h *UserSessionHandlers) RevokeUserSessions(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	claims, target, ok := h.sessionTarget(ctx, w, r, userID)
+	claims, username, ok := h.sessionTarget(ctx, w, r, userID)
 	if !ok {
 		return
 	}
@@ -93,7 +93,7 @@ func (h *UserSessionHandlers) RevokeUserSessions(w http.ResponseWriter, r *http.
 	}
 
 	slog.InfoContext(r.Context(), "admin revoked user sessions",
-		"admin", claims.Username, "username", target.Username, "revoked", n)
+		"admin", claims.Username, "username", username, "revoked", n)
 	httpx.Data(w, http.StatusOK, revokedSessionsResp{Revoked: n})
 }
 
@@ -114,7 +114,7 @@ func (h *UserSessionHandlers) RevokeUserSession(w http.ResponseWriter, r *http.R
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, msgInvalidSessionID))
 		return
 	}
-	claims, target, ok := h.sessionTarget(ctx, w, r, userID)
+	claims, username, ok := h.sessionTarget(ctx, w, r, userID)
 	if !ok {
 		return
 	}
@@ -130,34 +130,36 @@ func (h *UserSessionHandlers) RevokeUserSession(w http.ResponseWriter, r *http.R
 	}
 
 	slog.InfoContext(r.Context(), "admin revoked user session",
-		"admin", claims.Username, "username", target.Username, "sid", sessionID, "revoked", n)
+		"admin", claims.Username, "username", username, "sid", sessionID, "revoked", n)
 	httpx.Data(w, http.StatusOK, revokedSessionsResp{Revoked: n})
 }
 
 // sessionTarget checks who is asking and about whom, and writes the failure
 // itself: 500 without claims (the route is mounted outside RequireAuth — a
 // wiring bug, not a permission problem), 400 for the admin's own account,
-// 404 when the account does not exist.
-func (h *UserSessionHandlers) sessionTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, userID uuid.UUID) (*jwtx.AccessClaims, dbgen.User, bool) {
+// 404 when the account does not exist.  It hands back only the account's
+// username, for the audit line: the users row also carries credential
+// columns, and nothing here should be one edit away from serialising them.
+func (h *UserSessionHandlers) sessionTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, userID uuid.UUID) (*jwtx.AccessClaims, string, bool) {
 	claims, ok := jwtx.ClaimsFrom(r.Context())
 	if !ok || claims == nil {
 		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "missing auth claims"))
-		return nil, dbgen.User{}, false
+		return nil, "", false
 	}
 	if claims.UserID == userID {
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, msgCannotRevokeSelf))
-		return nil, dbgen.User{}, false
+		return nil, "", false
 	}
 	user, err := h.db.GetUserByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
-			return nil, dbgen.User{}, false
+			return nil, "", false
 		}
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "user lookup failed"))
-		return nil, dbgen.User{}, false
+		return nil, "", false
 	}
-	return claims, user, true
+	return claims, user.Username, true
 }
 
 // RevokeAllUserSessions ends every session of the account in one
@@ -169,8 +171,13 @@ func (h *UserSessionHandlers) sessionTarget(ctx context.Context, w http.Response
 // session either commits first (and its new session is deleted here) or
 // waits and finds its token cleared; a login opening a session either
 // commits first (and is signed out here) or waits and opens it after.
+//
+// READ COMMITTED is load-bearing, so it is stated rather than inherited: each
+// statement takes a fresh snapshot, which is how the delete sees a session
+// committed while the lock was being waited for.  Under REPEATABLE READ the
+// snapshot would predate the wait and that session would survive, silently.
 func (s *UserStore) RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, bool, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return 0, false, fmt.Errorf("admin: begin revoke sessions: %w", err)
 	}

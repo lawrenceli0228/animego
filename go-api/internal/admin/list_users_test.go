@@ -7,6 +7,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"strconv"
@@ -366,6 +367,33 @@ func TestParsePage(t *testing.T) {
 			assert.Equal(t, tc.want, parsePage(tc.input))
 		})
 	}
+}
+
+// The field names are users.ts's, exactly.  The pg tests decode into the
+// same Go structs, which a mistyped tag would survive.
+func TestUserListResponse_FieldNamesMatchTheWireContract(t *testing.T) {
+	t.Parallel()
+	country := "JP"
+	body, err := json.Marshal(userListResponse{
+		Data:  []userItem{{ID: uuid.New(), RecentActiveDates: []string{}, LastDevice: &userDevice{Country: &country}}},
+		Today: "2026-03-02",
+	})
+	require.NoError(t, err)
+
+	var top map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &top))
+	assert.Equal(t, sorted("data", "hasMore", "total", "page", "today", "segments"), keysOf(t, body))
+	assert.Equal(t, sorted("all", "active7", "returned", "neverReturned", "subscribed", "admin"), keysOf(t, top["segments"]))
+
+	var rows []json.RawMessage
+	require.NoError(t, json.Unmarshal(top["data"], &rows))
+	require.Len(t, rows, 1)
+	assert.Equal(t, sorted("_id", "username", "email", "role", "createdAt", "lastSeenAt", "activeDays", "logins",
+		"subscriptions", "followers", "ratings", "watchedEpisodes", "returned", "recentActiveDates", "lastDevice"),
+		keysOf(t, rows[0]))
+	var row map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(rows[0], &row))
+	assert.Equal(t, sorted("kind", "os", "browser", "country", "lastUsedAt"), keysOf(t, row["lastDevice"]))
 }
 
 // --- attachUserBatches -------------------------------------------------------

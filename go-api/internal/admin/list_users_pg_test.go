@@ -230,7 +230,7 @@ func TestListUsers_EverySort_PG(t *testing.T) {
 	seedUserAt(t, pool, "sort_c", "sort_c@example.com", localAt(today, -8, 8, 0)) // never seen, nothing
 	d := seedUserAt(t, pool, "sort_d", "sort_d@example.com", localAt(today, -7, 8, 0))
 
-	// last seen: b today 09:00, a yesterday 20:00, d three days ago; c never.
+	// last seen: b today 00:20, a yesterday 20:00, d three days ago; c never.
 	archiveSeedDay(t, pool, a, dayOf(today, -1), localAt(today, -1, 19, 0), localAt(today, -1, 20, 0), 1, 0)
 	archiveSeedDay(t, pool, b, dayOf(today, -1), localAt(today, -1, 8, 0), localAt(today, -1, 8, 30), 1, 0)
 	archiveSeedDay(t, pool, b, dayOf(today, 0), localAt(today, 0, 0, 10), localAt(today, 0, 0, 20), 1, 0)
@@ -373,8 +373,8 @@ func TestListUsers_ReturnedUsesTheShanghaiSignupDay_PG(t *testing.T) {
 	assert.Equal(t, int64(2), never.Segments.Returned)
 }
 
-// lastDevice is the live session used most recently; an expired one is
-// ignored even when it was used later.
+// lastDevice is the live session used most recently — not the one opened
+// most recently — and an expired one is ignored even when it was used later.
 func TestListUsers_LastDevice_PG(t *testing.T) {
 	h, pool := makeHandlers(t)
 	today := pinUsersClock(h)
@@ -384,9 +384,13 @@ func TestListUsers_LastDevice_PG(t *testing.T) {
 	iphone, windows, mac := uaIPhoneSafari, uaWindowsChrome, uaMacFirefox
 
 	user := seedUserAt(t, pool, "dev_user", "dev_user@example.com", localAt(today, -30, 9, 0))
-	seedSession(t, pool, user, sessionSeed{UserAgent: &windows, Country: &jp, LastUsed: now.Add(-2 * time.Hour), Expires: live})
+	// Opened most recently, used two hours ago.
+	seedSession(t, pool, user, sessionSeed{UserAgent: &windows, Country: &jp,
+		CreatedAt: now.Add(-3 * time.Hour), LastUsed: now.Add(-2 * time.Hour), Expires: live})
+	// Opened ten days ago, used a minute ago: the last device.
 	newest := now.Add(-time.Minute).Truncate(time.Microsecond)
-	seedSession(t, pool, user, sessionSeed{UserAgent: &iphone, Country: &cn, LastUsed: newest, Expires: live})
+	seedSession(t, pool, user, sessionSeed{UserAgent: &iphone, Country: &cn,
+		CreatedAt: now.Add(-10 * 24 * time.Hour), LastUsed: newest, Expires: live})
 	seedSession(t, pool, user, sessionSeed{UserAgent: &mac, LastUsed: now.Add(-10 * time.Second), Expires: now.Add(-time.Hour)})
 
 	expiredOnly := seedUserAt(t, pool, "dev_expired", "dev_expired@example.com", localAt(today, -30, 8, 0))
@@ -412,6 +416,37 @@ func TestListUsers_LastDevice_PG(t *testing.T) {
 	assert.Nil(t, byName["dev_expired"].LastDevice, "an expired session is not a last device")
 	assert.Nil(t, byName["dev_none"].LastDevice)
 	assert.Contains(t, body, `"lastDevice":null`)
+}
+
+// The handlers take today in +08.  At 17:30 UTC it is already tomorrow in
+// +08, so a handler that took the UTC date would answer a day behind: its
+// strip would hold today-30 and miss today.  The clock is pinned to that
+// instant rather than left to whenever the suite happens to run.
+func TestUserTable_TodayIsTheShanghaiDay_PG(t *testing.T) {
+	h, pool := makeHandlers(t)
+	u := time.Now().UTC()
+	pinned := time.Date(u.Year(), u.Month(), u.Day(), 17, 30, 0, 0, time.UTC)
+	h.now = func() time.Time { return pinned }
+	today := activity.Day(pinned)
+	require.NotEqual(t, pinned.Format(userDayLayout), today.Format(userDayLayout))
+
+	user := seedUserAt(t, pool, "tz_today", "tz_today@example.com", localAt(today, -40, 9, 0))
+	seedDay(t, pool, user, today, 0)
+	seedDay(t, pool, user, today, -30)
+
+	got, _ := getUsersPage(t, h, "")
+	assert.Equal(t, today.Format(userDayLayout), got.Today)
+	require.Len(t, got.Data, 1)
+	assert.Equal(t, []string{dayOf(today, 0)}, got.Data[0].RecentActiveDates)
+	assert.Equal(t, int64(1), got.Segments.Active7)
+
+	rec, detail := getUserDetail(t, h, user.String())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, today.Format(userDayLayout), detail.Today)
+	assert.Equal(t, []userActivityDay{
+		{Date: dayOf(today, -30), Recorded: true},
+		{Date: dayOf(today, 0), Recorded: true},
+	}, detail.Activity.Days90)
 }
 
 // The depth filter counts distinct days inside the window only.

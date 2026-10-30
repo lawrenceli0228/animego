@@ -656,14 +656,6 @@ func (failingQuerier) GetDescriptionCnLlmStats(_ context.Context) (dbgen.GetDesc
 	return dbgen.GetDescriptionCnLlmStatsRow{}, errors.New("simulated description_cn llm stats query failure")
 }
 
-func (failingQuerier) GetAdminUserSubFollowCounts(_ context.Context, _ []uuid.UUID) ([]dbgen.GetAdminUserSubFollowCountsRow, error) {
-	return nil, errors.New("simulated sub/follow query failure")
-}
-
-func (failingQuerier) GetAdminUserActivityCounts(_ context.Context, _ []uuid.UUID) ([]dbgen.GetAdminUserActivityCountsRow, error) {
-	return nil, errors.New("simulated activity counts query failure")
-}
-
 // --- ListEnrichment ---------------------------------------------------------
 
 func TestListEnrichment_EmptyResult(t *testing.T) {
@@ -983,9 +975,9 @@ func TestListUsers_MergesCounts(t *testing.T) {
 	seedSubscription(t, pool, alice, 1)
 	seedSubscription(t, pool, alice, 2)
 	seedSubscription(t, pool, bob, 1)
-	seedFollow(t, pool, bob, alice)    // alice has 1 follower
-	seedFollow(t, pool, alice, carol)  // carol has 1 follower
-	seedFollow(t, pool, bob, carol)    // carol has 2 followers total
+	seedFollow(t, pool, bob, alice)   // alice has 1 follower
+	seedFollow(t, pool, alice, carol) // carol has 1 follower
+	seedFollow(t, pool, bob, carol)   // carol has 2 followers total
 
 	rec := httptest.NewRecorder()
 	h.ListUsers(rec, httptest.NewRequest(http.MethodGet, "/api/admin/users", nil))
