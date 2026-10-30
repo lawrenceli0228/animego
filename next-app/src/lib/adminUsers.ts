@@ -335,8 +335,9 @@ export interface CalendarModel {
  * Monday-first week columns covering [today − span + 1, today]. Cells before
  * the window or after today are "outside" (drawn blank), so the grid stays a
  * rectangle without claiming a day had no visit. A month is labelled on the
- * column holding its 1st; the first column is labelled too when neither it
- * nor the next one holds a 1st, so the grid never starts unnamed.
+ * column holding its 1st, if that 1st is inside the window; the first column
+ * is labelled too when neither it nor the next one holds one, so the grid
+ * never starts unnamed.
  */
 export function visitCalendar(
   days: readonly { date: string; recorded: boolean }[],
@@ -368,7 +369,9 @@ export function visitCalendar(
             : "reconstructed";
       return { date, state, today: date === today, weekday: i + 1 };
     });
-    const firstOfMonth = cells.find((c) => c.date.endsWith("-01"));
+    // Only a 1st the grid actually draws: a future or pre-window 1st is a
+    // blank cell, and naming its month would label a month that is not shown.
+    const firstOfMonth = cells.find((c) => c.state !== "outside" && c.date.endsWith("-01"));
     return { start, month: firstOfMonth ? Number(firstOfMonth.date.slice(5, 7)) : null, cells };
   });
 

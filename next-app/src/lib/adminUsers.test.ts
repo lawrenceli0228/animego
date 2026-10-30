@@ -272,6 +272,19 @@ describe("the 90-day visit calendar", () => {
   });
 });
 
+describe("calendar month labels only name months the grid shows", () => {
+  test("a 1st that falls after today does not label its column", () => {
+    // 2026-10-30 is a Friday; its column runs 10-26..11-01, and 11-01 is a
+    // future cell drawn blank. Labelling that column 11月 would name a month
+    // the calendar does not contain.
+    const cal = visitCalendar([], "2026-10-30");
+    const last = cal.weeks[cal.weeks.length - 1];
+    expect(last.cells.find((c) => c.date === "2026-11-01")?.state).toBe("outside");
+    expect(last.month).toBeNull();
+    expect(cal.weeks.map((w) => w.month).filter((m) => m !== null)).toEqual([8, 9, 10]);
+  });
+});
+
 describe("the list query", () => {
   const q = (over: Partial<AdminUsersQuery>): string => usersQueryString({ ...DEFAULT_USERS_QUERY, ...over });
 

@@ -249,6 +249,17 @@
   background: #1c1c28;
 }
 
+/* The legend's base swatch is declared before the state rules below: with
+ * equal specificity the later rule wins, and a base written after them had
+ * painted every swatch the "no visit" grey. */
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #1c1c28;
+}
+
 .calCell[data-state="recorded"],
 .swatchRecorded {
   background: #3d90dd;
@@ -281,14 +292,6 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-
-.swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  background: #1c1c28;
 }
 
 .calSum {
