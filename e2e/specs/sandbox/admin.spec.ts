@@ -10,6 +10,7 @@
 //      cancelled: focus stays in it, Escape closes it, focus goes back
 //   5. logged-in admin     → a chip and straight back, before the first
 //      request answers, leaves the table not loading
+//   6. logged-in admin on a phone → the page is no wider than the screen
 //
 // The globalSetup storageState user has role=null (plain user), so the
 // non-admin block uses it via the project-level storageState. The admin
@@ -302,6 +303,32 @@ test.describe("admin user list", () => {
     await expect(users.locator('[aria-busy="true"]')).toHaveCount(0);
     await expect(users.locator('[data-segment="all"]')).toHaveAttribute("aria-pressed", "true");
     await expect(users.locator("tbody tr[data-user-row]").first()).toBeVisible();
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+  });
+});
+
+test.describe("admin on a phone", () => {
+  test.use({ storageState: { cookies: [], origins: [] }, viewport: { width: 390, height: 844 } });
+
+  test("the page is no wider than the screen", async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors = collectConsoleErrors(page);
+    await signInAsNewAdmin(page);
+
+    await page.goto("/admin");
+    await waitForHydration(page, '#users input[type="search"]');
+    await expect(page.locator("#users table")).toBeVisible();
+
+    // The document's scroll width, not a scroll attempt: html clips sideways
+    // overflow, so a user cannot pan, but a positioned element escaping a
+    // scroll container (the table's visually hidden header text once did)
+    // still widens the page.
+    const width = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth,
+      screen: window.innerWidth,
+    }));
+    expect(width.page).toBeLessThanOrEqual(width.screen);
 
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });

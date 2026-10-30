@@ -238,7 +238,12 @@
 
 /* ─── The table ──────────────────────────────────────────────────────── */
 
+/* position: relative makes this the containing block of the table's
+ * visually hidden header text (.srOnly is absolute). Without it the 1px span
+ * in the last column escaped the scroller and widened the whole page to the
+ * table's width on a phone. */
 .scroll {
+  position: relative;
   overflow-x: auto;
   border: 1px solid #1f1f2a;
   border-radius: 8px;
