@@ -848,7 +848,9 @@ type Querier interface {
 	// Activity is all time: active_days counts every row (before
 	// instrumented_since a row is a reconstructed interaction day, after it a
 	// recorded visit -- the same caveat as the list column), recorded_days only
-	// the rows the live recorder wrote (request_count > 0).
+	// the rows the live recorder wrote: a request or a login counted.  0026 writes
+	// both counters as zero, and a day with only a password login (nothing
+	// requested after it) is still a day the recorder saw.
 	//
 	// score_sum is returned instead of an average so the mean is computed in Go
 	// from two NOT NULL integers: "no rated subscriptions" stays an explicit
@@ -1621,8 +1623,9 @@ type Querier interface {
 	// per event.
 	ListActivityReplies(ctx context.Context, eventIds []uuid.UUID, viewerID *uuid.UUID, perEventLimit int32) ([]ListActivityRepliesRow, error)
 	// The detail drawer's 90-day calendar: every recorded day of the account in
-	// [today-89, today], ascending.  recorded = the live recorder wrote the row;
-	// false means migration 0026 reconstructed it from other tables.
+	// [today-89, today], ascending.  recorded = the live recorder wrote the row
+	// (a request or a login counted; see recorded_days above); false means
+	// migration 0026 reconstructed it from other tables.
 	ListAdminUserActivityDays(ctx context.Context, userID uuid.UUID, today pgtype.Date) ([]ListAdminUserActivityDaysRow, error)
 	// The most recently used LIVE session of each account on the page.  Expired
 	// rows stay in user_sessions until the owner's next login prunes them, so

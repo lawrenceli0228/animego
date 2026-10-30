@@ -60,6 +60,9 @@ func TestGetUser_EveryBlock_PG(t *testing.T) {
 	archiveSeedDay(t, pool, user, dayOf(today, -90), localAt(today, -90, 10, 0), localAt(today, -90, 11, 0), 0, 0)
 	archiveSeedDay(t, pool, user, dayOf(today, -89), localAt(today, -89, 10, 0), localAt(today, -89, 11, 0), 5, 1)
 	archiveSeedDay(t, pool, user, dayOf(today, -40), localAt(today, -40, 10, 0), localAt(today, -40, 11, 0), 0, 0)
+	// A password login and nothing requested after it: no request counted, but
+	// the recorder saw the day (0026 writes both counters as zero).
+	archiveSeedDay(t, pool, user, dayOf(today, -20), localAt(today, -20, 21, 0), localAt(today, -20, 21, 0), 0, 1)
 	archiveSeedDay(t, pool, user, dayOf(today, -1), localAt(today, -1, 10, 0), localAt(today, -1, 12, 0), 7, 2)
 	lastSeen := localAt(today, 0, 0, 40)
 	archiveSeedDay(t, pool, user, dayOf(today, 0), localAt(today, 0, 0, 10), lastSeen, 3, 0)
@@ -173,15 +176,16 @@ func TestGetUser_EveryBlock_PG(t *testing.T) {
 		CreatedAt: signup.UTC(), IsPublic: false, AvatarURL: &avatar,
 	}, got.User)
 
-	assert.Equal(t, int64(5), got.Activity.ActiveDays)
-	assert.Equal(t, int64(3), got.Activity.RecordedDays)
+	assert.Equal(t, int64(6), got.Activity.ActiveDays)
+	assert.Equal(t, int64(4), got.Activity.RecordedDays, "the login-only day is a recorded one")
 	assert.Equal(t, int64(15), got.Activity.Requests)
-	assert.Equal(t, int64(3), got.Activity.Logins)
+	assert.Equal(t, int64(4), got.Activity.Logins)
 	require.NotNil(t, got.Activity.LastSeenAt)
 	assert.True(t, got.Activity.LastSeenAt.Equal(lastSeen))
 	assert.Equal(t, []userActivityDay{
 		{Date: dayOf(today, -89), Recorded: true},
 		{Date: dayOf(today, -40), Recorded: false},
+		{Date: dayOf(today, -20), Recorded: true},
 		{Date: dayOf(today, -1), Recorded: true},
 		{Date: dayOf(today, 0), Recorded: true},
 	}, got.Activity.Days90)

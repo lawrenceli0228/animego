@@ -54,7 +54,8 @@ SELECT
     (SELECT count(*) FROM user_activity_daily AS a
       WHERE a.user_id = u.id)::bigint                                            AS active_days,
     (SELECT count(*) FROM user_activity_daily AS a
-      WHERE a.user_id = u.id AND a.request_count > 0)::bigint                    AS recorded_days,
+      WHERE a.user_id = u.id
+        AND (a.request_count > 0 OR a.login_count > 0))::bigint                  AS recorded_days,
     (SELECT max(a.last_seen_at) FROM user_activity_daily AS a
       WHERE a.user_id = u.id)::timestamptz                                       AS last_seen_at,
     (SELECT COALESCE(sum(a.login_count), 0) FROM user_activity_daily AS a
@@ -146,7 +147,9 @@ type GetAdminUserDetailRow struct {
 // Activity is all time: active_days counts every row (before
 // instrumented_since a row is a reconstructed interaction day, after it a
 // recorded visit -- the same caveat as the list column), recorded_days only
-// the rows the live recorder wrote (request_count > 0).
+// the rows the live recorder wrote: a request or a login counted.  0026 writes
+// both counters as zero, and a day with only a password login (nothing
+// requested after it) is still a day the recorder saw.
 //
 // score_sum is returned instead of an average so the mean is computed in Go
 // from two NOT NULL integers: "no rated subscriptions" stays an explicit
@@ -195,7 +198,7 @@ func (q *Queries) GetAdminUserDetail(ctx context.Context, id uuid.UUID) (GetAdmi
 }
 
 const listAdminUserActivityDays = `-- name: ListAdminUserActivityDays :many
-SELECT a.activity_date, (a.request_count > 0)::boolean AS recorded
+SELECT a.activity_date, (a.request_count > 0 OR a.login_count > 0)::boolean AS recorded
 FROM user_activity_daily AS a
 WHERE a.user_id = $1
   AND a.activity_date BETWEEN $2::date - 89 AND $2::date
@@ -208,8 +211,9 @@ type ListAdminUserActivityDaysRow struct {
 }
 
 // The detail drawer's 90-day calendar: every recorded day of the account in
-// [today-89, today], ascending.  recorded = the live recorder wrote the row;
-// false means migration 0026 reconstructed it from other tables.
+// [today-89, today], ascending.  recorded = the live recorder wrote the row
+// (a request or a login counted; see recorded_days above); false means
+// migration 0026 reconstructed it from other tables.
 func (q *Queries) ListAdminUserActivityDays(ctx context.Context, userID uuid.UUID, today pgtype.Date) ([]ListAdminUserActivityDaysRow, error) {
 	rows, err := q.db.Query(ctx, listAdminUserActivityDays, userID, today)
 	if err != nil {
