@@ -1,18 +1,21 @@
-// P10 sandbox — /admin access control.
+// P10 sandbox — /admin access control, and the user list.
 //
-// Two flows:
+// Three flows:
 //   1. logged-in non-admin → /admin returns 403 (proxy.ts:69)
 //   2. logged-in admin     → /admin renders the dashboard
+//   3. logged-in admin     → the user list: segment chips with their sizes,
+//      the activity panel's depth hand-off, the row menu, search, and the
+//      detail drawer opening and closing with Escape
 //
 // The globalSetup storageState user has role=null (plain user), so the
 // non-admin block uses it via the project-level storageState. The admin
-// block opts out of that state and logs in fresh with a per-run admin
-// account it inserts itself.
+// blocks opt out of that state and log in fresh with a per-run admin
+// account they insert themselves.
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { collectConsoleErrors, expectSignedIn } from "../_helpers";
 import { closePg, insertPgUser } from "../../fixtures/pg";
-import { makeUser } from "../../fixtures/users";
+import { makeUser, type TestUser } from "../../fixtures/users";
 import { waitForHydration } from "../../fixtures/hydration";
 
 // Cleanup is centralized in globalSetup so it runs once before any
@@ -20,6 +23,38 @@ import { waitForHydration } from "../../fixtures/hydration";
 test.afterAll(async () => {
   await closePg();
 });
+
+/**
+ * A fresh admin, signed in through the real form.
+ *
+ * The Postgres row is the whole account. The old two-step — mint the record
+ * via a Mongo `insertAdmin`, then re-insert it into Postgres "so Go API login
+ * can authenticate the admin" — kept a Mongo write whose only surviving
+ * purpose was to hand back a user object. makeUser does that without a
+ * database.
+ */
+async function signInAsNewAdmin(page: Page): Promise<TestUser> {
+  const user = makeUser("admin");
+  await insertPgUser({
+    username: user.username,
+    email: user.email,
+    passwordHash: user.passwordHash,
+    role: "admin",
+  });
+
+  await page.goto("/login");
+  // See fixtures/hydration.ts. An unhydrated fill posts an empty form, the
+  // login never happens, and the test then fails on the /admin assertion —
+  // reading exactly like an access-control regression.
+  await waitForHydration(page, "#login-email");
+  await page.locator("#login-email").fill(user.email);
+  await page.locator("#login-password").fill(user.password);
+  await Promise.all([
+    page.waitForURL((url) => !url.pathname.startsWith("/login")),
+    page.locator('button[type="submit"]').click(),
+  ]);
+  return user;
+}
 
 test.describe("non-admin rejection", () => {
   test("non-admin user is rejected from /admin with 403", async ({ page }) => {
@@ -46,31 +81,7 @@ test.describe("admin dashboard", () => {
 
   test("admin user sees the admin dashboard", async ({ page }) => {
     const errors = collectConsoleErrors(page);
-
-    // The Postgres row is the whole account. The old two-step — mint the
-    // record via a Mongo `insertAdmin`, then re-insert it into Postgres
-    // "so Go API login can authenticate the admin" — kept a Mongo write
-    // whose only surviving purpose was to hand back a user object.
-    // makeUser does that without a database.
-    const user = makeUser("admin");
-    await insertPgUser({
-      username: user.username,
-      email: user.email,
-      passwordHash: user.passwordHash,
-      role: "admin",
-    });
-
-    await page.goto("/login");
-    // See fixtures/hydration.ts. An unhydrated fill posts an empty form, the
-    // login never happens, and this test then fails on the /admin assertion —
-    // reading exactly like an access-control regression.
-    await waitForHydration(page, "#login-email");
-    await page.locator("#login-email").fill(user.email);
-    await page.locator("#login-password").fill(user.password);
-    await Promise.all([
-      page.waitForURL((url) => !url.pathname.startsWith("/login")),
-      page.locator('button[type="submit"]').click(),
-    ]);
+    await signInAsNewAdmin(page);
 
     await page.goto("/admin");
 
@@ -93,6 +104,111 @@ test.describe("admin dashboard", () => {
     await page.mouse.wheel(0, -200);
     await expect(siteHeader).toHaveAttribute("data-hidden", "false");
     await expect.poll(barTop).toBe(64);
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+  });
+});
+
+test.describe("admin user list", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  // Two logins' worth of `next dev` compiles, the debounced search and the
+  // drawer's own chunk do not fit Playwright's 30s default.
+  const SPEC_TIMEOUT_MS = 120_000;
+  // The drawer is loaded on first open (next/dynamic), which under
+  // `next dev` is a compile, then it fetches the account.
+  const DRAWER_MS = 20_000;
+
+  test("chips carry their sizes, search finds one account, its drawer opens and Escape closes it", async ({
+    page,
+  }) => {
+    test.setTimeout(SPEC_TIMEOUT_MS);
+    const errors = collectConsoleErrors(page);
+
+    // The account to look for: never signed in, so nothing about it depends
+    // on what other specs in this run have done.
+    const target = makeUser();
+    await insertPgUser({
+      username: target.username,
+      email: target.email,
+      passwordHash: target.passwordHash,
+    });
+    await signInAsNewAdmin(page);
+    await page.goto("/admin");
+
+    const users = page.locator("#users");
+    // The search box is part of the same client tree as the chips, rows and
+    // menus: once React owns it, their handlers are attached too.
+    await waitForHydration(page, '#users input[type="search"]');
+
+    // ── Segment chips: six, each with a count, 全部 selected ───────────────
+    // Counts are over every account in this run's database, which parallel
+    // specs keep adding to — so they are checked for shape, not value.
+    const chips = users.getByRole("group", { name: "按人群筛选" }).getByRole("button");
+    await expect(chips).toHaveCount(6);
+    const segments: Array<[string, string]> = [
+      ["all", "全部"],
+      ["active7", "近 7 天来过"],
+      ["returned", "回访过"],
+      ["neverReturned", "没有回访记录"],
+      ["subscribed", "有追番"],
+      ["admin", "管理员"],
+    ];
+    for (const [segment, label] of segments) {
+      await expect(users.locator(`[data-segment="${segment}"]`)).toHaveText(new RegExp(`^${label}\\s*\\d[\\d,]*$`));
+    }
+    await expect(users.locator('[data-segment="all"]')).toHaveAttribute("aria-pressed", "true");
+
+    // ── The activity panel's depth rows hand over through a window event ──
+    // Dispatched here directly: this pins the list's side of the contract.
+    // The listener is attached in an effect, which runs after hydration, so
+    // the event is re-sent until the chip appears (see fixtures/hydration.ts).
+    const depthChip = users.locator("[data-depth-chip]");
+    await expect(async () => {
+      await page.evaluate(() =>
+        window.dispatchEvent(
+          new CustomEvent("admin:users-depth", { detail: { days: 30, min: 3, max: 6 } }),
+        ),
+      );
+      await expect(depthChip).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
+    await expect(depthChip).toHaveText(/^近 30 天来过 3–6 天\s*×$/);
+    await depthChip.click();
+    await expect(depthChip).toHaveCount(0);
+
+    // ── Search narrows the table to the one account ────────────────────────
+    // The username is unique to this run (a uuid prefix), and the account's
+    // email starts with it, so exactly one row matches.
+    await users.getByRole("searchbox", { name: "搜索用户名或邮箱" }).fill(target.username);
+    const rows = users.locator("tbody tr[data-user-row]");
+    await expect(rows).toHaveCount(1, { timeout: 15_000 });
+    const row = rows.first();
+    await expect(row).toContainText(target.email);
+
+    // ── The row menu: portalled, five actions, Escape gives focus back ────
+    const dots = row.getByRole("button", { name: `${target.username} 的更多操作` });
+    await dots.click();
+    const menu = page.getByRole("menu", { name: `${target.username} 的更多操作` });
+    await expect(menu.getByRole("menuitem")).toHaveCount(5);
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(dots).toBeFocused();
+
+    // ── The drawer: opens on the username, closes on Escape ───────────────
+    const opener = row.getByRole("button", { name: target.username, exact: true });
+    await opener.click();
+    const drawer = page.getByRole("dialog", { name: target.username });
+    await expect(drawer).toBeVisible({ timeout: DRAWER_MS });
+    await expect(drawer).toContainText(target.email);
+    await expect(drawer).toContainText("普通用户");
+    // The detail endpoint answered: the tiles and the calendar are drawn.
+    await expect(drawer.locator('[data-tile="activeDays"]')).toBeVisible({ timeout: DRAWER_MS });
+    await expect(drawer.locator('[data-block="calendar"]')).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(drawer).toHaveCount(0);
+    // Focus goes back to what opened it.
+    await expect(opener).toBeFocused();
 
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });
