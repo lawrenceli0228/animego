@@ -13,7 +13,9 @@ import type { Lang } from "@/lib/i18n/lang";
 import { formatSubLine, genreLabels, popularityText, statusSubLine } from "@/lib/seasonal/display";
 import type { SeasonalItem } from "@/lib/seasonal/model";
 import { Pills, Score } from "./CardBits";
+import type { RankMark } from "./types";
 import type { BrowseCopy } from "./useBrowseCopy";
+import cards from "./cards.module.css";
 import rows from "./rows.module.css";
 
 const ROW_GENRES = 3;
@@ -27,15 +29,27 @@ interface TableRowProps {
   copy: BrowseCopy;
   /** "2026 秋季" — what a finished show's status line says. */
   seasonYear: string;
+  /**
+   * The show's place in a ranking: a column of its number outside the row,
+   * read before the title. On a phone the ranked row is AniList's compact
+   * one — number, cover, title over a line of when and what, score. Pass a
+   * stable object (the row is memoised).
+   */
+  rank?: RankMark;
 }
 
-function TableRow({ item, hidden, delayMs, nowMs, lang, copy, seasonYear }: TableRowProps) {
+function TableRow({ item, hidden, delayMs, nowMs, lang, copy, seasonYear, rank }: TableRowProps) {
   const tone = toneLadder(item.hue);
   const href = `/anime/${item.id}`;
   const rootStyle: CSSProperties = { color: tone.text, animationDelay: `${delayMs}ms` };
-
-  return (
-    <div className={rows.row} style={rootStyle} hidden={hidden} data-anime-card data-id={item.id}>
+  const row = (
+    <div
+      className={rows.row}
+      style={rank ? undefined : rootStyle}
+      hidden={rank ? undefined : hidden}
+      data-anime-card={rank ? undefined : true}
+      data-id={rank ? undefined : item.id}
+    >
       <Link
         href={href}
         prefetch={false}
@@ -48,8 +62,10 @@ function TableRow({ item, hidden, delayMs, nowMs, lang, copy, seasonYear }: Tabl
       </Link>
       <div className={rows.rowMain}>
         <Link href={href} prefetch={false} className={rows.rowTitle}>
+          {rank ? <span className={cards.srOnly}>{`${rank.label} `}</span> : null}
           {item.title}
         </Link>
+        {rank ? <div className={rows.rowSub}>{rank.sub}</div> : null}
         <Pills
           labels={genreLabels(item, lang, ROW_GENRES)}
           tone={tone.text}
@@ -73,6 +89,16 @@ function TableRow({ item, hidden, delayMs, nowMs, lang, copy, seasonYear }: Tabl
         <div className={rows.colMain}>{item.status ? statusLabel(item.status, lang) : "—"}</div>
         <div className={rows.colSub}>{statusSubLine(item, nowMs, copy, lang, seasonYear)}</div>
       </div>
+    </div>
+  );
+  if (!rank) return row;
+  return (
+    <div className={rows.ranked} style={rootStyle} hidden={hidden} data-anime-card data-id={item.id}>
+      <span className={rows.rankNum} aria-hidden="true" data-rank={rank.n}>
+        <i>#</i>
+        {rank.n}
+      </span>
+      {row}
     </div>
   );
 }
