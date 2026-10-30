@@ -5,10 +5,10 @@ package admin
 //	DELETE /api/admin/users/{userId}/sessions              every device
 //	DELETE /api/admin/users/{userId}/sessions/{sessionId}  one device
 //
-// Both answer {revoked: n}.  Ending a session deletes its user_sessions
-// row; the device notices on its next request, because jwtx's session check
-// (UserSessionLive) refuses an access token whose session is gone, and its
-// refresh token can no longer rotate.
+// Both answer {revoked: n}, the signed-in devices they signed out.  Ending a
+// session deletes its user_sessions row; the device notices on its next
+// request, because jwtx's session check (UserSessionLive) refuses an access
+// token whose session is gone, and its refresh token can no longer rotate.
 //
 // Neither acts on the calling admin's own account: the admin's devices are
 // managed from the settings page, where the device being used is known and
@@ -42,8 +42,20 @@ const (
 // the account, so an id belonging to someone else ends nothing.
 type UserSessionDB interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (dbgen.User, error)
-	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) (revoked int64, found bool, err error)
+	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) (revoked RevokedSessions, found bool, err error)
 	DeleteUserSession(ctx context.Context, iD uuid.UUID, userID uuid.UUID) (int64, error)
+}
+
+// RevokedSessions is what RevokeAllUserSessions ended.
+type RevokedSessions struct {
+	// Live is how many signed-in devices were signed out: the sessions that
+	// had not expired, the ones the drawer's device list shows.  Expired rows
+	// are deleted too, uncounted.
+	Live int64
+	// LegacyCleared reports a pre-0052 refresh token cleared from the users
+	// row.  It is not in Live: the device list cannot show it, and nothing on
+	// the row says whether it has already expired.
+	LegacyCleared bool
 }
 
 // UserSessionHandlers carries the session actions' store.
@@ -67,7 +79,8 @@ type revokedSessionsResp struct {
 
 // RevokeUserSessions implements DELETE /api/admin/users/{userId}/sessions:
 // ends every session of the account, including a pre-0052 refresh token
-// still held on its users row.  revoked counts both.
+// still held on its users row.  revoked counts the live sessions ended (see
+// RevokedSessions); the audit line also says whether a legacy token went.
 func (h *UserSessionHandlers) RevokeUserSessions(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), userQueryTimeout)
 	defer cancel()
@@ -81,7 +94,7 @@ func (h *UserSessionHandlers) RevokeUserSessions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	n, found, err := h.db.RevokeAllUserSessions(ctx, userID)
+	res, found, err := h.db.RevokeAllUserSessions(ctx, userID)
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "revoke sessions failed"))
 		return
@@ -93,8 +106,9 @@ func (h *UserSessionHandlers) RevokeUserSessions(w http.ResponseWriter, r *http.
 	}
 
 	slog.InfoContext(r.Context(), "admin revoked user sessions",
-		"admin", claims.Username, "username", username, "revoked", n)
-	httpx.Data(w, http.StatusOK, revokedSessionsResp{Revoked: n})
+		"admin", claims.Username, "username", username,
+		"revoked", res.Live, "legacyCleared", res.LegacyCleared)
+	httpx.Data(w, http.StatusOK, revokedSessionsResp{Revoked: res.Live})
 }
 
 // RevokeUserSession implements DELETE
@@ -165,7 +179,7 @@ func (h *UserSessionHandlers) sessionTarget(ctx context.Context, w http.Response
 // RevokeAllUserSessions ends every session of the account in one
 // transaction, in auth.Store.RevokeOtherSessions' order without the kept
 // session: lock the users row, clear a pre-0052 refresh token still held on
-// it, delete every user_sessions row.  Returns how many ended.
+// it, delete every user_sessions row.  Returns what ended (RevokedSessions).
 //
 // The lock is what makes "every" true.  A legacy token being adopted into a
 // session either commits first (and its new session is deleted here) or
@@ -176,30 +190,30 @@ func (h *UserSessionHandlers) sessionTarget(ctx context.Context, w http.Response
 // statement takes a fresh snapshot, which is how the delete sees a session
 // committed while the lock was being waited for.  Under REPEATABLE READ the
 // snapshot would predate the wait and that session would survive, silently.
-func (s *UserStore) RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, bool, error) {
+func (s *UserStore) RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) (RevokedSessions, bool, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return 0, false, fmt.Errorf("admin: begin revoke sessions: %w", err)
+		return RevokedSessions{}, false, fmt.Errorf("admin: begin revoke sessions: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	q := dbgen.New(tx)
 	if _, err := q.LockUserForRevoke(ctx, userID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, false, nil
+			return RevokedSessions{}, false, nil
 		}
-		return 0, false, fmt.Errorf("admin: lock user for revoke: %w", err)
+		return RevokedSessions{}, false, fmt.Errorf("admin: lock user for revoke: %w", err)
 	}
 	legacy, err := q.ClearLegacyRefreshTokens(ctx, userID)
 	if err != nil {
-		return 0, false, fmt.Errorf("admin: clear legacy session: %w", err)
+		return RevokedSessions{}, false, fmt.Errorf("admin: clear legacy session: %w", err)
 	}
-	n, err := q.DeleteAllUserSessions(ctx, userID)
+	live, err := q.DeleteAllUserSessions(ctx, userID)
 	if err != nil {
-		return 0, false, fmt.Errorf("admin: delete sessions: %w", err)
+		return RevokedSessions{}, false, fmt.Errorf("admin: delete sessions: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, false, fmt.Errorf("admin: commit revoke sessions: %w", err)
+		return RevokedSessions{}, false, fmt.Errorf("admin: commit revoke sessions: %w", err)
 	}
-	return n + legacy, true, nil
+	return RevokedSessions{Live: live, LegacyCleared: legacy > 0}, true, nil
 }

@@ -170,5 +170,10 @@ export interface AdminUserSession {
 
 /** DELETE /api/admin/users/{userId}/sessions and …/sessions/{sessionId}. */
 export interface AdminRevokeSessionsResult {
+  /**
+   * Signed-in devices signed out. "Every device" deletes expired session rows
+   * and clears a refresh token from before per-device sessions too, but
+   * counts only the live sessions, the ones `sessions` above lists.
+   */
   revoked: number;
 }

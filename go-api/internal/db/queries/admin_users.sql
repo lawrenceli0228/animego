@@ -175,7 +175,7 @@ WHERE s.user_id = sqlc.arg(user_id)
   AND s.expires_at > now()
 ORDER BY s.last_used_at DESC, s.id;
 
--- name: DeleteAllUserSessions :execrows
+-- name: DeleteAllUserSessions :one
 -- "Sign this account out everywhere", from the admin page.  Runs in
 -- admin.UserStore.RevokeAllUserSessions' transaction after LockUserForRevoke
 -- and ClearLegacyRefreshTokens -- the same order, for the same reason, as
@@ -183,5 +183,16 @@ ORDER BY s.last_used_at DESC, s.id;
 -- is not one of this account's devices.  Each device notices on its next
 -- request, when jwtx's session check (UserSessionLive) no longer finds the
 -- session its access token names.
-DELETE FROM user_sessions
-WHERE user_id = sqlc.arg(user_id);
+--
+-- Every row goes, expired ones included, but only the live ones are counted:
+-- the count is "devices signed out", and the drawer's device list
+-- (ListAdminUserLiveSessions) shows only live sessions.  An expired row stays
+-- in the table until its owner next signs in, so counting it would report a
+-- device for an account that has not been signed in anywhere for months.
+WITH gone AS (
+    DELETE FROM user_sessions
+    WHERE user_id = sqlc.arg(user_id)
+    RETURNING expires_at
+)
+SELECT count(*) FILTER (WHERE expires_at > now())::bigint AS live
+FROM gone;

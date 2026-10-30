@@ -26,6 +26,7 @@ import (
 type fakeSessionDB struct {
 	userErr   error
 	revoked   int64
+	legacy    bool // RevokeAllUserSessions cleared a pre-0052 refresh token
 	missing   bool // RevokeAllUserSessions finds no account
 	revokeErr error
 	deleted   int64
@@ -43,10 +44,10 @@ func (f *fakeSessionDB) GetUserByID(_ context.Context, id uuid.UUID) (dbgen.User
 	return dbgen.User{ID: id, Username: "target_user"}, nil
 }
 
-func (f *fakeSessionDB) RevokeAllUserSessions(_ context.Context, userID uuid.UUID) (int64, bool, error) {
+func (f *fakeSessionDB) RevokeAllUserSessions(_ context.Context, userID uuid.UUID) (RevokedSessions, bool, error) {
 	f.revokes++
 	f.gotUser = userID
-	return f.revoked, !f.missing, f.revokeErr
+	return RevokedSessions{Live: f.revoked, LegacyCleared: f.legacy}, !f.missing, f.revokeErr
 }
 
 func (f *fakeSessionDB) DeleteUserSession(_ context.Context, id, userID uuid.UUID) (int64, error) {
@@ -253,14 +254,15 @@ func TestSessionActions_WriteAnAuditLine(t *testing.T) {
 	slog.SetDefault(slog.New(rec))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	h := NewUserSessionHandlers(&fakeSessionDB{revoked: 2, deleted: 1})
+	h := NewUserSessionHandlers(&fakeSessionDB{revoked: 2, legacy: true, deleted: 1})
 	require.Equal(t, http.StatusOK, revokeAll(h, sessionRequest(t, uuid.NewString(), "", false)).Code)
 	sid := uuid.New()
 	require.Equal(t, http.StatusOK, revokeOne(h, sessionRequest(t, uuid.NewString(), sid.String(), false)).Code)
 
 	all, ok := rec.find("admin revoked user sessions")
 	require.True(t, ok, "no audit line for revoke-all")
-	assert.Equal(t, map[string]string{"admin": "root_admin", "username": "target_user", "revoked": "2"}, all)
+	assert.Equal(t, map[string]string{"admin": "root_admin", "username": "target_user", "revoked": "2", "legacyCleared": "true"}, all,
+		"the audit line says a legacy token went, although the answer does not count it")
 
 	one, ok := rec.find("admin revoked user session")
 	require.True(t, ok, "no audit line for revoke-one")

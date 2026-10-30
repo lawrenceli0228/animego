@@ -495,6 +495,12 @@ type Querier interface {
 	// is not one of this account's devices.  Each device notices on its next
 	// request, when jwtx's session check (UserSessionLive) no longer finds the
 	// session its access token names.
+	//
+	// Every row goes, expired ones included, but only the live ones are counted:
+	// the count is "devices signed out", and the drawer's device list
+	// (ListAdminUserLiveSessions) shows only live sessions.  An expired row stays
+	// in the table until its owner next signs in, so counting it would report a
+	// device for an account that has not been signed in anywhere for months.
 	DeleteAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error)
 	// Wipe child tables when Reset clears a row.  Express puts characters /
 	// episode_titles back to `undefined` in the document — Postgres mirrors

@@ -12,9 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteAllUserSessions = `-- name: DeleteAllUserSessions :execrows
-DELETE FROM user_sessions
-WHERE user_id = $1
+const deleteAllUserSessions = `-- name: DeleteAllUserSessions :one
+WITH gone AS (
+    DELETE FROM user_sessions
+    WHERE user_id = $1
+    RETURNING expires_at
+)
+SELECT count(*) FILTER (WHERE expires_at > now())::bigint AS live
+FROM gone
 `
 
 // "Sign this account out everywhere", from the admin page.  Runs in
@@ -24,12 +29,17 @@ WHERE user_id = $1
 // is not one of this account's devices.  Each device notices on its next
 // request, when jwtx's session check (UserSessionLive) no longer finds the
 // session its access token names.
+//
+// Every row goes, expired ones included, but only the live ones are counted:
+// the count is "devices signed out", and the drawer's device list
+// (ListAdminUserLiveSessions) shows only live sessions.  An expired row stays
+// in the table until its owner next signs in, so counting it would report a
+// device for an account that has not been signed in anywhere for months.
 func (q *Queries) DeleteAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAllUserSessions, userID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, deleteAllUserSessions, userID)
+	var live int64
+	err := row.Scan(&live)
+	return live, err
 }
 
 const getAdminUserDetail = `-- name: GetAdminUserDetail :one

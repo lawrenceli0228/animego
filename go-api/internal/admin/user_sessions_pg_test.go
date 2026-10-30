@@ -43,6 +43,9 @@ func sessionLive(t *testing.T, pool *pgxpool.Pool, sid, userID uuid.UUID) bool {
 	return live
 }
 
+// Every row and the legacy token go, but the answer counts only the two live
+// sessions: it reads as "devices signed out", next to a device list that
+// shows only live sessions.
 func TestRevokeUserSessions_EndsEverySessionAndTheLegacyToken_PG(t *testing.T) {
 	h, pool := newSessionHandlersForPG(t)
 	target := seedUser(t, pool, "revoke_target", "revoke_target@example.com")
@@ -61,7 +64,8 @@ func TestRevokeUserSessions_EndsEverySessionAndTheLegacyToken_PG(t *testing.T) {
 	rec := revokeAll(h, sessionRequest(t, target.String(), "", false))
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.Equal(t, `{"data":{"revoked":4}}`, rec.Body.String(), "three session rows and the legacy token")
+	assert.Equal(t, `{"data":{"revoked":2}}`, rec.Body.String(),
+		"the two live sessions; the expired row and the legacy token go uncounted")
 	assert.Equal(t, int64(0), countRows(t, pool, `SELECT count(*) FROM user_sessions WHERE user_id = $1`, target))
 	assert.Equal(t, int64(0), countRows(t, pool, `SELECT count(*) FROM users WHERE id = $1
 		AND (refresh_token IS NOT NULL OR previous_refresh_token IS NOT NULL OR refresh_rotated_at IS NOT NULL)`, target))
@@ -127,10 +131,10 @@ func TestSessionActions_UnknownAccount_404_PG(t *testing.T) {
 
 func TestRevokeAllUserSessions_MissingAccount_PG(t *testing.T) {
 	pool := newStorePool(t)
-	n, found, err := NewUserStore(pool).RevokeAllUserSessions(context.Background(), uuid.New())
+	res, found, err := NewUserStore(pool).RevokeAllUserSessions(context.Background(), uuid.New())
 	require.NoError(t, err)
 	assert.False(t, found)
-	assert.Zero(t, n)
+	assert.Zero(t, res)
 }
 
 // A login holds the users row FOR SHARE while it writes its session
@@ -158,14 +162,14 @@ func TestRevokeAllUserSessions_SignsOutALoginInFlight_PG(t *testing.T) {
 	}))
 
 	type result struct {
-		n     int64
+		res   RevokedSessions
 		found bool
 		err   error
 	}
 	done := make(chan result, 1)
 	go func() {
-		n, found, err := NewUserStore(pool).RevokeAllUserSessions(ctx, user)
-		done <- result{n, found, err}
+		res, found, err := NewUserStore(pool).RevokeAllUserSessions(ctx, user)
+		done <- result{res, found, err}
 	}()
 
 	// Polled with a plain query: the condition runs off the test goroutine,
@@ -189,7 +193,7 @@ func TestRevokeAllUserSessions_SignsOutALoginInFlight_PG(t *testing.T) {
 	case r := <-done:
 		require.NoError(t, r.err)
 		assert.True(t, r.found)
-		assert.Equal(t, int64(1), r.n, "the session the login committed is the one revoked")
+		assert.Equal(t, int64(1), r.res.Live, "the session the login committed is the one revoked")
 	case <-time.After(10 * time.Second):
 		t.Fatal("revoke did not finish after the login committed")
 	}
