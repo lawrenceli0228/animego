@@ -1343,11 +1343,6 @@ const en = {
     statSubs: 'Subscriptions',
     statFollows: 'Follows',
     statFlagged: 'Flagged',
-    statDiscussionImpressions: 'Discussion Impressions',
-    statDiscussionOpenRate: 'Discussion CTR',
-    statWelcomeCardOpenRate: 'Welcome Card CTR',
-    communityMetricsHint: '{{opens}} opens in {{days}} days',
-    communityMetricsRatio: '{{opens}} first opens / {{impressions}} impressions',
     // Search
     searchPlaceholder: 'Search title or AniList ID...',
     searchBtn: 'Search',

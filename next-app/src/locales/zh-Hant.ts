@@ -1409,11 +1409,6 @@ const zhHant = {
     statSubs: '追番記錄',
     statFollows: '關注關係',
     statFlagged: '待審查',
-    statDiscussionImpressions: '熱議曝光',
-    statDiscussionOpenRate: '熱議點選率',
-    statWelcomeCardOpenRate: '公告卡點選率',
-    communityMetricsHint: '近 {{days}} 天 · {{opens}} 次開啟',
-    communityMetricsRatio: '{{opens}} 次首次開啟 / {{impressions}} 次曝光',
     // Search
     searchPlaceholder: '搜尋標題或 AniList ID...',
     searchBtn: '搜尋',

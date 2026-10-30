@@ -9,8 +9,7 @@ import {
 // seen by every file that runs later. It used to be left behind: any later
 // test importing next/image then died at import time, because next's
 // deployment-id module reads `document` as soon as `window` exists. Put the
-// global back exactly as it was found, the way pendingSubscribe.test.ts and
-// communityEngagement.test.ts do.
+// global back exactly as it was found, the way pendingSubscribe.test.ts does.
 const hadWindow = "window" in globalThis;
 const originalWindow = (globalThis as { window?: unknown }).window;
 

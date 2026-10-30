@@ -9,8 +9,8 @@ import { join } from "node:path";
 // were four different rings in the tree:
 //
 //   · blue,  the specified one                    (Button, page.module.css)
-//   · teal   #64d2ff                              (PlayButton dialog, HotDiscussions links)
-//   · amber  #ff9f0a                              (HotDiscussions cards)
+//   · teal   #64d2ff                              (PlayButton dialog, discussion rail links)
+//   · amber  #ff9f0a                              (discussion rail cards; rail since removed)
 //   · the per-anime poster accent                 (HeroCarousel)
 //
 // Each looked deliberate in its own file. Together they are a ring that
