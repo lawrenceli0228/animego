@@ -24,13 +24,15 @@ interface HubHeroProps {
   countLine: string;
   strip: readonly StripEntry[];
   onPick: (genre: FilterGenre) => void;
+  /** Already on screen when this page landed (carriedHeader.ts): no entrance. */
+  held: boolean;
   lang: Lang;
   copy: GenreCopy;
 }
 
-export default function HubHero({ genre, shown, countLine, strip, onPick, lang, copy }: HubHeroProps) {
+export default function HubHero({ genre, shown, countLine, strip, onPick, held, lang, copy }: HubHeroProps) {
   return (
-    <div className={hero.hero}>
+    <div className={hero.hero} data-held={held ? "true" : undefined}>
       <div className={hero.h1row}>
         <h1 className={hero.h1}>{genreHeading(shown, lang)}</h1>
         {countLine ? (

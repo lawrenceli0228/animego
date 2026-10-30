@@ -8,7 +8,8 @@
 // loading, the page already shows where it is going, as the approved
 // artboards do: the header of the view on its way (the genre pressed in the
 // strip, with the block sliding under it; the grid's heading and count; the
-// hub's heading on the way back) over that view's 2s shimmer. The page clock
+// hub's heading on the way back) over that view's 2s shimmer; the page that
+// lands keeps that header as it stands (carriedHeader.ts). The page clock
 // is the seasonal page's: the server's time through hydration, then the
 // reader's.
 //
@@ -32,6 +33,7 @@ import type { SeasonalItem } from "@/lib/seasonal/model";
 import GridHeader from "./GridHeader";
 import GridResults from "./GridResults";
 import HubBody from "./HubBody";
+import { carryHeader, dropCarriedHeader, isHeaderCarried } from "./carriedHeader";
 import HubHero from "./HubHero";
 import { GridSkeleton, HubSkeleton } from "./Skeletons";
 import type { CardEnv, PendingTarget } from "./types";
@@ -51,12 +53,22 @@ export default function GenreView({ genre, data, strip, serverNowMs, Follow }: G
   const { nowMs, zone } = useSeasonClock(serverNowMs);
   const layout = useLayout();
   const [pending, setPending] = useState<PendingTarget | null>(null);
+  // Whether this page's header is the one the page before it drew while this
+  // one loaded (carriedHeader.ts): then it is drawn as it stands, no entrance.
+  // Read as the page mounts; the header keeps it for as long as it stays.
+  const [held] = useState(() =>
+    isHeaderCarried(data.kind === "hub" ? { kind: "hub", genre } : { kind: "grid", genre, view: data.view }),
+  );
+  useEffect(() => dropCarriedHeader(), []);
 
   // A link started loading and the reader went Back before it landed: this
   // page is staying, so the view it was going to goes.
   useEffect(() => {
     if (!pending) return;
-    const onPop = () => setPending(null);
+    const onPop = () => {
+      dropCarriedHeader();
+      setPending(null);
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [pending]);
@@ -70,13 +82,29 @@ export default function GenreView({ genre, data, strip, serverNowMs, Follow }: G
     [nowMs, zone, lang, browse, Follow, layout, airing],
   );
 
-  const toHub = (next: FilterGenre) => setPending({ kind: "hub", genre: next });
-  const toGrid = (view: GridView, count: number | null) => setPending({ kind: "grid", view, count });
+  const toHub = (next: FilterGenre) => {
+    carryHeader({ kind: "hub", genre: next });
+    setPending({ kind: "hub", genre: next });
+  };
+  const toGrid = (view: GridView, count: number | null) => {
+    carryHeader({ kind: "grid", genre, view });
+    setPending({ kind: "grid", view, count });
+  };
 
   let header: ReactNode;
   let body: ReactNode;
   if (pending?.kind === "grid") {
-    header = <GridHeader genre={genre} view={pending.view} count={pending.count} onBack={() => toHub(genre)} lang={lang} copy={copy} />;
+    header = (
+      <GridHeader
+        genre={genre}
+        view={pending.view}
+        count={pending.count}
+        onBack={() => toHub(genre)}
+        held={data.kind === "grid" && held}
+        lang={lang}
+        copy={copy}
+      />
+    );
     body = <GridSkeleton />;
   } else if (pending?.kind === "hub" || data.kind === "hub") {
     const countLine = !pending && data.kind === "hub" ? heroCountText(copy, data.total, data.airing) : "";
@@ -87,6 +115,7 @@ export default function GenreView({ genre, data, strip, serverNowMs, Follow }: G
         countLine={countLine}
         strip={strip}
         onPick={toHub}
+        held={data.kind === "hub" && held}
         lang={lang}
         copy={copy}
       />
@@ -97,7 +126,17 @@ export default function GenreView({ genre, data, strip, serverNowMs, Follow }: G
   } else {
     // A total of 0 is an API that did not answer as often as an empty slice:
     // no count, as the hub's heading does (heroCountText).
-    header = <GridHeader genre={genre} view={data.view} count={data.total || null} onBack={() => toHub(genre)} lang={lang} copy={copy} />;
+    header = (
+      <GridHeader
+        genre={genre}
+        view={data.view}
+        count={data.total || null}
+        onBack={() => toHub(genre)}
+        held={held}
+        lang={lang}
+        copy={copy}
+      />
+    );
     body = <GridResults genre={genre} data={data} env={env} copy={copy} />;
   }
 

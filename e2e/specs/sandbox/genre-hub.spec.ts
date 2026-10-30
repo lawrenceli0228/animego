@@ -157,6 +157,49 @@ async function open(page: Page, path: string): Promise<void> {
 /** A server-HTML request's budget: under three workers the dev server can be slow to answer the first. */
 const GET = { timeout: 30_000 };
 
+/**
+ * Watch the elements matching `selector` frame by frame from now on: for each
+ * element that comes to match it (a route change mounts the page afresh, so
+ * the arriving page's header is a new one), the lowest opacity it was drawn
+ * at — its own times its ancestors', as the reader sees it.
+ */
+async function watchOpacity(page: Page, selector: string): Promise<() => Promise<number[]>> {
+  const key = await page.evaluate((sel) => {
+    const drawn: { el: Element; min: number }[] = [];
+    const key = `__opacity${Math.random().toString(36).slice(2)}`;
+    (window as unknown as Record<string, unknown>)[key] = drawn;
+    const seen = (el: Element) => {
+      let o = 1;
+      for (let e: Element | null = el; e; e = e.parentElement) o *= Number(getComputedStyle(e).opacity);
+      return Math.round(o * 1000) / 1000;
+    };
+    const tick = () => {
+      const el = document.querySelector(sel);
+      if (el) {
+        const last = drawn.at(-1);
+        if (last?.el === el) last.min = Math.min(last.min, seen(el));
+        else drawn.push({ el, min: seen(el) });
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return key;
+  }, selector);
+  // Read after two more frames, so the element just mounted has been drawn.
+  return () =>
+    page.evaluate(
+      (k) =>
+        new Promise<number[]>((resolve) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() =>
+              resolve(((window as unknown as Record<string, { min: number }[]>)[k] ?? []).map((d) => d.min)),
+            ),
+          ),
+        ),
+      key,
+    );
+}
+
 const cardsIn = (page: Page, scope: string) => page.locator(`${scope} [data-anime-card]`);
 const gridCards = (page: Page) => cardsIn(page, "[data-grid]");
 
@@ -236,19 +279,26 @@ test.describe("desktop", () => {
 
   test("查看全部 opens the grid on the rail's titles, and the way back is the hub", async ({ page }) => {
     await open(page, HUB);
+    const backLink = await watchOpacity(page, "[data-back]");
     await page.locator('[data-see-all="airing"]').click();
     await page.waitForURL(/\/genre\/mecha\?list=airing$/);
     await waitForHydration(page, '[data-genre-page][data-view="grid"]');
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("机战 · 正在连载");
+    // The way back came in as the grid's header went up, before the grid
+    // landed; the grid that landed kept it as it stood, with no second fade.
+    expect((await backLink()).at(-1)).toBe(1);
     await expect(page.locator("[data-count]")).toHaveText("7 部");
     const ids = await gridCards(page).evaluateAll((els) => els.map((el) => Number(el.getAttribute("data-id"))));
     expect(ids).toEqual(SHOWS.filter((s) => s.status === "RELEASING").map((s) => s.anilistId));
     await expect(page.locator("[data-load-more]")).toHaveCount(0);
 
+    const heading = await watchOpacity(page, "main h1");
     await page.locator("[data-back]").click();
     await page.waitForURL((url) => url.pathname === HUB && url.search === "");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("机战番剧");
     await expect(page.locator("[data-genre-page]")).toHaveAttribute("data-view", "hub");
+    await expect(page.locator("[data-count]")).toBeVisible();
+    expect((await heading()).at(-1)).toBe(1);
   });
 
   test("a grid opens behind the skeleton while it loads", async ({ page }) => {
@@ -368,6 +418,7 @@ test.describe("desktop", () => {
       await new Promise((r) => setTimeout(r, 1_500));
       await route.continue();
     });
+    const heading = await watchOpacity(page, "main h1");
     await page.locator('[data-genre-strip] a[data-genre="sports"]').click();
     // Before the page arrives: the block is under 运动 and the hub's skeleton stands in.
     await expect(indicator).toHaveAttribute("data-strip-indicator", "sports");
@@ -378,6 +429,11 @@ test.describe("desktop", () => {
     await expect(page.locator("[data-count]")).toHaveText(
       `${count(hasGenre("Sports"))} 部 · ${count((s) => hasGenre("Sports")(s) && s.status === "RELEASING")} 部连载中`,
     );
+    // The heading and the strip were on screen the whole time, and the page
+    // that landed kept them: they never faded out and back in.
+    const drawn = await heading();
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(Math.min(...drawn)).toBe(1);
   });
 
   test("the popover says what the show's data says", async ({ page }) => {
