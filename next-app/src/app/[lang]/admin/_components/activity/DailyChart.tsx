@@ -17,6 +17,7 @@
 
 import { useState, type CSSProperties } from "react";
 import {
+  DENSE_SERIES,
   calendarDay,
   clock08,
   dailySummary,
@@ -43,8 +44,7 @@ import {
   cx,
 } from "./palette";
 
-/** Above this many bars the gap between them narrows, so 90 days fit a phone. */
-const DENSE_SERIES = 45;
+/** The gap between bars, narrower on a dense series (DENSE_SERIES) so 90 days fit a phone. */
 const GAP_WIDE = 3;
 const GAP_DENSE = 1;
 
@@ -181,7 +181,7 @@ export function DailyChart({ data }: { data: AdminActivityPanel }) {
         {points.map((p, i) => {
           const l = labels[i];
           return (
-            <span key={p.date} className={chart.xLabel}>
+            <span key={p.date} className={chart.xLabel} data-thin={l?.kind === "date" && l.thin ? "true" : undefined}>
               {l ? (l.kind === "today" ? t("admin.activity.today") : l.text) : ""}
             </span>
           );

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -344,6 +346,42 @@ describe("today's bar is visibly not over", () => {
     const html = markup(mature());
     expect(textOf(html)).toContain("今天，还没过完");
     expect(textOf(divWith(html, 'data-axis="x"')).trim()).toBe("6/06 今天");
+  });
+
+  test("a 90-day axis marks every other week thin, which a narrow chart hides", () => {
+    const daily = Array.from({ length: 90 }, (_, i) =>
+      day(new Date(Date.UTC(2030, 5, 12 - 89 + i)).toISOString().slice(0, 10), 1, 1),
+    );
+    const axis = divWith(markup(mature({ days: 90, daily })), 'data-axis="x"');
+    const slots = [...axis.matchAll(/<span([^>]*)>([^<]*)<\/span>/g)].map((m) => ({
+      thin: m[1].includes('data-thin="true"'),
+      text: m[2],
+    }));
+    expect(slots).toHaveLength(90);
+    expect(slots.filter((s) => s.thin).map((s) => s.text)).toEqual(["3/22", "4/05", "4/19", "5/03", "5/17", "5/31"]);
+    // What a phone shows: a date every two weeks and 今天, which is never thin.
+    expect(slots.filter((s) => s.text && !s.thin).map((s) => s.text)).toEqual([
+      "3/15",
+      "3/29",
+      "4/12",
+      "4/26",
+      "5/10",
+      "5/24",
+      "今天",
+    ]);
+  });
+
+  test("each axis label is centred on its bar, and the thin ones give way below 561px", () => {
+    // Read from the stylesheet, comments stripped: a label wider than its
+    // slot is only centred by a flex container, never by text-align.
+    const sheet = readFileSync(join(import.meta.dir, "activity/DailyChart.module.css"), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    );
+    const label = /\.xLabel\s*\{([^}]*)\}/.exec(sheet)?.[1] ?? "";
+    expect(label).toMatch(/display:\s*flex/);
+    expect(label).toMatch(/justify-content:\s*center/);
+    expect(sheet).toMatch(/@media \(max-width: 560px\)\s*\{\s*\.xLabel\[data-thin\]\s*\{\s*visibility:\s*hidden;?\s*\}/);
   });
 
   test("the readout starts on the last full day, not on today", () => {

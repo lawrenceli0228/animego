@@ -129,12 +129,25 @@
   margin-top: 6px;
 }
 
+/* One slot per bar, and the label centred on it. On a dense axis the text is
+ * wider than its slot, and text-align cannot centre text that overflows its
+ * line (it starts at the left edge and runs right); a flex item wider than
+ * its centring container overflows both sides equally. */
 .xLabel {
+  display: flex;
+  justify-content: center;
   flex: 1;
   min-width: 0;
   font-size: 10.5px;
   color: #8a8a9a;
-  text-align: center;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* Below 561px a 90-day axis has room for every other week only: labels
+ * xAxisLabels marks thin give way, and the rest, today's included, stay. */
+@media (max-width: 560px) {
+  .xLabel[data-thin] {
+    visibility: hidden;
+  }
 }
