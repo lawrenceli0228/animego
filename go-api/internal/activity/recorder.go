@@ -109,8 +109,15 @@ const (
 //     deleted account silently zeroes EVERYBODY's counters, once a minute,
 //     until the token expires.  The only trace is a foreign-key line in the
 //     log and a dent in the DAU chart nobody can explain.  Skipping the row
-//     costs one primary-key probe per user per flush and makes the failure
-//     structurally impossible rather than merely handled.
+//     costs one primary-key probe per user per flush.
+//
+//     The guard reads the statement's snapshot, so it cannot see a delete
+//     that commits WHILE the statement runs: EXISTS passes, the foreign-key
+//     check then waits on the deleting transaction's row lock, and once that
+//     commits the check fails with 23503 for the whole batch.  execFlush
+//     runs the statement a second time in that case; the fresh statement
+//     takes a fresh snapshot, the guard skips the account that is now gone,
+//     and everybody else's counters land.
 //
 //   - counters ADD.  A flush is an increment, not a snapshot, so the second
 //     flush of a day accumulates onto the first instead of replacing it.
@@ -146,6 +153,11 @@ SET first_seen_at = LEAST(uad.first_seen_at, EXCLUDED.first_seen_at),
     last_seen_at  = GREATEST(uad.last_seen_at, EXCLUDED.last_seen_at),
     request_count = uad.request_count + EXCLUDED.request_count,
     login_count   = uad.login_count   + EXCLUDED.login_count`
+
+// pgForeignKeyViolation is the SQLSTATE a flush fails with when an account in
+// the batch is deleted while the statement is running.  See the note on the
+// WHERE EXISTS guard above and execFlush below.
+const pgForeignKeyViolation = "23503"
 
 // execer is the pgxpool surface the recorder needs -- one method, satisfied by
 // *pgxpool.Pool as-is.  Declared here, where it is consumed, so tests can
@@ -399,16 +411,16 @@ func (r *Recorder) Flush(ctx context.Context) {
 // arriving mid-flush accumulate into the fresh map rather than blocking on a
 // database round-trip.
 //
-// On failure the batch is DROPPED, not retried, and the error is logged.  That
-// is the deliberate choice: re-queueing would either double-count on a partial
-// success (the statement is one transaction, but a timeout cannot tell a
-// caller which side of the commit it landed on) or grow without bound during a
-// sustained outage.  Losing a minute of activity counters is a smaller harm
+// On failure the batch is DROPPED, not re-queued, and the error is logged.
+// That is the deliberate choice: re-queueing would either double-count on a
+// partial success (the statement is one transaction, but a timeout cannot tell
+// a caller which side of the commit it landed on) or grow without bound during
+// a sustained outage.  Losing a minute of activity counters is a smaller harm
 // than either, and the log line is the signal that it happened.
 //
 // Note this is now genuinely "a minute of counters" and not "everyone's
 // counters because of one bad row" -- see the WHERE EXISTS guard in the
-// statement above.
+// statement above, and execFlush for the one failure the guard cannot see.
 func (r *Recorder) flush(ctx context.Context, budget time.Duration) {
 	if r == nil {
 		return
@@ -423,6 +435,25 @@ func (r *Recorder) flush(ctx context.Context, budget time.Duration) {
 	r.mu.Unlock()
 
 	n := len(batch)
+	execCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	if err := r.execFlush(execCtx, flushArgs(batch), n); err != nil {
+		if errors.Is(err, context.Canceled) {
+			// A cancelled parent means the process is going away mid-flush.
+			// Same data loss, but not a fault worth an ERROR line during a
+			// deliberate shutdown.
+			r.log.Warn("activity: flush cancelled during shutdown", "rows", n)
+			return
+		}
+		r.log.Error("activity: flush failed; this interval's counters are lost",
+			"err", err.Error(), "rows", n)
+	}
+}
+
+// flushArgs lays a swapped-out buffer out as the statement's five parallel
+// arrays, one element per (user, day) entry.
+func flushArgs(batch map[bufferKey]*bufferEntry) []any {
+	n := len(batch)
 	userIDs := make([]uuid.UUID, 0, n)
 	firstSeen := make([]time.Time, 0, n)
 	lastSeen := make([]time.Time, 0, n)
@@ -436,20 +467,37 @@ func (r *Recorder) flush(ctx context.Context, budget time.Duration) {
 		requests = append(requests, entry.Requests)
 		logins = append(logins, entry.Logins)
 	}
+	return []any{userIDs, firstSeen, lastSeen, requests, logins}
+}
 
-	execCtx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
-	if _, err := r.pool.Exec(execCtx, recordUserActivitySQL,
-		userIDs, firstSeen, lastSeen, requests, logins,
-	); err != nil {
-		if errors.Is(err, context.Canceled) {
-			// A cancelled parent means the process is going away mid-flush.
-			// Same data loss, but not a fault worth an ERROR line during a
-			// deliberate shutdown.
-			r.log.Warn("activity: flush cancelled during shutdown", "rows", n)
-			return
-		}
-		r.log.Error("activity: flush failed; this interval's counters are lost",
-			"err", err.Error(), "rows", n)
+// execFlush runs the flush statement, and runs it exactly once more when the
+// first attempt fails with a foreign-key violation.
+//
+// That failure means an account in the batch was deleted while the statement
+// was running (see the WHERE EXISTS note on recordUserActivitySQL).  Retrying
+// is safe and cannot double-count: a statement that fails is rolled back
+// whole, so the first attempt wrote nothing, and the second one re-evaluates
+// the guard against a fresh snapshot and skips the account that is gone.  It
+// is one retry and not a loop -- a second foreign-key failure means another
+// delete landed in the same instant, which is rare enough to log and drop
+// like any other failure.  Every other error is returned as-is: none of them
+// is fixed by asking again within the same budget.
+//
+// Both attempts share ctx, so the flush as a whole still fits the budget the
+// caller gave it -- which matters for the shutdown drain (see drainTimeout).
+func (r *Recorder) execFlush(ctx context.Context, args []any, rows int) error {
+	_, err := r.pool.Exec(ctx, recordUserActivitySQL, args...)
+	if !isForeignKeyViolation(err) {
+		return err
 	}
+	r.log.Info("activity: flush raced an account delete; retrying once", "rows", rows)
+	_, err = r.pool.Exec(ctx, recordUserActivitySQL, args...)
+	return err
+}
+
+// isForeignKeyViolation reports whether err is, or wraps, a Postgres
+// foreign-key violation.
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation
 }
