@@ -26,7 +26,7 @@ import DeviceIcon from "../../settings/_components/DeviceIcon";
 import { DEVICE_KINDS, type DeviceKind } from "../../settings/_components/deviceSessions";
 import type { AdminAnimeTitles, AdminUserDetail, AdminUserSession, AdminUserSubscription } from "../_types/users";
 import { useUserWords } from "./userWords";
-import s from "./users.module.css";
+import s from "./userDetail.module.css";
 
 type T = (key: string) => string;
 

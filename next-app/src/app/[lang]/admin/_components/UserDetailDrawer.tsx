@@ -45,7 +45,7 @@ import {
 } from "../_actions/users";
 import type { AdminUserDetail, AdminUserSession } from "../_types/users";
 import { UserDetailPanel, type DetailStatus } from "./UserDetailPanel";
-import s from "./users.module.css";
+import s from "./userDetail.module.css";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';

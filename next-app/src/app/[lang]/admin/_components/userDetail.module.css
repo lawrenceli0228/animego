@@ -1,0 +1,658 @@
+/* The user detail drawer (UserDetailDrawer, UserDetailPanel,
+ * UserDetailSections, UserDetailActions).
+ *
+ * Portalled to <body>, outside the admin shell, so it sets its own font and
+ * colours and inherits nothing from the page. Split from users.module.css (the
+ * list) only for size; the two share the same palette. Tests select through
+ * roles and data-* attributes, never these class names.
+ *
+ * Every @media block is at the end of the file. */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.5);
+  animation: fade 0.18s ease both;
+}
+
+.drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  height: 100%;
+  box-sizing: border-box;
+  border-left: 1px solid #1f1f2a;
+  background: #111118;
+  box-shadow: -24px 0 48px rgba(0, 0, 0, 0.45);
+  color: #e7e7ef;
+  font-family: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  outline: none;
+  animation: slide 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.drawerTop {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #1f1f2a;
+}
+
+.drawerTopTitle {
+  color: #a8a8b8;
+  font-size: 13px;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: #a8a8b8;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: #1a1a26;
+  color: #f4f4f8;
+}
+
+.drawerBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 22px;
+  padding: 20px 24px 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.idRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.bigAvatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  color: #0b0b10;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.name {
+  margin: 0 0 4px;
+  color: #f4f4f8;
+  font-size: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.email {
+  color: #a8a8b8;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.tags {
+  margin-top: 8px;
+}
+
+.tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid #2a2a38;
+  color: #a8a8b8;
+  font-size: 11.5px;
+}
+
+.tagInline {
+  margin-right: 0;
+  margin-left: 6px;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: #8a8a9a;
+  font-size: 12px;
+  font-feature-settings: "tnum";
+}
+
+.status {
+  color: #8a8a9a;
+  font-size: 13px;
+}
+
+.blockTitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 10px;
+  color: #9090a0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.blockTitle small {
+  color: #8a8a9a;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tile {
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #1f1f2a;
+  background: #15151f;
+}
+
+.tileLabel {
+  margin-bottom: 6px;
+  color: #9090a0;
+  font-size: 11.5px;
+}
+
+.tileValue {
+  color: #f4f4f8;
+  font-size: 20px;
+  font-weight: 600;
+  font-feature-settings: "tnum";
+}
+
+.tileSub {
+  margin-top: 4px;
+  color: #8a8a9a;
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-feature-settings: "tnum";
+}
+
+/* The 90-day calendar: Monday-first week columns of 22px cells. */
+.cal {
+  display: flex;
+  gap: 6px;
+}
+
+.calRows {
+  display: grid;
+  grid-template-rows: repeat(7, 22px);
+  gap: 4px;
+  padding-top: 18px;
+  color: #8a8a9a;
+  font-size: 10.5px;
+}
+
+.calRows span {
+  line-height: 22px;
+}
+
+.calWeeks {
+  display: flex;
+  gap: 4px;
+}
+
+.calWeek {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calMonth {
+  height: 14px;
+  color: #8a8a9a;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.calCell {
+  display: block;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: #1c1c28;
+}
+
+.calCell[data-state="recorded"],
+.swatchRecorded {
+  background: #3d90dd;
+}
+
+.calCell[data-state="reconstructed"],
+.swatchReconstructed {
+  background-color: rgba(61, 144, 221, 0.28);
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.14) 0 2px, transparent 2px 5px);
+}
+
+.calCell[data-state="outside"] {
+  background: transparent;
+}
+
+.calCell[data-today="true"] {
+  box-shadow: 0 0 0 1px #f4f4f8;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+  color: #a8a8b8;
+  font-size: 11.5px;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #1c1c28;
+}
+
+.calSum {
+  margin-top: 8px;
+  color: #8a8a9a;
+  font-size: 12px;
+  font-feature-settings: "tnum";
+}
+
+.calSum b,
+.social b {
+  color: #e7e7ef;
+  font-weight: 600;
+}
+
+/* Devices, recent watches, subscriptions. */
+.devices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dev {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #1f1f2a;
+  background: #15151f;
+}
+
+.devIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #1c1c28;
+  color: #a8a8b8;
+}
+
+.devIcon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.devText {
+  flex: 1;
+  min-width: 0;
+}
+
+.devName {
+  color: #f4f4f8;
+  font-size: 13.5px;
+}
+
+.devMeta {
+  margin-top: 3px;
+  color: #8a8a9a;
+  font-size: 12px;
+  font-feature-settings: "tnum";
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  border: 1px solid #1f1f2a;
+  background: #15151f;
+}
+
+.li {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #1c1c28;
+  font-size: 13px;
+}
+
+.li:last-child {
+  border-bottom: 0;
+}
+
+.liWatch {
+  grid-template-columns: 86px minmax(0, 1fr) auto;
+}
+
+.liSub {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.liTime {
+  color: #8a8a9a;
+  font-size: 12px;
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+}
+
+.liTitle {
+  overflow: hidden;
+  color: #e7e7ef;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liEp {
+  color: #a8a8b8;
+  font-size: 12px;
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+}
+
+.liProgress {
+  min-width: 76px;
+  text-align: right;
+}
+
+.st {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: #1f1f2a;
+  color: #a8a8b8;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.st[data-status="watching"] {
+  background: rgba(61, 144, 221, 0.16);
+  color: #8cc2f0;
+}
+
+.st[data-status="completed"] {
+  background: rgba(48, 209, 88, 0.14);
+  color: #6fe08f;
+}
+
+.st[data-status="dropped"] {
+  color: #8a8a9a;
+}
+
+.listMore {
+  display: block;
+  padding: 10px 14px;
+  border-top: 1px solid #1c1c28;
+  color: #8cc2f0;
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.listMore:hover {
+  color: #b9dbf7;
+}
+
+.listEmpty {
+  padding: 12px 14px;
+  color: #8a8a9a;
+  font-size: 12.5px;
+}
+
+.social {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  color: #a8a8b8;
+  font-size: 12.5px;
+  font-feature-settings: "tnum";
+}
+
+.social b {
+  margin-left: 4px;
+}
+
+/* The action row and its inline forms. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 18px;
+  border-top: 1px solid #1f1f2a;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.btn {
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid #2a2a38;
+  background: transparent;
+  color: #cfcfdc;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: #3a3a4c;
+  color: #f4f4f8;
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btnSave {
+  border-color: rgba(10, 132, 255, 0.4);
+  background: rgba(10, 132, 255, 0.12);
+  color: #5ac8fa;
+}
+
+.btnDanger {
+  border-color: rgba(255, 69, 58, 0.4);
+  background: rgba(255, 69, 58, 0.08);
+  color: #ff6b61;
+}
+
+.btnDanger:hover {
+  border-color: #ff453a;
+  color: #ff8a82;
+}
+
+.btnDangerSolid,
+.btnDangerSolid:hover {
+  border-color: #ff453a;
+  background: #ff453a;
+  color: #fff;
+}
+
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid #1f1f2a;
+  background: #15151f;
+}
+
+.inlineButtons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.confirm {
+  margin-top: 10px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid #663030;
+  background: #2a0f0f;
+  color: #ffd0cc;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.confirmButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.actionError {
+  margin: 8px 0 0;
+  color: #ff6b61;
+  font-size: 12px;
+}
+
+.errorBox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #663030;
+  background: #3a0d0d;
+  color: #ffb4b4;
+  font-size: 13px;
+}
+
+.input {
+  flex: 1 1 200px;
+  min-width: 160px;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border-radius: 6px;
+  border: 1px solid #2a2a38;
+  background: #0d0d14;
+  color: #e7e7ef;
+  font: inherit;
+  font-size: 13px;
+}
+
+.input:focus {
+  border-color: #3d90dd;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The one ring DESIGN.md specifies (components/ui/focusRing.test.ts), with a
+ * transparent outline left for forced-colors mode to paint. */
+.close:focus-visible,
+.btn:focus-visible,
+.input:focus-visible,
+.listMore:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .drawerBody {
+    padding: 16px 16px 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .drawer {
+    animation: none;
+  }
+}

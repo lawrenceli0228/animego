@@ -12,7 +12,7 @@ import { useId, useState, type FormEvent } from "react";
 import { fillTemplate } from "@/lib/home/time";
 import { useLang } from "@/lib/lang-client";
 import { PASSWORD_MIN, type UserDrawerMode } from "@/lib/adminUsers";
-import s from "./users.module.css";
+import s from "./userDetail.module.css";
 
 export interface UserDetailActionsProps {
   /** The account as it stands — the edit form starts from these. */

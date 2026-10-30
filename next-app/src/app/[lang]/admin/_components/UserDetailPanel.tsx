@@ -34,7 +34,7 @@ import type { AdminUserDetail, AdminUserSession } from "../_types/users";
 import { UserDetailActions } from "./UserDetailActions";
 import { CommunityCounts, RecentWatches, SessionList, SubscriptionList, VisitCalendar } from "./UserDetailSections";
 import { useUserWords } from "./userWords";
-import s from "./users.module.css";
+import s from "./userDetail.module.css";
 
 /** loading: nothing yet; refreshing: re-reading after a change, the old payload still shown. */
 export type DetailStatus = "loading" | "ready" | "refreshing" | "error" | "missing";
@@ -205,7 +205,7 @@ export function UserDetailPanel(props: UserDetailPanelProps) {
           </p>
         ) : null}
         {status === "error" ? (
-          <div role="alert" className={s.listError}>
+          <div role="alert" className={s.errorBox}>
             <span>{t("admin.userPanel.detailError")}</span>
             <button type="button" className={s.btn} onClick={props.onRetry}>
               {t("admin.userPanel.retry")}
