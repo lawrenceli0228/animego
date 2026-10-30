@@ -94,7 +94,7 @@ describe("calendar days are counted, not parsed with new Date(str)", () => {
   });
 
   test("the legend's short day: month without its zero, day with it", () => {
-    expect(monthDay("2026-08-28")).toBe("8-28");
+    expect(monthDay("2026-09-17")).toBe("9-17");
     expect(monthDay("2026-11-05")).toBe("11-05");
   });
 });
