@@ -30,7 +30,7 @@ const en = {
     myList: 'My List', hi: 'Hi', library: 'Library', about: 'About',
     // Site header. The bar is a client component and reads the -spa twin;
     // these keep the server dictionary a complete record of the chrome.
-    schedule: 'Schedule', genres: 'Genres',
+    schedule: 'Schedule', genres: 'Genres', top: 'Top 100',
     searchAnime: 'Search anime', searchPlaceholder: 'Chinese, Japanese or romaji',
     menu: 'Menu', openMenu: 'Open menu', closeMenu: 'Close menu',
   },
@@ -596,6 +596,19 @@ const en = {
     backShort: 'Back',
     yearSeason: '{{season}} {{year}}',
     released: 'Released',
+  },
+  // The top-100 pages (/top, /top/{year}). Their heading is a table in
+  // lib/hubs/headings.ts, which the <title> and the detail page's breadcrumb
+  // read too. Client components read the -spa twin; one key per visible
+  // string, in both sets so the two stay equal.
+  topPage: {
+    metaSuffix: 'The 100 highest-rated anime, filterable by format, genre and season, with scores, episodes and synopses.',
+    strip: 'Switch ranking',
+    allTime: 'All time',
+    older: 'Earlier',
+    olderYears: 'Earlier years',
+    filters: 'Filters',
+    wholeYear: 'All year',
   },
   // Schedule page (/calendar), hue redesign. The server components read the
   // .ts dictionary, the client board the -spa twin; one key per visible string.

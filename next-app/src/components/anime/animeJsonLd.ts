@@ -14,7 +14,8 @@
 
 import { DETAIL_CHARACTERS_SHOWN, DETAIL_STAFF_SHOWN } from "@/components/anime/detailPeople";
 import { genreFromSlug, genrePath, genreSlug, yearPath } from "@/lib/hubs/paths";
-import { genreHeading, yearHeading } from "@/lib/hubs/headings";
+import { isRankable } from "@/lib/top/rules";
+import { genreHeading, topHeading } from "@/lib/hubs/headings";
 import { normalizeStaffRole, seasonYearLabel } from "@/lib/contentLabels";
 import {
   formatFuzzyDate,
@@ -282,9 +283,11 @@ export function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
  * Season first, because /seasonal is the hierarchy the site's own nav
  * presents (首页 › 季度) and the page that has listed the title since
  * before the hubs existed. A title with a year but no season (most films,
- * anything AniList has only a start date for) hangs under /year; one with
- * neither hangs under its first genre that has a page. A title with none
- * of those gets no middle crumb.
+ * anything AniList has only a start date for) hangs under its year's
+ * ranking, /top/{year} — when it is a title the rankings count, which is
+ * what makes sure that page exists: a year with nothing ranked has no page.
+ * Anything else hangs under its first genre that has a page. A title with
+ * none of those gets no middle crumb.
  */
 export function breadcrumbParent(
   detail: AnimeDetail,
@@ -297,7 +300,7 @@ export function breadcrumbParent(
     };
   }
   const year = detail.seasonYear ?? releaseYear(detail.startDate);
-  if (year) return { name: yearHeading(year, lang), path: yearPath(year) };
+  if (year && isRankable(detail)) return { name: topHeading(year, lang), path: yearPath(year) };
   for (const genre of detail.genres ?? []) {
     if (genreFromSlug(genreSlug(genre))) {
       return { name: genreHeading(genre, lang), path: genrePath(genre) };

@@ -76,7 +76,7 @@ const zhHant = {
     // Language menu: the group heading + the account menu's own label.
     language: '語言', accountMenu: '賬戶選單', mainNavigation: '主導航',
     // Site header (AniList-style bar + phone drawer).
-    schedule: '放送表', genres: '分類',
+    schedule: '放送表', genres: '分類', top: '排行',
     searchAnime: '搜尋番劇', searchPlaceholder: '中文 / 日文 / 羅馬字',
     menu: '選單', openMenu: '打開選單', closeMenu: '關閉選單',
   },
@@ -609,6 +609,19 @@ const zhHant = {
     backShort: '返回',
     yearSeason: '{{year}} 年 {{season}}',
     released: '已上映',
+  },
+  // The top-100 pages (/top, /top/{year}). Their heading is a table in
+  // lib/hubs/headings.ts, which the <title> and the detail page's breadcrumb
+  // read too. Client components read the -spa twin; one key per visible
+  // string, in both sets so the two stay equal.
+  topPage: {
+    metaSuffix: '依評分排出的前 100 部番劇，可依格式、類型與季度篩選；評分、集數、簡介一站看全。',
+    strip: '切換榜單',
+    allTime: '歷代',
+    older: '更早',
+    olderYears: '更早的年份',
+    filters: '篩選',
+    wholeYear: '全年',
   },
   // Login
   login: {

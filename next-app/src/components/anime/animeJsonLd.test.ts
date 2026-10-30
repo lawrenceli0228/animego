@@ -240,16 +240,35 @@ describe("breadcrumb parent", () => {
     );
   });
 
-  test("a title with a year but no season hangs under /year", () => {
+  // What the rankings count: rated, not adult, not a music video, tracked by
+  // at least a thousand AniList users.
+  const ranked = { averageScore: 82, popularity: 54_000, format: "MOVIE", isAdult: false } as const;
+
+  test("a ranked title with a year but no season hangs under its year's ranking", () => {
     expect(
-      breadcrumbParent(detailRow({ season: null, seasonYear: null, startDate: "2019-07-19" }), "en"),
-    ).toEqual({ name: "Anime of 2019", path: "/year/2019" });
+      breadcrumbParent(detailRow({ ...ranked, season: null, seasonYear: null, startDate: "2019-07-19" }), "en"),
+    ).toEqual({ name: "Top 100 Anime of 2019", path: "/top/2019" });
     expect(
       breadcrumbParent(
-        detailRow({ season: null, seasonYear: null, startDate: { year: 2019, month: null, day: null } }),
+        detailRow({ ...ranked, season: null, seasonYear: null, startDate: { year: 2019, month: null, day: null } }),
         "zh",
       ),
-    ).toEqual({ name: "2019年番剧", path: "/year/2019" });
+    ).toEqual({ name: "2019 年度 Top 100", path: "/top/2019" });
+  });
+
+  test("a title the rankings do not count skips its year (the year may have no ranking page) for its genre", () => {
+    const unranked = [
+      { popularity: 999 },
+      { averageScore: null },
+      { averageScore: 0 },
+      { format: "MUSIC" },
+      { isAdult: true },
+      { popularity: undefined },
+    ];
+    for (const over of unranked) {
+      const row = detailRow({ ...ranked, ...over, season: null, seasonYear: null, startDate: "2019-07-19" });
+      expect(breadcrumbParent(row, "en")).toEqual({ name: "Adventure Anime", path: "/genre/adventure" });
+    }
   });
 
   test("a title with neither hangs under its first genre that has a page", () => {
