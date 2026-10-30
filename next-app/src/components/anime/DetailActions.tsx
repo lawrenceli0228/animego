@@ -94,6 +94,12 @@ export default function DetailActions({
     const row = rowRef.current;
     setPanel({ hue: row ? parseHue(getComputedStyle(row).getPropertyValue("--poster-hue")) : null });
   };
+  // Safari does not focus a button it clicks; give the magnet button focus
+  // itself, so the panel returns focus there and not to whatever held it.
+  const openFromMagnet = () => {
+    magnetRef.current?.focus({ preventScroll: true });
+    openPanel();
+  };
 
   return (
     <>
@@ -139,7 +145,12 @@ export default function DetailActions({
             needed) and the player selects episodes itself. Gating these on
             AniList's `episodes` total hid them for every currently-airing show,
             where AniList returns episodes=null until the run finishes. */}
-        <MagnetButton ref={magnetRef} onOpen={openPanel} label={labels.torrents} />
+        <MagnetButton
+          ref={magnetRef}
+          onOpen={openFromMagnet}
+          label={labels.torrents}
+          expanded={panel !== null}
+        />
         <PlayButton
           ariaLabel={labels.playAria}
           onOpenDownloads={openPanel}

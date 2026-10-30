@@ -793,6 +793,7 @@ const zh = {
     retry: '重试', clearFilters: '清除筛选',
     srcDmhy: '动漫花园', srcGarden: '花园', srcNyaa: 'Nyaa', srcMikan: '蜜柑',
     srcTosho: 'AnimeTosho', srcAcg: 'ACG.RIP',
+    showMore: '显示更多', moreLeft: '还有 {{n}} 条', copyFailed: '复制失败',
   },
   // Social
   social: {

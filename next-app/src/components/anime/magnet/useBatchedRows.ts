@@ -1,7 +1,9 @@
 "use client";
 
 // How many rows the list renders: 40, then 40 more each time the reader
-// brings the end of the list near — by their own hand.
+// brings the end of the list near — by their own hand — or presses the
+// "show more" button at its end (the way in for a screen reader, a dragged
+// scrollbar, or anything else that scrolls without a wheel, finger or key).
 //
 // A popular show answers with over a thousand rows (1.4 MB for Re:Zero), and
 // laying all of them out at once stalls a phone. The extra rows come only on
@@ -43,7 +45,7 @@ export function useBatchedRows(
   resetKey: string,
   scrollRef: RefObject<HTMLElement | null>,
   endRef: RefObject<HTMLElement | null>,
-): number {
+): { limit: number; more: () => void } {
   const [state, setState] = useState({ key: resetKey, limit: BATCH_SIZE });
   const limit = state.key === resetKey ? state.limit : BATCH_SIZE;
 
@@ -103,5 +105,5 @@ export function useBatchedRows(
     };
   }, [limit, total, more, scrollRef, endRef]);
 
-  return Math.min(limit, total);
+  return { limit: Math.min(limit, total), more };
 }

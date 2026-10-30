@@ -146,8 +146,9 @@ export function visibleRows(
  * 1 ran 28. With the season's length known, a number past it is translated
  * by the franchise offset when that lands inside the season (38 − 28 = 10),
  * and otherwise shows no tag — a number the season cannot have is not one to
- * print. With the length unknown (still airing) a number past the offset is
- * read as continuous and the rest as the season's own.
+ * print. With the length unknown (still airing) a number past the offset
+ * could be either — a long season's own 13 or a continuous 13 after 11 — so
+ * it shows no tag; numbers up to the offset are the season's own.
  *
  * `offset` is the measured offset or undefined when unknown; 0 is a real
  * answer ("nothing precedes this season") and translates nothing.
@@ -165,5 +166,5 @@ export function episodeLabel(
     const local = n - shift;
     return shift > 0 && local >= 1 && local <= seasonEpisodes ? { kind: "single", n: local } : null;
   }
-  return shift > 0 && n > shift ? { kind: "single", n: n - shift } : episode;
+  return shift > 0 && n > shift ? null : episode;
 }

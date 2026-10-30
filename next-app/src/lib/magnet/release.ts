@@ -36,17 +36,39 @@ const BATCH_WORD = /batch|合集|全集|全\s*\d{1,3}\s*[话話集]|\bcomplete\b
 /**
  * An episode range such as `01-12`, `[1~24]`, `67-77`, `总第67~85`. Both ends
  * are at most three digits and not glued to more digits, which keeps years
- * (`2025-2026`) out; `isRange` then wants the second end above the first,
- * which keeps "x265-10bit" out.
+ * (`2025-2026`) out; `isRange` then turns away the look-alikes below.
  */
 const EPISODE_RANGE = /(?:^|[^\d.])(\d{1,3})\s*[-~～]\s*(\d{1,3})(?![\d.])/g;
 
 /** Calendar dates ("2026-10-04", "2026.10.04") would otherwise read as ranges or episodes. */
 const DATE = /\d{4}[-./]\d{1,2}[-./]\d{1,2}/g;
 
+/** A number that ends a season or title marker: "S2", "Season 3", "Part 2", "No. 8". */
+const MARKER_BEFORE = /(?:\bS|season\s*|part\s*|no\.\s*)$/i;
+/** An opening bracket right before the first number: "[1 - 12]", "(01 ~ 13)". */
+const BRACKET_BEFORE = /[[【(（]\s*$/;
+
+/**
+ * Whether one of the title's number pairs is an episode range. Turned away:
+ *   - a falling pair ("x265-10bit");
+ *   - a pair whose first number closes a marker ("S2 - 05", "Season 3 - 05",
+ *     "Kaiju No. 8 - 10"): that is the season or title, then the episode;
+ *   - " 2 - 03" written with the spaced dash groups put between a title and
+ *     its episode, unless the first number is zero-padded ("01 - 12") or
+ *     opens a bracket ("[1 - 12]"). Ranges are written "01-12" or "1~12".
+ * (No lookbehind: it is a syntax error in Safari before 16.4.)
+ */
 function isRange(title: string): boolean {
   for (const m of title.matchAll(EPISODE_RANGE)) {
-    if (Number.parseInt(m[2], 10) > Number.parseInt(m[1], 10)) return true;
+    const [whole, from, to] = m;
+    if (Number.parseInt(to, 10) <= Number.parseInt(from, 10)) continue;
+    const fromAt = whole.indexOf(from);
+    const before = title.slice(0, (m.index ?? 0) + fromAt);
+    if (MARKER_BEFORE.test(before)) continue;
+    const dash = whole.slice(fromAt + from.length, whole.length - to.length);
+    const spaced = /^\s+\S\s+$/.test(dash);
+    if (spaced && !/^0\d/.test(from) && !BRACKET_BEFORE.test(before)) continue;
+    return true;
   }
   return false;
 }
@@ -182,7 +204,7 @@ export function parseRelease(title: string): ReleaseFacts {
 // ── Group name and title ─────────────────────────────────────────────
 
 /** Zero-width characters some feeds leave in group names ("7³ACG​"). */
-const ZERO_WIDTH = /[​-‍⁠﻿]/g;
+const ZERO_WIDTH = /[\u200b-\u200d\u2060\ufeff]/g;
 
 /** The group name as it should be shown and grouped on: zero-width marks removed, trimmed. */
 export function cleanFansub(fansub: string | null | undefined): string {

@@ -608,10 +608,15 @@
   stroke-width: 2.2;
 }
 
-.copy[data-done="true"],
-.copy[data-done="true"]:hover {
+.copy[data-state="done"],
+.copy[data-state="done"]:hover {
   background: var(--done);
   color: #03200b;
+}
+
+.copy[data-state="failed"] {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--t2);
 }
 
 .open {
@@ -684,6 +689,34 @@
   inset: 0;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
   animation: shimmer 2s linear infinite;
+}
+
+/* The way past the first batches without a wheel or a finger. */
+.more {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-top: 10px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.more:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.more span {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--t4);
 }
 
 .empty {
@@ -835,10 +868,22 @@
   }
 }
 
+/* A short window (a phone on its side, a page zoomed to 400%): the controls
+ * scroll on their own instead of pushing the list out of the panel. */
+@media (max-height: 560px) {
+  .top {
+    flex-shrink: 1;
+    min-height: 0;
+    max-height: 50%;
+    overflow-y: auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scrim,
   .panel,
   .row,
+  .spinner,
   .sk::after {
     animation: none;
   }

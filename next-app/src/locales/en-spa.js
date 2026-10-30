@@ -623,6 +623,7 @@ const en = {
     retry: 'Retry', clearFilters: 'Clear filters',
     srcDmhy: 'DMHY', srcGarden: 'Garden', srcNyaa: 'Nyaa', srcMikan: 'Mikan',
     srcTosho: 'AnimeTosho', srcAcg: 'ACG.RIP',
+    showMore: 'Show more', moreLeft: '{{n}} more', copyFailed: 'Copy failed',
   },
   playerGuide: {
     eyebrow: 'LOCAL DANMAKU PLAYER',

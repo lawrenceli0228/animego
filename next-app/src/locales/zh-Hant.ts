@@ -804,6 +804,7 @@ const zhHant = {
     retry: '重試', clearFilters: '清除篩選',
     srcDmhy: '動漫花園', srcGarden: '花園', srcNyaa: 'Nyaa', srcMikan: '蜜柑',
     srcTosho: 'AnimeTosho', srcAcg: 'ACG.RIP',
+    showMore: '顯示更多', moreLeft: '還有 {{n}} 條', copyFailed: '複製失敗',
   },
   // Social
   social: {

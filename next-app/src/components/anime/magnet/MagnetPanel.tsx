@@ -35,7 +35,7 @@ import { useScrollLock } from "@/lib/scrollLock";
 import { copyText } from "./copyText";
 import FansubStrip from "./FansubStrip";
 import { CloseIcon, SearchIcon } from "./icons";
-import ReleaseRow, { type ReleaseRowText } from "./ReleaseRow";
+import ReleaseRow, { type CopyState, type ReleaseRowText } from "./ReleaseRow";
 import { BATCH_SIZE, useBatchedRows } from "./useBatchedRows";
 import { useDialogFocus } from "./useDialogFocus";
 import { useEpisodeOffset, useTorrentRows } from "./useMagnetData";
@@ -83,7 +83,7 @@ export default function MagnetPanel({ anime, heading, hue, onClose, returnFocusR
   const [variant, setVariant] = useState<TitleVariantKind | null>(null);
   const [subFilter, setSubFilter] = useState<SubFilter>("all");
   const [fansub, setFansub] = useState<string | null>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [copied, setCopied] = useState<{ key: string; ok: boolean } | null>(null);
 
   const panelRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -100,7 +100,7 @@ export default function MagnetPanel({ anime, heading, hue, onClose, returnFocusR
 
   const cells = useMemo(() => fansubCells(list.rows, subFilter, fansub), [list.rows, subFilter, fansub]);
   const shown = useMemo(() => visibleRows(list.rows, subFilter, fansub), [list.rows, subFilter, fansub]);
-  const limit = useBatchedRows(
+  const { limit, more } = useBatchedRows(
     shown.length,
     `${list.status}|${manualQ ?? ""}|${subFilter}|${fansub ?? "\u0000"}|${list.rows.length}`,
     bodyRef,
@@ -138,6 +138,7 @@ export default function MagnetPanel({ anime, heading, hue, onClose, returnFocusR
       unnamed: t("torrent.unnamed"),
       copy: t("torrent.copyMagnet"),
       copied: t("torrent.copied"),
+      copyFailed: t("torrent.copyFailed"),
       open: t("torrent.openInClient"),
     }),
     [t],
@@ -183,15 +184,20 @@ export default function MagnetPanel({ anime, heading, hue, onClose, returnFocusR
   };
 
   const onCopy = useCallback(async (row: MagnetRow) => {
-    if (!(await copyText(row.magnet))) return;
-    setCopiedKey(row.key);
+    const ok = await copyText(row.magnet);
+    setCopied({ key: row.key, ok });
     window.clearTimeout(copiedTimer.current);
-    copiedTimer.current = window.setTimeout(() => setCopiedKey(null), COPIED_MS);
+    copiedTimer.current = window.setTimeout(() => setCopied(null), COPIED_MS);
   }, []);
 
+  // go-api only lists magnet URIs; checked again here so nothing else can be
+  // handed to window.open.
   const onOpen = useCallback((row: MagnetRow) => {
-    window.open(row.magnet);
+    if (row.magnet.startsWith("magnet:")) window.open(row.magnet);
   }, []);
+
+  const copyStateOf = (row: MagnetRow): CopyState =>
+    copied?.key !== row.key ? "idle" : copied.ok ? "done" : "failed";
 
   const episodeText = (row: MagnetRow): string | null => {
     const label = episodeLabel(row.facts.episode, anime.episodes, offset);
@@ -206,6 +212,14 @@ export default function MagnetPanel({ anime, heading, hue, onClose, returnFocusR
       ? fillTemplate(subTagTemplate, { script: scriptTag[script], embed: embedTag[embed] })
       : scriptTag[script];
   };
+
+  // The one live region: what a sighted reader learns from the list changing.
+  const countText = `${t("torrent.download")} ${shown.length} / ${list.rows.length} ${t("torrent.countUnit")}`.trim();
+  let statusText = "";
+  if (loading) statusText = t("torrent.loading");
+  else if (list.status === "error") statusText = t("torrent.searchFailed");
+  else if (copied) statusText = copied.ok ? t("torrent.copied") : t("torrent.copyFailed");
+  else statusText = shown.length === 0 ? t("torrent.notFound") : countText;
 
   const toneStyle = magnetToneVars(hue) as CSSProperties;
   const placeholder = anime.titleChinese || anime.titleRomaji || t("torrent.placeholder");
@@ -262,13 +276,19 @@ export default function MagnetPanel({ anime, heading, hue, onClose, returnFocusR
               episodeIsWord={row.facts.episode?.kind === "batch"}
               subTag={subTagFor(row)}
               sourceName={sourceNames[row.source] ?? row.source}
-              copied={copiedKey === row.key}
+              copy={copyStateOf(row)}
               text={rowText}
               onCopy={onCopy}
               onOpen={onOpen}
             />
           ))}
         </div>
+        {limit < shown.length ? (
+          <button type="button" className={s.more} onClick={more}>
+            {t("torrent.showMore")}
+            <span>{fillTemplate(t("torrent.moreLeft"), { n: shown.length - limit })}</span>
+          </button>
+        ) : null}
         <div ref={endRef} aria-hidden="true" />
       </>
     );
@@ -375,7 +395,7 @@ export default function MagnetPanel({ anime, heading, hue, onClose, returnFocusR
 
         <div ref={bodyRef} className={s.body}>
           <p className={s.srOnly} role="status">
-            {loading ? t("torrent.loading") : ""}
+            {statusText}
           </p>
           {body}
         </div>

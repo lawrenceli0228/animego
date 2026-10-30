@@ -38,7 +38,7 @@ export default function FansubStrip({ cells, selected, pending, onPick }: Fansub
 
   return (
     <div ref={scrollerRef} className={`${s.hscroll} ${s.stripScroll}`}>
-      <nav className={s.strip} aria-label={t("torrent.fansubsAria")}>
+      <div className={s.strip} role="group" aria-label={t("torrent.fansubsAria")}>
         <i
           className={s.ind}
           style={{ transform: `translateX(calc(${index} * (100% + ${GAP_PX}px)))` }}
@@ -62,7 +62,7 @@ export default function FansubStrip({ cells, selected, pending, onPick }: Fansub
             </button>
           );
         })}
-      </nav>
+      </div>
     </div>
   );
 }

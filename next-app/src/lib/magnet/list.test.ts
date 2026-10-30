@@ -130,10 +130,13 @@ describe("episodeLabel", () => {
     expect(episodeLabel(single(50), 10, 28)).toBeNull();
   });
 
-  test("season length unknown: past the offset reads as continuous", () => {
-    expect(episodeLabel(single(85), null, 66)).toEqual(single(19));
+  test("season length unknown: up to the offset is the season's own, past it is ambiguous and untagged", () => {
     expect(episodeLabel(single(19), null, 66)).toEqual(single(19));
     expect(episodeLabel(single(19), null, undefined)).toEqual(single(19));
+    // 85 after 66 is surely continuous, but 13 after 11 may be a long
+    // season's own 13: one rule for both, and no tag beats a wrong one.
+    expect(episodeLabel(single(85), null, 66)).toBeNull();
+    expect(episodeLabel(single(13), null, 11)).toBeNull();
   });
 
   test("batches and unstated pass through", () => {

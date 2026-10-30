@@ -17,11 +17,13 @@ interface MagnetButtonProps {
   label: string;
   /** Where the panel returns focus when it closes (React 19 passes `ref` as a prop). */
   ref?: Ref<HTMLButtonElement>;
+  /** Whether the panel it opens is open. */
+  expanded?: boolean;
 }
 
-export default function MagnetButton({ onOpen, label, ref }: MagnetButtonProps) {
+export default function MagnetButton({ onOpen, label, ref, expanded = false }: MagnetButtonProps) {
   return (
-    <Button ref={ref} variant="outline" onClick={onOpen}>
+    <Button ref={ref} variant="outline" onClick={onOpen} aria-haspopup="dialog" aria-expanded={expanded}>
       {label}
     </Button>
   );

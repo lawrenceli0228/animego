@@ -65,6 +65,23 @@ describe("parseEpisode — batches", () => {
     expect(parseEpisode("[kikuri] Sousou no Frieren 2nd Season (BD 1080p HEVC Opus) | Frieren: Beyond Journey's End S02")).toEqual({ kind: "batch" });
   });
 
+  test("a season or title number before the spaced dash is not a range", () => {
+    expect(parseEpisode("[SubsPlease] Spy x Family S2 - 05 (1080p) [ABCD1234].mkv")).toEqual({ kind: "single", n: 5 });
+    expect(parseEpisode("Sousou no Frieren S2 - 05")).toEqual({ kind: "single", n: 5 });
+    expect(parseEpisode("[Group] Oshi no Ko Season 3 - 05 [1080p]")).toEqual({ kind: "single", n: 5 });
+    expect(parseEpisode("[Group] Show Part 2 - 07 [1080p]")).toEqual({ kind: "single", n: 7 });
+    expect(parseEpisode("[Group] Re Zero kara Hajimeru Isekai Seikatsu S4 - 19 (85) [1080p]")).toEqual({ kind: "single", n: 19 });
+    expect(parseEpisode("[Group] Show 2 - 03 [1080p]")).toEqual({ kind: "single", n: 3 });
+    expect(parseEpisode("[Group] Kaiju No. 8 - 10 [1080p]")).toEqual({ kind: "single", n: 10 });
+  });
+
+  test("ranges written with a padded start, inside a bracket, or without spaces stay ranges", () => {
+    expect(parseEpisode("[Group] Show [01 - 12][1080p]")).toEqual({ kind: "batch" });
+    expect(parseEpisode("[Group] Show [1 - 12][1080p]")).toEqual({ kind: "batch" });
+    expect(parseEpisode("[Group] Show S2 [1-12][1080p]")).toEqual({ kind: "batch" });
+    expect(parseEpisode("[Group] Show 01~13 [1080p]")).toEqual({ kind: "batch" });
+  });
+
   test("x265-10bit is not a range", () => {
     expect(parseEpisode("[Group] Show - 03 [1080p x265-10bit]")).toEqual({ kind: "single", n: 3 });
   });

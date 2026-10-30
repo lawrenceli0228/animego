@@ -109,7 +109,7 @@ async function openPanel(page: Page, id = ANIME): Promise<{ button: Locator; dia
 }
 
 const rows = (dialog: Locator) => dialog.locator("[data-row]");
-const strip = (dialog: Locator) => dialog.getByRole("navigation", { name: "字幕组" }).getByRole("button");
+const strip = (dialog: Locator) => dialog.getByRole("group", { name: "字幕组" }).getByRole("button");
 
 async function stripLabels(dialog: Locator): Promise<string[]> {
   return strip(dialog).evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""));
@@ -250,6 +250,14 @@ test.describe("desktop", () => {
       await page.waitForTimeout(150);
     }
     await expect(rows(dialog)).toHaveCount(80);
+
+    // The way in that needs no wheel at all (a screen reader, a dragged
+    // scrollbar): the button at the end of the list, with what is left.
+    const more = dialog.getByRole("button", { name: /显示更多/ });
+    await expect(more).toContainText("还有 20 条");
+    await more.click();
+    await expect(rows(dialog)).toHaveCount(100);
+    await expect(more).toHaveCount(0);
   });
 });
 

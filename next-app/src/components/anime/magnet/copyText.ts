@@ -29,6 +29,8 @@ function copyBySelection(text: string): boolean {
   document.body.appendChild(field);
   try {
     field.select();
+    // iOS selects nothing in a read-only field without an explicit range.
+    field.setSelectionRange(0, text.length);
     return document.execCommand("copy");
   } catch {
     return false;

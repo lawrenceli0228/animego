@@ -41,17 +41,24 @@ export function useDialogFocus(
     panel?.focus({ preventScroll: true });
 
     const onKey = (e: KeyboardEvent) => {
-      if (!panel || e.isComposing) return;
+      // 229: WebKit reports the key that ends an IME composition with
+      // isComposing false, so Escape that cancels a pinyin candidate would
+      // otherwise close the panel.
+      if (!panel || e.isComposing || e.keyCode === 229) return;
       if (e.key === "Escape") {
         e.preventDefault();
         closeRef.current();
         return;
       }
       if (e.key !== "Tab") return;
+      // Every Tab is placed by hand, not only the two that wrap: Safari by
+      // default skips buttons, so from the search box its own next stop is
+      // outside the panel — the address bar or a field on the page behind.
       const controls = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(isShown);
+      if (controls.length === 0) return;
       const at = document.activeElement instanceof HTMLElement ? controls.indexOf(document.activeElement) : -1;
-      const next = trapFocusIndex(controls.length, at, e.shiftKey);
-      if (next === null) return;
+      const wrap = trapFocusIndex(controls.length, at, e.shiftKey);
+      const next = wrap ?? at + (e.shiftKey ? -1 : 1);
       e.preventDefault();
       controls[next].focus();
     };

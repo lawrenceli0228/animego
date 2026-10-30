@@ -15,7 +15,19 @@ import { buildTorrentRequest, episodeOffsetPath, readOffsetAnswer } from "@/lib/
  * the same request for an hour, so a miss here usually hits there.
  */
 const FRESH_MS = 5 * 60 * 1000;
+/** A popular show's answer parses to a thousand rows; keep the last few answers, not every one. */
+const LIST_CACHE_LIMIT = 12;
 const listCache = new Map<string, { rows: MagnetRow[]; at: number }>();
+
+function remember(key: string, rows: MagnetRow[]): void {
+  listCache.delete(key);
+  listCache.set(key, { rows, at: Date.now() });
+  while (listCache.size > LIST_CACHE_LIMIT) {
+    const oldest = listCache.keys().next().value;
+    if (oldest === undefined) break;
+    listCache.delete(oldest);
+  }
+}
 
 /** Offsets per anime for the life of the document; an answer, known or not, does not change. */
 const offsetCache = new Map<number, number | undefined>();
@@ -47,7 +59,7 @@ export function useTorrentRows(anilistId: number, manualQ: string | null): ListV
     apiGet<TorrentItem[]>(req.path, { signal: controller.signal })
       .then((data) => {
         const rows = toRows(Array.isArray(data) ? data : []);
-        listCache.set(req.cacheKey, { rows, at: Date.now() });
+        remember(req.cacheKey, rows);
         setSettled({ key, status: "ready", rows });
       })
       .catch((err: unknown) => {

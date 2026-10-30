@@ -4,7 +4,7 @@
 // source; copy and open. Memoised — a copy confirmation re-renders one row,
 // not the forty around it.
 
-import { memo } from "react";
+import { memo, useId } from "react";
 import type { MagnetRow } from "@/lib/magnet/list";
 import { CheckIcon, CopyIcon, OpenIcon } from "./icons";
 import s from "./MagnetPanel.module.css";
@@ -13,8 +13,12 @@ export interface ReleaseRowText {
   unnamed: string;
   copy: string;
   copied: string;
+  copyFailed: string;
   open: string;
 }
+
+/** Where the row's copy button stands: as drawn, just copied, or refused by the browser. */
+export type CopyState = "idle" | "done" | "failed";
 
 interface ReleaseRowProps {
   row: MagnetRow;
@@ -29,7 +33,7 @@ interface ReleaseRowProps {
   /** "简繁内封", or null. */
   subTag: string | null;
   sourceName: string;
-  copied: boolean;
+  copy: CopyState;
   text: ReleaseRowText;
   onCopy: (row: MagnetRow) => void;
   onOpen: (row: MagnetRow) => void;
@@ -43,13 +47,17 @@ function ReleaseRow({
   episodeIsWord,
   subTag,
   sourceName,
-  copied,
+  copy,
   text,
   onCopy,
   onOpen,
 }: ReleaseRowProps) {
   const { resolution, codec, source } = row.facts;
   const meta = [row.size, sourceName].filter(Boolean).join(" · ");
+  // The buttons are described by the title, so a list of buttons read out of
+  // context still says which release each one is for.
+  const titleId = useId();
+  const copyLabel = copy === "done" ? text.copied : copy === "failed" ? text.copyFailed : text.copy;
   return (
     <div className={s.row} data-row={index} style={{ animationDelay: `${stagger}ms` }}>
       <div className={s.rtop}>
@@ -59,7 +67,9 @@ function ReleaseRow({
         ) : null}
         {row.date ? <span className={s.date}>{row.date}</span> : null}
       </div>
-      <p className={s.title}>{row.title}</p>
+      <p id={titleId} className={s.title}>
+        {row.title}
+      </p>
       <div className={s.rbot}>
         <div className={s.tags}>
           {resolution ? <span className={`${s.tag} ${s.tagRes}`}>{resolution}</span> : null}
@@ -69,14 +79,21 @@ function ReleaseRow({
           {meta ? <span className={s.meta}>{meta}</span> : null}
         </div>
         <div className={s.acts}>
-          <button type="button" className={s.copy} data-done={copied} onClick={() => onCopy(row)}>
-            {copied ? <CheckIcon /> : <CopyIcon />}
-            <span aria-live="polite">{copied ? text.copied : text.copy}</span>
+          <button
+            type="button"
+            className={s.copy}
+            data-state={copy}
+            aria-describedby={titleId}
+            onClick={() => onCopy(row)}
+          >
+            {copy === "done" ? <CheckIcon /> : <CopyIcon />}
+            {copyLabel}
           </button>
           <button
             type="button"
             className={s.open}
             aria-label={text.open}
+            aria-describedby={titleId}
             title={text.open}
             onClick={() => onOpen(row)}
           >
