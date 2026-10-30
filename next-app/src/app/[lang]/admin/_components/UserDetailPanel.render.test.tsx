@@ -423,7 +423,7 @@ describe("the action row and what it opens", () => {
     const html = actions("revokeAll");
     expect(html).toContain('role="alertdialog"');
     expect(html).toContain('aria-label="确认退出全部设备"');
-    expect(text(html)).toContain("让「fixture-reader」在所有设备上退出登录？他下次打开网站时需要重新登录。");
+    expect(text(html)).toContain("让「fixture-reader」在所有设备上退出登录？对方下次打开网站时需要重新登录。");
     expect(html.indexOf(">取消<")).toBeLessThan(html.indexOf(">全部退出<"));
   });
 
@@ -432,7 +432,7 @@ describe("the action row and what it opens", () => {
     expect(html).toContain('data-confirm="delete"');
     expect(html).toContain('aria-label="确认删除用户"');
     expect(text(html)).toContain(
-      "删除「fixture-reader」？账号、追番、观看记录和登录设备会一起删掉，不能恢复。他过去的来访仍计入历史统计，不会让以前的日活和注册数变少。",
+      "删除「fixture-reader」？账号、追番、观看记录和登录设备会一起删掉，不能恢复。这个账号过去的来访仍计入历史统计，不会让以前的日活和注册数变少。",
     );
     expect(text(html)).toContain("确认删除");
   });
