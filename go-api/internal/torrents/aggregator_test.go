@@ -22,6 +22,7 @@ package torrents
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -485,6 +486,38 @@ func TestNew_DefaultsApplied(t *testing.T) {
 	require.NotNil(t, a.nyaaFn, "default nyaaFn should be wired")
 	require.NotNil(t, a.cache, "default cache should be created")
 	assert.True(t, a.ownsCache, "default cache is owned by the aggregator")
+}
+
+// TestNew_CacheHoldsResultsNotBytes pins the default cache's capacity in
+// RESULTS.  torrentCacheMax reads as an entry cap (500 queries), but every
+// entry is charged cost 1, and ristretto adds 56 bytes of its own per entry
+// unless IgnoreInternalCost is set — so without it the cache holds about
+// 500/57 ≈ 8 results and rejects the rest at admission.  That failure is
+// silent: Set reports success, Wait returns, and Get misses, so the only
+// symptom is every popular show going back to six upstreams on each open.
+//
+// Written through cacheResult (the production write path) rather than
+// driven through FetchForAnime: what is under test is admission, and the
+// per-source throttle would only make a hundred fan-outs slow to observe it.
+func TestNew_CacheHoldsResultsNotBytes(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAggregator(t)
+
+	const n = 100 // a fifth of the cap, and ~12x what an unflagged cache admits
+	for i := 0; i < n; i++ {
+		a.cacheResult("anime:show-"+strconv.Itoa(i), []TorrentItem{stubItem(SourceGarden)})
+	}
+	a.cache.Wait()
+
+	present := 0
+	for i := 0; i < n; i++ {
+		if _, ok := a.cache.Get("anime:show-" + strconv.Itoa(i)); ok {
+			present++
+		}
+	}
+	assert.Equal(t, n, present,
+		"results were rejected far below torrentCacheMax — check IgnoreInternalCost at the cache.New call in New()")
 }
 
 // TestNew_WithCacheTakesOwnership verifies that WithCache flips the

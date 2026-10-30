@@ -296,11 +296,16 @@ func New(opts ...Option) (*Aggregator, error) {
 
 	// Default cache.  Numeric inputs chosen to match Express's
 	// torrentCache: 500 entries, 1h TTL.  ristretto recommends
-	// NumCounters ~ 10x expected items.
+	// NumCounters ~ 10x expected items.  IgnoreInternalCost is what makes
+	// MaxCost an entry count: without it ristretto charges its own 56 bytes
+	// per entry on top of our cost of 1, and the cache admits about 8
+	// results instead of 500 (see cache.Config.IgnoreInternalCost and
+	// TestNew_CacheHoldsResultsNotBytes).
 	c, err := cache.New[[]TorrentItem](cache.Config{
-		NumCounters: int64(torrentCacheMax) * 10,
-		MaxCost:     int64(torrentCacheMax),
-		DefaultTTL:  torrentCacheTTL,
+		NumCounters:        int64(torrentCacheMax) * 10,
+		MaxCost:            int64(torrentCacheMax),
+		DefaultTTL:         torrentCacheTTL,
+		IgnoreInternalCost: true,
 	})
 	if err != nil {
 		return nil, err
