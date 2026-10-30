@@ -86,14 +86,15 @@ test.describe("the desktop bar", () => {
   test("links the agreed pages in order and marks the current one", async ({ page }) => {
     await page.goto("/calendar");
     const links = await centreLinks(page);
-    expect(links.map(([label]) => label)).toEqual(["首页", "放送表", "季度", "分类", "关于"]);
+    expect(links.map(([label]) => label)).toEqual(["首页", "放送表", "季度", "分类", "排行", "关于"]);
     expect(links[0]?.[1]).toBe("/");
     expect(links[1]?.[1]).toBe("/calendar");
     expect(links[2]?.[1]).toMatch(/^\/seasonal\/(winter|spring|summer|fall)\/\d{4}$/);
-    expect(links[4]?.[1]).toBe("/welcome");
+    expect(links[4]?.[1]).toBe("/top");
+    expect(links[5]?.[1]).toBe("/welcome");
     // Only 放送表 is current, and a visitor gets no 我的追番 and no
     // placeholder for it.
-    expect(links.map(([, , current]) => current)).toEqual([null, "page", null, null, null]);
+    expect(links.map(([, , current]) => current)).toEqual([null, "page", null, null, null, null]);
     await expect(navbar(page).locator('a[href="/profile"]')).toHaveCount(0);
     // /library is never a top-level link.
     await expect(navbar(page).locator('ul a[href="/library"]')).toHaveCount(0);
@@ -104,7 +105,7 @@ test.describe("the desktop bar", () => {
     // needs the page's images, so the DOM is enough to read it from.
     await page.goto("/en/calendar", { waitUntil: "domcontentloaded" });
     const links = await centreLinks(page);
-    expect(links.map(([label]) => label)).toEqual(["Home", "Schedule", "Season", "Genres", "About"]);
+    expect(links.map(([label]) => label)).toEqual(["Home", "Schedule", "Season", "Genres", "Top 100", "About"]);
     expect(links[1]).toEqual(["Schedule", "/en/calendar", "page"]);
     expect(links.filter(([, , current]) => current === "page")).toHaveLength(1);
   });
@@ -490,8 +491,8 @@ test.describe("signed in", () => {
     await page.goto("/");
     await expectSignedIn(page, "e2e-sandbox");
     const links = await centreLinks(page);
-    expect(links.map(([label]) => label)).toEqual(["首页", "放送表", "季度", "分类", "我的追番", "关于"]);
-    expect(links[4]?.[1]).toBe("/profile");
+    expect(links.map(([label]) => label)).toEqual(["首页", "放送表", "季度", "分类", "排行", "我的追番", "关于"]);
+    expect(links[5]?.[1]).toBe("/profile");
     // No visitor chrome once the probe has answered.
     await expect(navbar(page).locator('a[href^="/login"]')).toHaveCount(0);
   });
