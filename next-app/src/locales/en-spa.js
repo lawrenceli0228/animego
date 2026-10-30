@@ -1717,6 +1717,15 @@ const en = {
       deleted: 'Deleted {{username}}',
       invalidUserId: 'Invalid user ID',
       invalidSessionId: 'Invalid session ID',
+      // What a failed user action says (lib/adminUserErrors.ts picks one from
+      // go-api's status and message); go-api's own text is never shown.
+      errUsernameTaken: 'That username is taken',
+      errEmailTaken: 'That email is already used by another account',
+      errSelfDelete: "You can't delete your own account",
+      errSelfRevoke: 'Sign your own devices out from Settings',
+      errSessionGone: 'That device is already signed out',
+      errSignedOut: 'Your session has ended. Sign in again',
+      errForbidden: 'Admin access required',
     },
     // Enrichment section
     enrichmentRecordsTitle: 'Enrichment Records',

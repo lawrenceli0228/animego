@@ -57,12 +57,37 @@ export interface DeleteUserResult {
   username: string;
 }
 
+/**
+ * A user action that did not go through (users.ts).
+ *
+ * The user actions return this rather than throw. In production Next sends a
+ * thrown action's error to the browser as a digest only, and React rebuilds
+ * it there as one fixed English sentence ("An error occurred in the Server
+ * Components render…"), so no thrown message — and no status — ever reached
+ * the drawer. A returned object arrives whole.
+ *
+ * `status` and `code` are go-api's (`ApiError`), or 400 / "VALIDATION_ERROR"
+ * for a check the action makes before the network, or 0 / "NETWORK_ERROR"
+ * when go-api could not be reached. `message` is go-api's English or the
+ * action's own check: it tells two answers with one status apart
+ * (lib/adminUserErrors.ts), and is never shown as it is. Empty for an
+ * unexpected error, which is logged on the server instead.
+ */
+export interface UserActionFailure {
+  ok: false;
+  status: number;
+  code: string;
+  message: string;
+}
+
+export type UserActionResult<T> = { ok: true; data: T } | UserActionFailure;
+
 // ─── Error classes used across the action surface ────────────────────
 //
-// Server Actions throw across the React RPC boundary. We normalise
-// upstream ApiError instances and unexpected throws into these named
-// classes so Client Components can `err instanceof XActionError` to
-// decide what to surface inline.
+// The enrichment actions throw across the React RPC boundary. We normalise
+// upstream ApiError instances and unexpected throws into this named class
+// so Client Components can `err instanceof EnrichmentActionError` to decide
+// what to surface inline.
 
 export class EnrichmentActionError extends Error {
   constructor(
@@ -72,16 +97,5 @@ export class EnrichmentActionError extends Error {
   ) {
     super(message);
     this.name = "EnrichmentActionError";
-  }
-}
-
-export class UserActionError extends Error {
-  constructor(
-    public code: string,
-    message: string,
-    public status: number,
-  ) {
-    super(message);
-    this.name = "UserActionError";
   }
 }

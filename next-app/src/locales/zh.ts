@@ -1599,6 +1599,15 @@ const zh = {
       deleted: '已删除 {{username}}',
       invalidUserId: '用户 ID 无效',
       invalidSessionId: '设备 ID 无效',
+      // 用户操作失败时显示的话（lib/adminUserErrors.ts 按 go-api 的状态码
+      // 和英文原文挑一条），go-api 的英文本身从不直接显示。
+      errUsernameTaken: '这个用户名已被占用',
+      errEmailTaken: '这个邮箱已经被其他账号使用',
+      errSelfDelete: '不能删除你自己的账号',
+      errSelfRevoke: '你自己的设备请到设置页退出',
+      errSessionGone: '这台设备已经退出了',
+      errSignedOut: '登录已失效，请重新登录',
+      errForbidden: '需要管理员权限',
     },
     // Server-action validation messages (thrown by users.ts; resolved via getDict())
     userActions: {

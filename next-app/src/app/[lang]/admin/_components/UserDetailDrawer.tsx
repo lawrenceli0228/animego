@@ -14,7 +14,9 @@
 //
 // After any change: a toast, the drawer reads the account again (or closes,
 // after a delete), and the list refetches its current page (onChanged /
-// onDeleted).
+// onDeleted). A change that did not go through is reported in the drawer's
+// own words (lib/adminUserErrors.ts), never in go-api's English or in what
+// a thrown action carries — in production that is React's generic sentence.
 //
 // Loaded by UsersSection through next/dynamic: this is the module that pulls
 // react-hot-toast, which touches `document` on import, so nothing a bun test
@@ -36,6 +38,8 @@ import {
   type UserDrawerMode,
   type UserDrawerTarget,
 } from "@/lib/adminUsers";
+import { userActionErrorKey, type UserAction } from "@/lib/adminUserErrors";
+import type { UserActionFailure } from "../_actions/_shared";
 import {
   deleteAdminUser,
   revokeAdminUserSession,
@@ -61,10 +65,8 @@ export interface UserDetailDrawerProps {
   onDeleted: () => void;
 }
 
-/** A thrown action's message when it carries one, else the action's own words. */
-function messageOf(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message ? err.message : fallback;
-}
+/** A thrown action — the network to Next, or Next itself — says only that it failed. */
+const THROWN = { status: 0 };
 
 async function fetchDetail(
   userId: string,
@@ -134,14 +136,21 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
     onChanged();
   };
 
-  /** One mutation at a time; its failure lands under the action row. */
-  const perform = async (work: () => Promise<void>, fallback: string) => {
+  const failureText = (action: UserAction, failure: { status: number; message?: string }) =>
+    t(userActionErrorKey(action, failure));
+
+  /**
+   * One mutation at a time; its failure lands under the action row. `work`
+   * answers with the action's failure, or null once it went through.
+   */
+  const perform = async (action: UserAction, work: () => Promise<UserActionFailure | null>) => {
     setBusy(true);
     setActionError(null);
     try {
-      await work();
-    } catch (err) {
-      setActionError(messageOf(err, fallback));
+      const failure = await work();
+      if (failure) setActionError(failureText(action, failure));
+    } catch {
+      setActionError(failureText(action, THROWN));
     } finally {
       setBusy(false);
     }
@@ -166,12 +175,16 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
       chooseMode("view");
       return;
     }
-    void perform(async () => {
-      const updated = await updateAdminUser(target.id, result.patch);
-      toast.success(fillTemplate(t("admin.userPanel.updated"), { username: updated.username }));
+    void perform("update", async () => {
+      const outcome = await updateAdminUser(target.id, result.patch);
+      // `=== false`: the repo compiles without strict null checks, and only
+      // the literal comparison narrows this union.
+      if (outcome.ok === false) return outcome;
+      toast.success(fillTemplate(t("admin.userPanel.updated"), { username: outcome.data.username }));
       setMode("view");
       changed();
-    }, t("admin.updateFailed"));
+      return null;
+    });
   };
 
   const savePassword = (password: string) => {
@@ -179,19 +192,23 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
       setActionError(fillTemplate(t("admin.passwordMinLen"), { min: PASSWORD_MIN }));
       return;
     }
-    void perform(async () => {
-      await setAdminUserPassword(target.id, password);
+    void perform("password", async () => {
+      const outcome = await setAdminUserPassword(target.id, password);
+      if (outcome.ok === false) return outcome;
       // A new password also ends every session (go-api migration 0052), so
       // the device list and the row's 最近设备 change too.
       toast.success(fillTemplate(t("admin.passwordResetSuccess"), { username: current.username }));
       setMode("view");
       changed();
-    }, t("admin.passwordChangeFailed"));
+      return null;
+    });
   };
 
   const revokeAll = () => {
-    void perform(async () => {
-      const { revoked } = await revokeAdminUserSessions(target.id);
+    void perform("revokeAll", async () => {
+      const outcome = await revokeAdminUserSessions(target.id);
+      if (outcome.ok === false) return outcome;
+      const { revoked } = outcome.data;
       toast.success(
         revoked > 0
           ? fillTemplate(t("admin.userPanel.revokedAll"), { username: current.username, n: revoked })
@@ -199,18 +216,23 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
       );
       setMode("view");
       changed();
-    }, t("admin.userPanel.revokeFailed"));
+      return null;
+    });
   };
 
   const revokeSession = async (session: AdminUserSession, deviceName: string) => {
     setEnding((prev) => new Set(prev).add(session.id));
     setDeviceError(null);
     try {
-      await revokeAdminUserSession(target.id, session.id);
+      const outcome = await revokeAdminUserSession(target.id, session.id);
+      if (outcome.ok === false) {
+        setDeviceError(failureText("revokeOne", outcome));
+        return;
+      }
       toast.success(fillTemplate(t("admin.userPanel.signedOutDevice"), { device: deviceName }));
       changed();
-    } catch (err) {
-      setDeviceError(messageOf(err, t("admin.userPanel.revokeFailed")));
+    } catch {
+      setDeviceError(failureText("revokeOne", THROWN));
     } finally {
       setEnding((prev) => {
         const next = new Set(prev);
@@ -221,11 +243,15 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
   };
 
   const remove = () => {
-    void perform(async () => {
-      const result = await deleteAdminUser(target.id);
-      toast.success(fillTemplate(t("admin.userPanel.deleted"), { username: result.username || current.username }));
+    void perform("delete", async () => {
+      const outcome = await deleteAdminUser(target.id);
+      if (outcome.ok === false) return outcome;
+      toast.success(
+        fillTemplate(t("admin.userPanel.deleted"), { username: outcome.data.username || current.username }),
+      );
       onDeleted();
-    }, t("admin.deleteFailed"));
+      return null;
+    });
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
