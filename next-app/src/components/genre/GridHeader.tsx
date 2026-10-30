@@ -23,13 +23,15 @@ interface GridHeaderProps {
   /** null while it is not known yet. */
   count: number | null;
   onBack: () => void;
+  /** Already on screen when this page landed (carriedHeader.ts): no entrance. */
+  held: boolean;
   lang: Lang;
   copy: GenreCopy;
 }
 
-export default function GridHeader({ genre, view, count, onBack, lang, copy }: GridHeaderProps) {
+export default function GridHeader({ genre, view, count, onBack, held, lang, copy }: GridHeaderProps) {
   return (
-    <div className={grid.wrap}>
+    <div className={grid.wrap} data-held={held ? "true" : undefined}>
       <Link href={genrePath(genre)} prefetch={false} className={grid.back} onNavigate={onBack} data-back>
         <BackIcon />
         {fillTemplate(copy.back, { heading: genreHeading(genre, lang) })}

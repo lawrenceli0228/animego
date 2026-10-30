@@ -18,6 +18,16 @@
   animation: fadeIn 0.3s ease both;
 }
 
+/* The header the page before drew while this one loaded (carriedHeader.ts):
+ * already on screen, it stays as it is. Only its count is new — a hub on its
+ * way has none to show — and that fades in by itself. */
+.hero[data-held="true"] {
+  animation: none;
+}
+.hero[data-held="true"] .count {
+  animation: fadeIn 0.3s ease both;
+}
+
 .h1row {
   display: flex;
   flex-wrap: wrap;
