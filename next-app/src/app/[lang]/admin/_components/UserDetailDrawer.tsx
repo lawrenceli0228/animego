@@ -12,6 +12,17 @@
 // because only the list knows where it should go: the opener, or its heading
 // after a delete, when the opener's row is about to disappear.
 //
+// Keeping focus in takes two things, because parts of the drawer disappear
+// while they hold focus — a confirmation's 取消 closes the confirmation, a
+// device's row goes after its sign-out, 重试 goes once the read restarts —
+// and a browser then drops focus on <body>, outside the dialog:
+//
+//   - Escape and Tab are heard on the document, not on the dialog, so they
+//     work wherever focus is. Tab from outside enters the dialog.
+//   - Focus that has fallen out is put back inside after every change: on
+//     the button that opened a closing panel (UserDetailActions), on the
+//     next device (SessionList), or else on the dialog itself.
+//
 // After any change: a toast, the drawer reads the account again (or closes,
 // after a delete), and the list refetches its current page (onChanged /
 // onDeleted). A change that did not go through is reported in the drawer's
@@ -22,11 +33,12 @@
 // react-hot-toast, which touches `document` on import, so nothing a bun test
 // imports may reach it.
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "react-hot-toast";
 import { fillTemplate } from "@/lib/home/time";
 import { useLang } from "@/lib/lang-client";
+import { focusIsLost } from "@/lib/lostFocus";
 import { useScrollLock } from "@/lib/scrollLock";
 import {
   PASSWORD_MIN,
@@ -67,6 +79,33 @@ export interface UserDetailDrawerProps {
 
 /** A thrown action — the network to Next, or Next itself — says only that it failed. */
 const THROWN = { status: 0 };
+
+/**
+ * Tab inside the dialog, wrapping at either end. From outside it — focus
+ * fell out, or never came in — Tab enters at the first control and
+ * Shift+Tab at the last.
+ */
+function trapTab(dialog: HTMLElement, event: KeyboardEvent): void {
+  const nodes = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+  const at = document.activeElement;
+  if (nodes.length === 0) {
+    event.preventDefault();
+    dialog.focus({ preventScroll: true });
+    return;
+  }
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  if (!at || !dialog.contains(at)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey && (at === first || at === dialog)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && at === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 
 async function fetchDetail(
   userId: string,
@@ -110,6 +149,35 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
     if (dialog && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
     return () => onRestoreFocus();
   }, [onRestoreFocus]);
+
+  // After every change: focus that fell out with whatever held it goes to the
+  // dialog itself. The action row and the device list run their own effects
+  // first (children before parents) and put it somewhere better when they can.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && focusIsLost()) dialog.focus({ preventScroll: true });
+  });
+
+  // Escape and Tab, wherever focus is, while the drawer is open. Captured on
+  // the document because a handler on the dialog only heard keys while focus
+  // was inside it, and stopped closing the drawer the moment it fell out.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      if (event.key === "Escape") {
+        // An input method (pinyin) is using Escape to cancel what it is composing.
+        if (event.isComposing) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      } else if (event.key === "Tab") {
+        trapTab(dialog, event);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [onClose]);
 
   // Read the account; again after every change (`reload`).
   useEffect(() => {
@@ -254,28 +322,6 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
     });
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab" || !dialogRef.current) return;
-    const nodes = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
-    if (nodes.length === 0) return;
-    const first = nodes[0];
-    const last = nodes[nodes.length - 1];
-    const at = document.activeElement;
-    if (event.shiftKey && (at === first || at === dialogRef.current)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && at === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
   return (
     <div
       className={s.overlay}
@@ -291,7 +337,6 @@ function Drawer({ target, onRestoreFocus, onClose, onChanged, onDeleted }: UserD
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        onKeyDown={onKeyDown}
         data-user-drawer={target.id}
       >
         <UserDetailPanel

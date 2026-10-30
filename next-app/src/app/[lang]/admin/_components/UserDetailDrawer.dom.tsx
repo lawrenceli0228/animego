@@ -1,10 +1,21 @@
-// The user detail drawer, mounted in a real DOM: the words a failed action is
-// reported in. Runs in its own bun process (domSuites.test.ts), which is what
-// lets it stub the server actions module.
+// The user detail drawer, mounted in a real DOM: where focus goes when part
+// of it disappears, the keys it answers wherever focus is, and the words a
+// failed action is reported in. Runs in its own bun process (domSuites.test.ts),
+// which is what lets it stub the server actions module.
 //
 // Every fixture is synthetic.
 
-import { button, click, holdFetch, mount, settle, type, unmountAll } from "@/lib/test-utils/domHarness";
+import {
+  button,
+  click,
+  describeFocus,
+  holdFetch,
+  mount,
+  press,
+  settle,
+  type,
+  unmountAll,
+} from "@/lib/test-utils/domHarness";
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { UserDrawerMode, UserDrawerTarget } from "@/lib/adminUsers";
@@ -139,6 +150,150 @@ async function open(mode: UserDrawerMode = "view", answer: { body: unknown; stat
   if (!dialog) throw new Error("no dialog");
   return dialog;
 }
+
+const inside = (dialog: HTMLElement) => dialog.contains(document.activeElement);
+
+// ─── Focus ─────────────────────────────────────────────────────────────
+
+describe("focus stays in the drawer when part of it goes away", () => {
+  test("取消 in a confirmation hands focus back to the button that opened it", async () => {
+    const dialog = await open("revokeAll");
+    expect(describeFocus()).toBe("<button> 取消");
+
+    await click(button(dialog, "取消"));
+
+    expect(dialog.querySelector("[data-confirm]")).toBeNull();
+    expect(describeFocus()).toBe("<button> 退出全部设备");
+  });
+
+  test("so Escape still closes the drawer afterwards", async () => {
+    const dialog = await open("delete");
+    await click(button(dialog, "取消"));
+
+    await press("Escape");
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("a successful 全部退出 closes its confirmation onto 退出全部设备", async () => {
+    const dialog = await open("revokeAll");
+    await click(button(dialog, "全部退出"));
+    expect(actionCalls.map((c) => c.name)).toEqual(["revokeAdminUserSessions"]);
+
+    await actionCalls[0].resolve({ ok: true, data: { revoked: 2 } });
+
+    expect(dialog.querySelector("[data-confirm]")).toBeNull();
+    expect(describeFocus()).toBe("<button> 退出全部设备");
+  });
+
+  test("a saved profile closes its form onto 编辑资料", async () => {
+    const dialog = await open("edit");
+    const name = dialog.querySelector<HTMLInputElement>('[data-form="edit"] input');
+    if (!name) throw new Error("no username field");
+    await type(name, "fixture-renamed");
+    await click(button(dialog, "保存"));
+
+    await actionCalls[0].resolve({
+      ok: true,
+      data: { _id: USER_ID, username: "fixture-renamed", email: "a@example.test", role: null, createdAt: "2030-01-05T01:00:00Z" },
+    });
+
+    expect(dialog.querySelector('[data-form="edit"]')).toBeNull();
+    expect(describeFocus()).toBe("<button> 编辑资料");
+  });
+
+  test("a signed-out device's row goes, and focus moves to the next device", async () => {
+    const dialog = await open();
+    const phone = dialog.querySelector<HTMLElement>(`[data-session="${PHONE}"] button`);
+    phone?.focus();
+    await click(phone);
+    await actionCalls[0].resolve({ ok: true, data: { revoked: 1 } });
+    // The drawer reads the account again; this time the phone is gone.
+    await net.requests[1].respond({ data: detail([session(LAPTOP, "Windows", "Edge")]) });
+
+    expect(dialog.querySelector(`[data-session="${PHONE}"]`)).toBeNull();
+    expect(describeFocus()).toBe("<button> 退出这台设备：Windows · Edge");
+  });
+
+  test("the last device's row goes, and focus moves to the device list's heading", async () => {
+    const dialog = await open("view", { body: { data: detail([session(PHONE, "Android", "Chrome")]) } });
+    const phone = dialog.querySelector<HTMLElement>(`[data-session="${PHONE}"] button`);
+    phone?.focus();
+    await click(phone);
+    await actionCalls[0].resolve({ ok: true, data: { revoked: 1 } });
+    await net.requests[1].respond({ data: detail([]) });
+
+    expect(inside(dialog)).toBe(true);
+    expect(document.activeElement?.closest('[data-block="sessions"]')).not.toBeNull();
+  });
+
+  test("重试 after a failed read keeps focus in the drawer", async () => {
+    const dialog = await open("view", { body: { error: { code: "SERVER_ERROR", message: "boom" } }, status: 500 });
+    const retry = button(dialog, "重试");
+    retry.focus();
+
+    await click(retry);
+
+    expect(dialog.querySelector('[role="alert"]')).toBeNull();
+    expect(inside(dialog)).toBe(true);
+  });
+});
+
+describe("Escape and Tab work wherever focus is", () => {
+  test("Escape with focus on <body> closes the drawer", async () => {
+    await open();
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(describeFocus()).toBe("<body>");
+
+    await press("Escape");
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("Escape while an input method is composing is left to it", async () => {
+    const dialog = await open("edit");
+    expect(inside(dialog)).toBe(true);
+
+    await press("Escape", { isComposing: true });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test("Tab from outside the drawer enters it at the first control, Shift+Tab at the last", async () => {
+    const dialog = await open();
+    const controls = Array.from(dialog.querySelectorAll<HTMLElement>("button"));
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    const forward = await press("Tab");
+    expect(forward.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(controls[0]);
+
+    (document.activeElement as HTMLElement | null)?.blur();
+    await press("Tab", { shiftKey: true });
+    expect(document.activeElement).toBe(controls[controls.length - 1]);
+  });
+
+  test("Tab wraps from the last control to the first and back", async () => {
+    const dialog = await open();
+    const controls = Array.from(dialog.querySelectorAll<HTMLElement>("button"));
+    controls[controls.length - 1].focus();
+
+    await press("Tab");
+    expect(document.activeElement).toBe(controls[0]);
+
+    await press("Tab", { shiftKey: true });
+    expect(document.activeElement).toBe(controls[controls.length - 1]);
+  });
+
+  test("opening puts focus in the drawer and closing hands it back once", async () => {
+    const dialog = await open();
+    expect(inside(dialog)).toBe(true);
+
+    await unmountAll();
+
+    expect(onRestoreFocus).toHaveBeenCalledTimes(1);
+  });
+});
 
 // ─── What a failed action says ─────────────────────────────────────────
 

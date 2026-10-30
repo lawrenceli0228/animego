@@ -7,6 +7,7 @@
 //
 // Every date is on the +08 clock and read against the payload's `today`.
 
+import { useEffect, useRef } from "react";
 import LocaleLink from "@/components/ui/LocaleLink";
 import { pickTitle } from "@/lib/formatters";
 import { fillTemplate } from "@/lib/home/time";
@@ -22,6 +23,7 @@ import {
   visitCalendar,
   type CalendarCell,
 } from "@/lib/adminUsers";
+import { focusIsLost } from "@/lib/lostFocus";
 import DeviceIcon from "../../settings/_components/DeviceIcon";
 import { DEVICE_KINDS, type DeviceKind } from "../../settings/_components/deviceSessions";
 import type { AdminAnimeTitles, AdminUserDetail, AdminUserSession, AdminUserSubscription } from "../_types/users";
@@ -153,9 +155,26 @@ export function SessionList({ detail, ending, error, onRevoke }: SessionListProp
   const { t } = useLang();
   const words = useUserWords();
   const sessions = detail.sessions;
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  // The row whose sign-out button has focus. A signed-out device's row goes
+  // when the drawer reads the account again, and takes that focus with it.
+  const focusedAt = useRef<number | null>(null);
+  const ids = sessions.map((session) => session.id).join(" ");
+
+  // Once the row has gone, focus moves to the device that took its place,
+  // or the one above it, or — with none left — the block's heading.
+  useEffect(() => {
+    const at = focusedAt.current;
+    if (at === null || !focusIsLost()) return;
+    focusedAt.current = null;
+    const buttons = sectionRef.current?.querySelectorAll<HTMLElement>("[data-session] button") ?? [];
+    (buttons[Math.min(at, buttons.length - 1)] ?? headingRef.current)?.focus();
+  }, [ids]);
+
   return (
-    <section data-block="sessions">
-      <h3 className={s.blockTitle}>
+    <section data-block="sessions" ref={sectionRef}>
+      <h3 className={s.blockTitle} ref={headingRef} tabIndex={-1}>
         {t("admin.userPanel.devicesTitle")}{" "}
         <small>{fillTemplate(t("admin.userPanel.devicesCount"), { n: sessions.length })}</small>
       </h3>
@@ -166,7 +185,7 @@ export function SessionList({ detail, ending, error, onRevoke }: SessionListProp
       ) : (
         // role="list": Safari drops the semantics of a <ul> styled without bullets.
         <ul className={s.devices} role="list">
-          {sessions.map((session) => {
+          {sessions.map((session, index) => {
             const name = words.device(session.os, session.browser);
             const country = countryCode(session.country);
             const busy = ending.has(session.id);
@@ -194,6 +213,13 @@ export function SessionList({ detail, ending, error, onRevoke }: SessionListProp
                   className={s.btn}
                   aria-label={fillTemplate(t("admin.userPanel.signOutDeviceLabel"), { device: name })}
                   aria-disabled={busy || undefined}
+                  onFocus={() => {
+                    focusedAt.current = index;
+                  }}
+                  onBlur={(event) => {
+                    // Focus moving on to another control; a removal blurs with no target.
+                    if (event.relatedTarget) focusedAt.current = null;
+                  }}
                   onClick={() => {
                     if (!busy) onRevoke(session, name);
                   }}
