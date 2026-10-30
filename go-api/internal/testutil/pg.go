@@ -96,8 +96,6 @@ var allTables = []string{
 	"anime_threads",
 	"community_replies",
 	"activity_likes",
-	// Community discovery aggregate (migration 0020).
-	"community_engagement_daily",
 	// Activity rollup (migration 0025).  The CASCADE from users would reach
 	// it anyway; listing it keeps this the readable inventory it claims to be.
 	"user_activity_daily",

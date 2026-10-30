@@ -67,8 +67,6 @@ type CommentsDB interface {
 	UpsertCommentReactionWithNotification(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.UpsertCommentReactionWithNotificationRow, error)
 	DeleteCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.DeleteCommentReactionRow, error)
 	ListTrendingDiscussions(ctx context.Context, pageLimit int32, windowHours int32, viewerUserID *uuid.UUID) ([]dbgen.ListTrendingDiscussionsRow, error)
-	TrackCommunityEngagement(ctx context.Context, eventType string, source string, anilistID int32, episode int32, authenticated bool) (int64, error)
-	GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (dbgen.GetCommunityEngagementSummaryRow, error)
 }
 
 // Handlers carries the deps shared by every comment handler.  Construct

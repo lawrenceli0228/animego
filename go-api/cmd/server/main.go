@@ -992,7 +992,6 @@ func main() {
 
 	r.Route("/api/community", func(r chi.Router) {
 		r.With(jwtx.OptionalAuth(signer)).Get("/discussions/trending", commentsHandlers.ListTrendingDiscussions)
-		r.With(jwtx.OptionalAuth(signer)).Post("/engagement", commentsHandlers.TrackCommunityEngagement)
 	})
 
 	r.Route("/api/notifications", func(r chi.Router) {
@@ -1038,11 +1037,8 @@ func main() {
 		// Removing a reported review, thread or reply (soft; deleted_by is
 		// the admin).
 		communityHandlers.MountAdmin(r)
-		r.Get("/community-metrics", commentsHandlers.CommunityMetrics)
 		// The user-activity panel: DAU/WAU/MAU, the daily trend, retention
-		// cohorts and the surface breakdown.  Distinct from
-		// /community-metrics, which is one rail's impressions and is
-		// aggregate-only by construction.
+		// cohorts and the surface breakdown.
 		r.Get("/activity", adminActivityHandlers.GetActivity)
 
 		// Enrichment writes — static paths first to keep chi happy.
