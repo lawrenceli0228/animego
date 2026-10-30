@@ -2,6 +2,7 @@ import Link from "@/components/ui/LocaleLink";
 import { LanguageMenu } from "@/components/layout/LanguageMenu";
 import type { CSSProperties } from "react";
 import type { Dict } from "@/lib/i18n";
+import { topPath } from "@/lib/hubs/paths";
 
 interface FooterProps {
   dict: Dict;
@@ -99,7 +100,7 @@ export default function Footer({ dict, season, year }: FooterProps) {
     { to: "/", label: dict.footer.trending },
     { to: "/search", label: dict.footer.search },
     { to: "/calendar", label: dict.home.scheduleLabel }, // P11: 放送日历
-    { href: "#", label: dict.footer.topRated },
+    { to: topPath(), label: dict.footer.topRated },
     { href: "#", label: dict.footer.upcoming },
   ];
 

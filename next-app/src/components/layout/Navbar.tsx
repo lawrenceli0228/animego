@@ -218,6 +218,7 @@ export default function Navbar({ season, year }: NavbarProps) {
     schedule: t("nav.schedule"),
     season: t("nav.season"),
     genres: t("nav.genres"),
+    top: t("nav.top"),
     myList: t("nav.myList"),
     about: t("nav.about"),
   };
