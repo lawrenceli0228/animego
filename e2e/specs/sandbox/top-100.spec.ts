@@ -51,7 +51,7 @@ function mainShow(i: number): Show {
     // Shows 2 and 3 tie on popularity too: their order is their ids'.
     popularity: i === 3 ? 50_000 - 2 * 100 : 50_000 - i * 100,
     format: i % 5 === 1 ? "MOVIE" : i % 5 === 3 ? "ONA" : "TV",
-    season: SEASONS[i % 4],
+    season: SEASONS[i % 4] ?? null,
     seasonYear: YEAR,
     startDate: `${YEAR}-0${1 + (i % 4) * 3}-05`,
     genres: i % 3 === 0 ? ["Action", "Comedy"] : ["Action"],
@@ -147,7 +147,7 @@ test.describe("a year's ranking on a desktop", () => {
     for (const s of NEVER) await expect(page.locator(`[data-id="${s.id}"]`)).toHaveCount(0);
     // Each place, read before the title and drawn on the cover.
     const first = page.locator(`[data-id="${expected[0]}"]`);
-    await expect(first.getByRole("link", { name: `第 1 名 ${title(expected[0])}` })).toBeVisible();
+    await expect(first.getByRole("link", { name: `第 1 名 ${title(expected[0] ?? 0)}` })).toBeVisible();
     await expect(first.locator("[data-rank]")).toHaveText("#1");
     await expect(page.locator(`[data-id="${expected[26]}"] [data-rank]`)).toHaveText("#27");
     // The film without a season is 2019's, by its premiere.
@@ -297,7 +297,7 @@ test.describe("on a phone", () => {
     const tops = await cards.evaluateAll((els) => els.slice(0, 4).map((el) => Math.round(el.getBoundingClientRect().top)));
     expect(tops[0]).toBe(tops[1]);
     expect(tops[1]).toBe(tops[2]);
-    expect(tops[3]).toBeGreaterThan(tops[0]);
+    expect(tops[3]).toBeGreaterThan(tops[0] ?? Infinity);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     // The strip's cells keep their width and the strip scrolls sideways in a
