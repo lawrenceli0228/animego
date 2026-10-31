@@ -682,6 +682,7 @@ const zhHant = {
     countUnit: '條',
     searchAria: '搜尋關鍵詞', variantsAria: '用哪個標題搜尋', variantChinese: '中文',
     fansubsAria: '字幕組', fansubCount: '{{name}}，{{n}} 條', unnamed: '未署名',
+    fansubScroll: '橫向捲動字幕組', fansubScrollValue: '第 {{from}}–{{to}} 個，共 {{n}} 個',
     subFilterAria: '字幕語言',
     subAll: '全部字幕', subSimp: '簡體', subTrad: '繁體', subBoth: '簡繁',
     tagSimp: '簡體', tagTrad: '繁體', tagBoth: '簡繁',

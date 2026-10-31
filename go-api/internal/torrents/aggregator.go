@@ -69,6 +69,11 @@ const torrentCacheMax = 500
 // receives.
 const perSourceTimeout = 8 * time.Second
 
+// maxMikanFeeds bounds the Mikan per-bangumi feeds one request reads.  The
+// pages a show is split over are few (two for every split show in the map
+// today); the bound keeps a bad map entry from fanning out one request.
+const maxMikanFeeds = 4
+
 // Logger is the minimal logging interface the package depends on.
 // Pass *log.Logger via a small wrapper, *slog.Logger, or a test
 // recorder — anything with a Warn(msg, args...) method.  Nil disables
@@ -454,11 +459,13 @@ type AnimeQuery struct {
 	// AnidbID, when set, folds in AnimeTosho's complete feed for that
 	// AniDB id.
 	AnidbID *int32
-	// MikanID, when set, is the anime's Mikan Project bangumi id.  Its
-	// per-bangumi feed then stands in for Mikan's keyword search: that feed
-	// lists every release for the season, so for this request Mikan is not
-	// searched by title.  The other sources still are.
-	MikanID *int32
+	// MikanIDs are the anime's Mikan Project bangumi pages: usually one,
+	// several when Mikan splits the show by arc or part (Re:Zero's fourth
+	// season is 丧失篇 and 夺还篇).  Their per-bangumi feeds then stand in
+	// for Mikan's keyword search: together they list every release for the
+	// season, so for this request Mikan is not searched by title.  The
+	// other sources still are.  At most maxMikanFeeds pages are read.
+	MikanIDs []int32
 	// MatchTitles are every title the anime is known by (Variants plus
 	// any that are never searched, such as the Traditional Chinese one).
 	// Keyword hits whose titles match none of them are dropped as
@@ -471,7 +478,7 @@ type AnimeQuery struct {
 // caller-supplied keyword it runs the registry fan-out once PER title
 // variant and folds in the feeds keyed by the anime's ids: AnimeTosho's
 // complete AniDB-id feed (?aid=) when q.AnidbID is set, Mikan's
-// per-bangumi feed when q.MikanID is set.  The combined rows are deduped
+// per-bangumi feeds when q.MikanIDs is set.  The combined rows are deduped
 // (by infohash, so the overlap between an id feed and the keyword hits
 // collapses harmlessly) and ranked by seeders exactly like Fetch.
 //
@@ -481,13 +488,13 @@ type AnimeQuery struct {
 //     With no usable variant AND no id feed there is nothing to search →
 //     return [] immediately (no upstream calls, no cache).
 //  2. Cache key is the sorted-join of the cleaned variant set plus the
-//     optional aid and Mikan id, so a show whose four titles produce the
+//     optional aid and Mikan pages, so a show whose four titles produce the
 //     same variant set shares ONE cache entry rather than caching each
 //     variant separately.  A hit returns the cached slice as-is.
 //  3. Cache miss → fan out the registry over every variant concurrently
 //     (errgroup), plus one AnimeTosho aid-feed call and one Mikan
-//     per-bangumi call when their ids are set.  With a Mikan id the
-//     fan-out leaves Mikan's keyword source out.  Per-variant / per-source
+//     per-bangumi call per page when their ids are set.  With a Mikan page
+//     the fan-out leaves Mikan's keyword source out.  Per-variant / per-source
 //     failures are absorbed exactly as in Fetch (logged, treated as empty)
 //     — only a parent-ctx cancellation surfaces as a top-level error.
 //  4. Keyword hits (every variant's fan-out) are filtered against
@@ -503,27 +510,31 @@ type AnimeQuery struct {
 // token buckets keep any single source's outbound rate bounded.
 func (a *Aggregator) FetchForAnime(ctx context.Context, q AnimeQuery) ([]TorrentItem, error) {
 	clean := cleanVariants(q.Variants)
-	if len(clean) == 0 && q.AnidbID == nil && q.MikanID == nil {
+	mikanIDs := q.MikanIDs
+	if len(mikanIDs) > maxMikanFeeds {
+		mikanIDs = mikanIDs[:maxMikanFeeds]
+	}
+	if len(clean) == 0 && q.AnidbID == nil && len(mikanIDs) == 0 {
 		// Nothing to search on — neither a keyword variant nor an id feed.
 		return []TorrentItem{}, nil
 	}
 
-	key := animeCacheKey(clean, q.AnidbID, q.MikanID, q.MatchTitles)
+	key := animeCacheKey(clean, q.AnidbID, mikanIDs, q.MatchTitles)
 	if cached, hit := a.cache.Get(key); hit {
 		return cached, nil
 	}
 
 	sources := a.registry.Sources()
-	if q.MikanID != nil {
+	if len(mikanIDs) > 0 {
 		sources = withoutSource(sources, SourceMikan)
 	}
 
 	// Collect every variant's fan-out result plus the optional id feeds into
 	// position-indexed slots so the merge order is deterministic regardless
 	// of which goroutine finishes first: variants in their (cleaned) order,
-	// then the aid feed, then the Mikan feed.
+	// then the aid feed, then the Mikan feeds in page order.
 	aidSlot, mikanSlot := len(clean), len(clean)+1
-	results := make([][]TorrentItem, len(clean)+2)
+	results := make([][]TorrentItem, len(clean)+1+len(mikanIDs))
 	relevant := newRelevanceMatcher(q.MatchTitles)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -547,10 +558,10 @@ func (a *Aggregator) FetchForAnime(ctx context.Context, q AnimeQuery) ([]Torrent
 			return nil
 		})
 	}
-	if q.MikanID != nil {
-		mikanID := int(*q.MikanID)
+	for i, id := range mikanIDs {
+		slot, mikanID := mikanSlot+i, int(id)
 		g.Go(func() error {
-			results[mikanSlot] = a.runMikanBangumi(gctx, mikanID)
+			results[slot] = a.runMikanBangumi(gctx, mikanID)
 			return nil
 		})
 	}
@@ -774,19 +785,19 @@ func cleanVariants(variants []string) []string {
 }
 
 // animeCacheKey builds the FetchForAnime cache key from a cleaned variant
-// set plus the optional AniDB and Mikan ids.  The variants are lower-cased
+// set plus the optional AniDB id and Mikan pages.  The variants are lower-cased
 // and SORTED before joining so a show whose titles arrive in any order — or
 // whose variant set is identical to another request's — collapses to ONE
 // cache entry rather than caching per variant or per ordering.  Each id
 // (when present) is appended so a keyword-only request and an id-augmented
 // one for the same titles don't collide: the aid feed can add rows the
-// keyword search misses, and a Mikan id swaps Mikan's keyword search for
-// its per-bangumi feed.  The match titles are appended too, because they
+// keyword search misses, and Mikan pages swap Mikan's keyword search for
+// their per-bangumi feeds (sorted, so their order does not split the key).  The match titles are appended too, because they
 // decide which keyword hits survive: the same variants checked against
 // different titles are a different result.  A leading marker namespaces
 // these keys away from Fetch's single-query keys so a one-keyword Fetch
 // and a single-variant FetchForAnime never alias.
-func animeCacheKey(clean []string, anidbID, mikanID *int32, matchTitles []string) string {
+func animeCacheKey(clean []string, anidbID *int32, mikanIDs []int32, matchTitles []string) string {
 	lowered := make([]string, len(clean))
 	for i, v := range clean {
 		lowered[i] = strings.ToLower(v)
@@ -797,8 +808,13 @@ func animeCacheKey(clean []string, anidbID, mikanID *int32, matchTitles []string
 	if anidbID != nil {
 		key += "|aid=" + strconv.Itoa(int(*anidbID))
 	}
-	if mikanID != nil {
-		key += "|mikan=" + strconv.Itoa(int(*mikanID))
+	if len(mikanIDs) > 0 {
+		pages := make([]string, len(mikanIDs))
+		for i, id := range mikanIDs {
+			pages[i] = strconv.Itoa(int(id))
+		}
+		sort.Strings(pages)
+		key += "|mikan=" + strings.Join(pages, ",")
 	}
 	if len(matchTitles) > 0 {
 		key += "|match=" + strings.Join(sortedLower(matchTitles), "\x00")

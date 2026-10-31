@@ -546,11 +546,11 @@ type TorrentsDB interface {
 	GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistID int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error)
 }
 
-// MikanIDLookup resolves an anime's Mikan Project bangumi id from its
-// AniList id and, when it has one, its Bangumi subject id.  Production
-// passes mikanidmap.Lookup; nil resolves nothing, leaving Mikan on its
-// keyword search.
-type MikanIDLookup func(anilistID int32, bgmID *int32) (int32, bool)
+// MikanIDLookup resolves an anime's Mikan Project bangumi pages from its
+// AniList id and, when it has one, its Bangumi subject id: usually one page,
+// several when Mikan splits the show by arc or part.  Production passes
+// mikanidmap.Lookup; nil, or no pages, leaves Mikan on its keyword search.
+type MikanIDLookup func(anilistID int32, bgmID *int32) []int32
 
 // Torrents implements GET /api/anime/torrents — multi-source magnet
 // aggregator (animes.garden + acg.rip + nyaa.si + dmhy + mikan + AnimeTosho)
@@ -565,8 +565,8 @@ type MikanIDLookup func(anilistID int32, bgmID *int32) (int32, bool)
 //     the anime's titles (those four plus the Traditional Chinese one), and,
 //     when the id map carries an AniDB id, pull AnimeTosho's complete aid
 //     feed alongside the keyword fan-out.  When
-//     mikanIDs names the show's Mikan bangumi page, Mikan's per-bangumi feed
-//     replaces Mikan's keyword search.  Server-side title resolution is what
+//     mikanIDs names the show's Mikan bangumi pages, Mikan's per-bangumi
+//     feeds replace Mikan's keyword search.  Server-side title resolution is what
 //     unlocks full coverage — the client no longer has to guess a single
 //     keyword.
 //   - ?q=<keyword> (fallback): the legacy single-keyword fan-out, unchanged.
@@ -632,9 +632,7 @@ func Torrents(agg *torrents.Aggregator, db TorrentsDB, mikanIDs MikanIDLookup) h
 				MatchTitles: buildTorrentMatchTitles(row),
 			}
 			if mikanIDs != nil {
-				if mikanID, ok := mikanIDs(int32(id), row.BgmID); ok {
-					query.MikanID = &mikanID
-				}
+				query.MikanIDs = mikanIDs(int32(id), row.BgmID)
 			}
 			items, err = agg.FetchForAnime(ctx, query)
 

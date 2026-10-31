@@ -396,10 +396,31 @@ func TestParseFansub(t *testing.T) {
 	}{
 		{"ASCII brackets", "[SubsPlease] Show - 01", strPtr("SubsPlease")},
 		{"CJK brackets", "【喵萌奶茶屋】Show - 01", strPtr("喵萌奶茶屋")},
-		{"no bracket → nil", "Show - 01 [1080p]", nil},
+		{"no bracket, no scene ending → nil", "Show - 01 [1080p]", nil},
 		{"empty title → nil", "", nil},
 		{"only bracket prefix", "[OnlyMe]", strPtr("OnlyMe")},
 		{"cross-bracket type still parses", "[FooBar】rest", strPtr("FooBar")},
+
+		// Scene-style names carry the group at the end instead.  Titles as
+		// Nyaa listed them, 2026-10-31.
+		{"scene: codec-group, notes after", "Frieren Beyond Journeys End S02E10 MULTi AD 1080p CR WEB-DL AAC2.0 x264-Tsundere-Raws (VF, FRENCH, VOSTFR)", strPtr("Tsundere-Raws")},
+		{"scene: space then -group, two notes", "Frieren Beyond Journey's End S02E09 VOSTFR 1080p WEB x264 AAC -Tsundere-Raws (CR) (Sousou no Frieren 2nd Season)", strPtr("Tsundere-Raws")},
+		{"scene: H.264-group", "Re ZERO Starting Life in Another World S04E18 Ram 1080p CR WEB-DL MULTi AAC2.0 H.264-VARYG (Re:Zero kara Hajimeru Isekai Seikatsu 4th Season, Multi-Audio, Multi-Subs)", strPtr("VARYG")},
+		{"scene: H 264-group", "SPY x FAMILY S03E12 Battle to the Death in the Sewers 1080p CR WEB-DL DUAL AAC2.0 H 264-VARYG (SPY×FAMILY Season 3, Dual-Audio, Multi-Subs)", strPtr("VARYG")},
+		{"scene: dotted name", "The.Apothecary.Diaries.S03E02.MULTi.AD.1080p.WEBRiP.x265-KAF", strPtr("KAF")},
+		{"scene: channels-group", "The Demon Girl Next Door S00 (Machikado Mazoku Mini) 1080p BluRay REMUX AVC FLAC 2.0-StaFer", strPtr("StaFer")},
+		{"scene: dotted channels-group", "Inukami!.The.Movie.2007.REPACK.1080p.BluRay.Remux.AVC.DTS-HD.MA.5.1-Headpatter", strPtr("Headpatter")},
+		{"scene: language-group", "Bubblegum.Crisis.OVA.1987-1991.BDrip.1080p.x264.AC3.Opus.MULTi.VOSTFR-Tinosoft", strPtr("Tinosoft")},
+		{"scene: file extension", "Show.S01E01.1080p.WEB.H264-GRP.mkv", strPtr("GRP")},
+
+		// What ends a name after a hyphen without being a group.
+		{"WEB-DL is not a group", "Show S01E01 1080p WEB-DL", nil},
+		{"Blu-ray is not a group", "Show Season 1 Blu-ray", nil},
+		{"a hyphenated title word is not a group", "Kaguya-sama Love is War - Ultra-Romantic", nil},
+		{"an episode dash is not a group", "Aikatsu! Encore - 004 (TVer 1920x1080 AVC AAC)", nil},
+		{"a range is not a group", "Goldfish Warning 1-36 (Bluray 480p)", nil},
+		// A leading bracket group wins over a scene ending.
+		{"bracket group first", "[Erai-raws] Show - 01 [1080p CR WEB-DL AVC AAC] x264-NotThis", strPtr("Erai-raws")},
 	}
 	for _, tc := range tests {
 		tc := tc

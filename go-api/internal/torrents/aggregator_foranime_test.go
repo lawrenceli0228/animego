@@ -254,8 +254,8 @@ func TestFetch_KeySpaceIsDisjointFromFetchForAnime(t *testing.T) {
 	t.Parallel()
 
 	aid, mikanID := int32(7), int32(3141)
-	query := AnimeQuery{Variants: []string{"naruto"}, AnidbID: &aid, MikanID: &mikanID}
-	lookalike := animeCacheKey([]string{"naruto"}, &aid, &mikanID, nil)
+	query := AnimeQuery{Variants: []string{"naruto"}, AnidbID: &aid, MikanIDs: []int32{mikanID}}
+	lookalike := animeCacheKey([]string{"naruto"}, &aid, []int32{mikanID}, nil)
 
 	for name, calls := range map[string][]func(*Aggregator) error{
 		"anime first": {

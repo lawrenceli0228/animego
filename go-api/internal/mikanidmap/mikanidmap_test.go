@@ -2,6 +2,7 @@ package mikanidmap
 
 import (
 	"regexp"
+	"slices"
 	"testing"
 )
 
@@ -48,38 +49,45 @@ func TestLookup(t *testing.T) {
 		name      string
 		anilistID int32
 		bgmID     *int32
-		want      int32
-		wantOK    bool
+		want      []int32
 	}{
-		{"AniList hit", 154587, nil, 3141, true},
+		{"AniList hit", 154587, nil, []int32{3141}},
 		// The AniList id decides even when the bgm id would say otherwise.
-		{"AniList hit wins over the bgm id", 154587, ptr(999001), 3141, true},
-		{"bgm fallback", 1, ptr(999001), 4001, true},
-		{"miss on both", 1, ptr(2), 0, false},
-		{"miss, no bgm id", 1, nil, 0, false},
+		{"AniList hit wins over the bgm id", 154587, ptr(999001), []int32{3141}},
+		{"bgm fallback", 1, ptr(999001), []int32{4001}},
+		{"miss on both", 1, ptr(2), nil},
+		{"miss, no bgm id", 1, nil, nil},
 		// Page 3821 is AniList 182255's.  Reaching it through the bgm id of
 		// an anime with another AniList id means the anime's bgm binding and
 		// bangumi-data disagree, so it is not used.
-		{"bgm hit on another AniList id's page", 1, ptr(515759), 0, false},
-		// AniList 21 spans pages 228 and 3977.  Its bgm id names only one of
-		// them; reading that page and dropping the keyword search would
-		// lose the other page's releases.
-		{"conflicted AniList id, through its own bgm id", 21, ptr(975), 0, false},
-		{"conflicted AniList id, no bgm id", 21, nil, 0, false},
-		// Nor may a bgm id that reaches some third, unowned page stand in
-		// for a show that spans several.
-		{"conflicted AniList id, bgm id on an unowned page", 21, ptr(999001), 0, false},
+		{"bgm hit on another AniList id's page", 1, ptr(515759), nil},
+		// AniList 21 spans pages 228 and 3977: only both together list all
+		// of its releases, so both come back, whatever its bgm id says.
+		{"conflicted AniList id, no bgm id", 21, nil, []int32{228, 3977}},
+		{"conflicted AniList id, through its own bgm id", 21, ptr(975), []int32{228, 3977}},
+		{"conflicted AniList id, bgm id on an unowned page", 21, ptr(999001), []int32{228, 3977}},
 		// The conflict's pages are AniList 21's: another anime bound to one
 		// of their subjects is refused, as for any owned page.
-		{"bgm hit on a conflicted id's page", 1, ptr(602059), 0, false},
+		{"bgm hit on a conflicted id's page", 1, ptr(602059), nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := m.Lookup(tc.anilistID, tc.bgmID)
-			if got != tc.want || ok != tc.wantOK {
-				t.Errorf("Lookup(%d, %v) = %d, %v; want %d, %v", tc.anilistID, tc.bgmID, got, ok, tc.want, tc.wantOK)
+			got := m.Lookup(tc.anilistID, tc.bgmID)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("Lookup(%d, %v) = %v; want %v", tc.anilistID, tc.bgmID, got, tc.want)
 			}
 		})
+	}
+}
+
+// A caller that reorders or trims the pages it got back must not change
+// what the next request is told.
+func TestLookup_ReturnsTheCallersOwnSlice(t *testing.T) {
+	m := mustParse(t, fixture)
+	first := m.Lookup(21, nil)
+	first[0] = 1
+	if got := m.Lookup(21, nil); !slices.Equal(got, []int32{228, 3977}) {
+		t.Errorf("after the caller wrote to its slice, Lookup(21) = %v", got)
 	}
 }
 
@@ -132,18 +140,25 @@ func TestEmbedded_ParsesAndIsSubstantial(t *testing.T) {
 	}
 }
 
-// The package-level Lookup answers from the embedded map.
+// The package-level Lookup answers from the embedded map: one page for a
+// mapped AniList id, and every page for each conflicted one.
 func TestLookup_PackageLevelUsesTheEmbeddedMap(t *testing.T) {
 	m, err := Embedded()
 	if err != nil {
 		t.Fatalf("Embedded: %v", err)
 	}
-	for anilistID, mikanID := range m.byAnilist {
-		got, ok := Lookup(anilistID, nil)
-		if !ok || got != mikanID {
-			t.Errorf("Lookup(%d) = %d, %v; the embedded map says %d", anilistID, got, ok, mikanID)
-		}
-		return
+	if len(m.byAnilist) == 0 {
+		t.Fatal("embedded map has no AniList ids")
 	}
-	t.Fatal("embedded map has no AniList ids")
+	for anilistID, mikanID := range m.byAnilist {
+		if got := Lookup(anilistID, nil); !slices.Equal(got, []int32{mikanID}) {
+			t.Errorf("Lookup(%d) = %v; the embedded map says %d", anilistID, got, mikanID)
+		}
+		break
+	}
+	for anilistID, pages := range m.conflicted {
+		if got := Lookup(anilistID, nil); !slices.Equal(got, pages) || len(got) < 2 {
+			t.Errorf("conflicted Lookup(%d) = %v; the embedded map says %v", anilistID, got, pages)
+		}
+	}
 }

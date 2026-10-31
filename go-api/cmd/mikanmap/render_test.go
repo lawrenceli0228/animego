@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,18 +102,20 @@ func TestRender_LoadsInTheReader(t *testing.T) {
 	if m.Version() != "0.3.231" {
 		t.Errorf("version: got %q", m.Version())
 	}
-	if got, ok := m.Lookup(154587, nil); !ok || got != 3141 {
-		t.Errorf("AniList 154587: got %d, %v", got, ok)
+	if got := m.Lookup(154587, nil); !slices.Equal(got, []int32{3141}) {
+		t.Errorf("AniList 154587: got %v", got)
 	}
 	bgm20, bgm975 := int32(20), int32(975)
 	// Page 3 belongs to AniList 10, so a Bangumi hit on it for another
 	// AniList id is refused; see mikanidmap.Map.Lookup.
-	if got, ok := m.Lookup(1, &bgm20); ok {
-		t.Errorf("bgm 20 for AniList 1: want a refusal, got %d", got)
+	if got := m.Lookup(1, &bgm20); got != nil {
+		t.Errorf("bgm 20 for AniList 1: want a refusal, got %v", got)
 	}
-	// AniList 21 is a conflict: its own Bangumi id must not bring it back.
-	if got, ok := m.Lookup(21, &bgm975); ok {
-		t.Errorf("conflicted AniList 21 via bgm 975: want a refusal, got %d", got)
+	// AniList 21 is a conflict: it gets every one of its pages, and its own
+	// Bangumi id does not narrow that to one.
+	conflict := m.Lookup(21, &bgm975)
+	if len(conflict) < 2 || !slices.Contains(conflict, 228) {
+		t.Errorf("conflicted AniList 21 via bgm 975: want all its pages, got %v", conflict)
 	}
 }
 

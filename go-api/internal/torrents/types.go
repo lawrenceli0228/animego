@@ -156,17 +156,58 @@ func FormatBinaryBytes(raw string) string {
 // /^[\[【]([^\]】]+)[\]】]/ from anime.controller.js:179.
 var fansubBracketRE = regexp.MustCompile(`^[\[【]([^\]】]+)[\]】]`)
 
-// ParseFansub extracts the leading bracket group, e.g.
-// "[SubsPlease] X" → "SubsPlease", "【喵萌奶茶屋】Y" → "喵萌奶茶屋".
-// Returns nil if no bracket prefix matches.
+// sceneTailRE strips what follows a scene-style release name: trailing
+// notes in parentheses or brackets ("(VF, FRENCH, VOSTFR)", "(CR)",
+// "[rartv]") and a file extension.  sceneGroup applies it until nothing
+// more comes off.
+var sceneTailRE = regexp.MustCompile(`\s*(?:\([^()]*\)|\[[^\[\]]*\])\s*$|\.(?i:mkv|mp4|avi)$`)
+
+// sceneGroupRE reads the group off the last word of a scene-style release
+// name, whose words are split by spaces or dots: "-Group" alone, or glued
+// to the codec, audio, channel, source or language token before it
+// ("x264-Tsundere-Raws", "H 264-VARYG", ".WEBRiP.x265-KAF", "FLAC 2.0-StaFer",
+// "MULTi.VOSTFR-Tinosoft").  Requiring that token keeps a hyphenated title
+// word from reading as a group.
+var sceneGroupRE = regexp.MustCompile(
+	`(?i)(?:^|[\s.])(?:x26[45]|h\.?26[45]|hevc|avc|av1|xvid|aac[0-9.]*|e?ac-?3[0-9.]*|ddp?[0-9.]*(?:\.atmos)?|` +
+		`flac[0-9.]*|opus[0-9.]*|dts[a-z0-9.]*|truehd[0-9.]*|mp3|10-?bits?|8-?bits?|hi10p?|` +
+		`web(?:rip|-?dl)?|blu-?ray|bdrip|bdremux|remux|hdtv|26[45]|[0-9]\.[0-9]|atmos|vostfr|multi|dual-?audio)?` +
+		`-([a-z0-9][a-z0-9_]*(?:-[a-z0-9][a-z0-9_]*)*)$`)
+
+// sceneNotGroups are the words that end a release name after a hyphen
+// without naming a group ("WEB-DL", "Blu-ray").
+var sceneNotGroups = map[string]bool{"dl": true, "rip": true, "ray": true, "dual": true, "multi": true}
+
+// ParseFansub extracts the release group: the leading bracket group, e.g.
+// "[SubsPlease] X" → "SubsPlease", "【喵萌奶茶屋】Y" → "喵萌奶茶屋", or,
+// when the title has none, the group a scene-style name ends with, e.g.
+// "Show S02E10 1080p WEB H.264-VARYG (CR)" → "VARYG".  Returns nil when
+// neither is there.
 //
 // The returned pointer is the JSON null-vs-string discriminator: nil
 // serialises to `"fansub": null`, a non-nil string serialises to the
 // quoted value.  Matches Express's `parseFansub` returning `null` or a
 // string.
 func ParseFansub(title string) *string {
-	m := fansubBracketRE.FindStringSubmatch(title)
-	if m == nil {
+	if m := fansubBracketRE.FindStringSubmatch(title); m != nil {
+		out := m[1]
+		return &out
+	}
+	return sceneGroup(title)
+}
+
+// sceneGroup is ParseFansub's reading of a scene-style release name.
+func sceneGroup(title string) *string {
+	name := strings.TrimSpace(title)
+	for range 4 {
+		cut := strings.TrimSpace(sceneTailRE.ReplaceAllString(name, ""))
+		if cut == name {
+			break
+		}
+		name = cut
+	}
+	m := sceneGroupRE.FindStringSubmatch(name)
+	if m == nil || sceneNotGroups[strings.ToLower(m[1])] {
 		return nil
 	}
 	out := m[1]

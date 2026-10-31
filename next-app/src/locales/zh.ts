@@ -797,6 +797,7 @@ const zh = {
     countUnit: '条',
     searchAria: '搜索关键词', variantsAria: '用哪个标题搜索', variantChinese: '中文',
     fansubsAria: '字幕组', fansubCount: '{{name}}，{{n}} 条', unnamed: '未署名',
+    fansubScroll: '横向滚动字幕组', fansubScrollValue: '第 {{from}}–{{to}} 个，共 {{n}} 个',
     subFilterAria: '字幕语言',
     subAll: '全部字幕', subSimp: '简体', subTrad: '繁体', subBoth: '简繁',
     tagSimp: '简体', tagTrad: '繁体', tagBoth: '简繁',

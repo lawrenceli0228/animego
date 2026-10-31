@@ -742,6 +742,7 @@ const en = {
     countUnit: '',
     searchAria: 'Search keywords', variantsAria: 'Search by title', variantChinese: 'Chinese',
     fansubsAria: 'Release groups', fansubCount: '{{name}}, {{n}}', unnamed: 'Unknown group',
+    fansubScroll: 'Scroll through the release groups', fansubScrollValue: '{{from}}–{{to}} of {{n}}',
     subFilterAria: 'Subtitle language',
     subAll: 'All subtitles', subSimp: 'Simplified', subTrad: 'Traditional', subBoth: 'Both',
     tagSimp: 'CHS', tagTrad: 'CHT', tagBoth: 'CHS/CHT',

@@ -45,9 +45,12 @@ const (
 )
 
 // Conflict is an id that bangumi-data links to more than one Mikan page.
-// It is left out of the map: no one page lists all of that show's
-// releases, and a lookup by that id could not say which page is meant.
-// Mikan lists the candidates, sorted.
+// It is left out of the one-page lookups, since no one page lists all of
+// that show's releases.  An AniList id's pages are kept in the map's
+// anilistConflicts, and the magnet search reads every one of them (Mikan
+// splits some shows by arc or part); a Bangumi id's are dropped, since a
+// lookup by it could not say which page is meant.  Mikan lists the
+// candidates, sorted.
 type Conflict struct {
 	Key   Key
 	ID    int

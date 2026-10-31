@@ -78,7 +78,7 @@ func TestRun_LatestReleaseEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read report: %v", err)
 	}
-	if !strings.Contains(string(report), "### Conflicts, left out of the map (2)") {
+	if !strings.Contains(string(report), "### Conflicts: AniList ids read from every page, Bangumi ids left out (2)") {
 		t.Errorf("report should list the fixture's two conflicts:\n%s", report)
 	}
 

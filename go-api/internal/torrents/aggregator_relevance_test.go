@@ -79,7 +79,7 @@ func TestFetchForAnime_IDFeedRowsAreNeverFiltered(t *testing.T) {
 		Variants:    reZeroS4Titles[:4],
 		MatchTitles: reZeroS4Titles,
 		AnidbID:     &aid,
-		MikanID:     int32Ptr(3821),
+		MikanIDs:    []int32{3821},
 	})
 	require.NoError(t, err)
 	assert.ElementsMatch(t,
