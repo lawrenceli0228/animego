@@ -1,0 +1,297 @@
+/* The release-group strip — fixed cells on a sideways rail, the genre page's
+ * sliding indicator under the current one — and the slider under it.
+ *
+ * Drawn inside the magnet panel's .root (MagnetPanel.module.css) and reads its
+ * tokens: --t3 / --t4 for text, --line, --ease, and the anime's own --tone,
+ * --tone-dim and --tone-line.
+ *
+ * The rail runs edge to edge across the panel (its padding is the panel's
+ * gutter plus the pill's own 4px), so the strip visibly carries on past either
+ * side. The rail hooks (components/home/useRail.ts) rest it on its children,
+ * so the cells are its only children: the pill behind them is the rail's
+ * ::before and the indicator its ::after, both scrolling with the cells. The
+ * cell count and the selected index come in as --cells and --at. */
+
+.frame {
+  /* The range input's containing block. */
+  position: relative;
+}
+
+.rail {
+  --gutter: 28px;
+  --cell: 112px;
+  --gap: 4px;
+  /* The offsetParent of the cells, so their offsetLeft is a place in the row
+   * (the stops it rests at are read off it), and the box the pill and the
+   * indicator are drawn in. */
+  position: relative;
+  display: flex;
+  gap: var(--gap);
+  margin: 0 calc(-1 * var(--gutter));
+  padding: var(--gap) calc(var(--gutter) + var(--gap));
+  /* Tab, and the selection scrolled into view, leave a cell where the rail
+   * would come to rest with it first. */
+  scroll-padding-inline: calc(var(--gutter) + var(--gap));
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Reaching either end does not hand the swipe on to the browser's back /
+   * forward gesture. */
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* No scroll-behavior: smooth. A drag writes scrollLeft on every pointer
+   * move; the slider and the settle after a fling ask for smooth scrolling
+   * themselves, except under reduced motion. */
+}
+
+.rail::-webkit-scrollbar {
+  display: none;
+}
+
+/* The pill the cells sit in. */
+.rail::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--gutter);
+  width: calc(var(--cells, 1) * (var(--cell) + var(--gap)) + var(--gap));
+  border-radius: 12px;
+  background: #0b0b0d;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+}
+
+/* The indicator under the current cell, sliding from cell to cell. */
+.rail::after {
+  content: "";
+  position: absolute;
+  top: var(--gap);
+  bottom: var(--gap);
+  left: calc(var(--gutter) + var(--gap));
+  width: var(--cell);
+  border-radius: 9px;
+  background: var(--tone-dim);
+  box-shadow: inset 0 0 0 1px var(--tone-line);
+  pointer-events: none;
+  transform: translateX(calc(var(--at, 0) * (var(--cell) + var(--gap))));
+  transition: transform 0.45s var(--ease);
+}
+
+.cell {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: var(--cell);
+  min-width: 0;
+  height: 50px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--t3);
+  cursor: pointer;
+  transition: color 0.25s;
+}
+
+.cell b {
+  max-width: 100%;
+  padding: 0 10px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cell span {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--t4);
+  transition: color 0.25s;
+}
+
+.cell:hover,
+.cell[aria-pressed="true"] {
+  color: #fff;
+}
+
+.cell[aria-pressed="true"] span {
+  color: var(--tone);
+}
+
+/* Moved by hand or flung: the cells passing under the pointer do not light up. */
+.rail[data-moving="true"] .cell:not([aria-pressed="true"]) {
+  color: var(--t3);
+}
+
+/* A mouse: the strip is grabbed and dragged. */
+@media (hover: hover) and (pointer: fine) {
+  .rail {
+    cursor: grab;
+  }
+
+  /* While dragging: the grabbing hand over everything, the cells included,
+   * and no text selection. */
+  .rail[data-dragging="true"],
+  .rail[data-dragging="true"] * {
+    cursor: grabbing;
+  }
+
+  .rail[data-dragging="true"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/* ── The slider ────────────────────────────────────────────────────────────
+ * 今日更新's (components/home/railSlider.module.css), in the anime's tone: a
+ * thin line under the strip, its thumb as wide as the share of the strip in
+ * view and as far along as the strip is. Quiet until the pointer is on it, it
+ * is held, or the keyboard is on the range input in front of it; then the line
+ * thickens and the thumb takes the full tone. Size and place are written onto
+ * the thumb by useRailSlider.
+ *
+ * Drawn only when the groups do not all fit: a panel with a handful of groups
+ * keeps no empty band under them. */
+.slider {
+  position: relative;
+  height: 24px;
+  margin-top: 2px;
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.slider[data-overflow="false"] {
+  display: none;
+}
+
+.track,
+.thumb {
+  position: absolute;
+  top: 11px;
+  height: 2px;
+  transition:
+    top 0.15s ease-out,
+    height 0.15s ease-out,
+    background-color 0.15s ease-out;
+}
+
+.track {
+  left: 0;
+  right: 0;
+  border-radius: 3px;
+  background-color: var(--line);
+}
+
+.thumb {
+  border-radius: 4px;
+  background-color: var(--tone-line);
+  cursor: grab;
+}
+
+.slider[data-active="true"] .track {
+  top: 9px;
+  height: 6px;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.slider[data-active="true"] .thumb {
+  top: 8px;
+  height: 8px;
+  background-color: var(--tone);
+}
+
+.slider[data-dragging="true"],
+.slider[data-dragging="true"] .thumb {
+  cursor: grabbing;
+}
+
+/* The range input: off screen but focusable; its focus shows on the slider. */
+.scrub {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.scrub:focus-visible + .slider {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* Forced colours (Windows high contrast) drop backgrounds and shadows: the
+ * track keeps a border and the thumb a system colour; the transparent outline
+ * above becomes the focus ring. */
+@media (forced-colors: active) {
+  .track {
+    border: 1px solid CanvasText;
+  }
+
+  .thumb {
+    forced-color-adjust: none;
+    background-color: Highlight;
+  }
+}
+
+/* Phone: the sheet's narrower gutter and cells. */
+@media (max-width: 767px) {
+  .rail {
+    --gutter: 16px;
+    --cell: 100px;
+  }
+
+  .cell {
+    height: 48px;
+  }
+}
+
+/* A finger needs a taller target than a mouse. The extra height reaches into
+ * the gap below rather than pushing the subtitle chips further down. */
+@media (pointer: coarse) {
+  .slider {
+    height: 44px;
+    margin-top: 0;
+    margin-bottom: -12px;
+  }
+
+  .track,
+  .thumb {
+    top: 21px;
+  }
+
+  .slider[data-active="true"] .track {
+    top: 19px;
+  }
+
+  .slider[data-active="true"] .thumb {
+    top: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail::after {
+    transition: none;
+  }
+
+  .track,
+  .thumb {
+    transition-duration: 0.01ms;
+  }
+}

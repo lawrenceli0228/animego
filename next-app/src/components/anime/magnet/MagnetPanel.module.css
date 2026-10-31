@@ -319,87 +319,7 @@
   color: #fff;
 }
 
-/* ── Release-group strip: fixed cells, sliding indicator (the genre page's switch) ── */
-.stripScroll {
-  margin: 0 -28px;
-  padding: 0 28px;
-}
-
-.strip {
-  --cell: 112px;
-  position: relative;
-  display: grid;
-  grid-auto-columns: var(--cell);
-  grid-auto-flow: column;
-  gap: 4px;
-  width: max-content;
-  margin: 0;
-  padding: 4px;
-  border-radius: 12px;
-  background: #0b0b0d;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-}
-
-.ind {
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 4px;
-  width: var(--cell);
-  border-radius: 9px;
-  background: var(--tone-dim);
-  box-shadow: inset 0 0 0 1px var(--tone-line);
-  pointer-events: none;
-  transition: transform 0.45s var(--ease);
-}
-
-.cell {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 0;
-  height: 50px;
-  padding: 0;
-  border: 0;
-  border-radius: 9px;
-  background: none;
-  color: var(--t3);
-  cursor: pointer;
-  transition: color 0.25s;
-}
-
-.cell b {
-  max-width: 100%;
-  padding: 0 10px;
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.cell span {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  line-height: 1;
-  color: var(--t4);
-  transition: color 0.25s;
-}
-
-.cell:hover,
-.cell[aria-pressed="true"] {
-  color: #fff;
-}
-
-.cell[aria-pressed="true"] span {
-  color: var(--tone);
-}
+/* The release-group strip and its slider: FansubStrip.module.css. */
 
 /* ── Subtitle chips ── */
 .filters {
@@ -801,14 +721,6 @@
     height: 34px;
   }
 
-  .strip {
-    --cell: 100px;
-  }
-
-  .cell {
-    height: 48px;
-  }
-
   .chip {
     height: 36px;
     padding: 0 14px;
@@ -888,7 +800,6 @@
     animation: none;
   }
 
-  .ind,
   .chip,
   .copy {
     transition: none;

@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page, type Route } from "@playwright/test";
 import { closePg, ensureAnimeDetail, removeAnimeFixture } from "../../fixtures/pg";
+import { collectConsoleErrors } from "../_helpers";
 
 // The magnet panel on /anime/[id] — design A: a drawer from the right on a
 // desktop, a sheet from the bottom on a phone.
@@ -12,6 +13,11 @@ import { closePg, ensureAnimeDetail, removeAnimeFixture } from "../../fixtures/p
 // Season two of a franchise whose first season ran 28 episodes, 10 of its
 // own: one group numbers the finale "[38]", which the panel has to show as
 // episode 10 (the episode-offset answer says 28), not hide or print as 38.
+//
+// The release-group strip is the homepage's sideways rail: with more groups
+// than fit, a slider under it moves it (its thumb dragged by a mouse or a
+// finger), and a mouse drags the strip itself without the release picking
+// the group it lets go over.
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -23,6 +29,8 @@ test.describe.configure({ mode: "serial" });
 const ANIME = 990_300_001;
 /** A second anime whose answer is long enough to need batching. */
 const LONG = 990_300_002;
+/** A third, with more release groups than the strip shows at once. */
+const WIDE = 990_300_003;
 const EPISODES = 10;
 const OFFSET = 28;
 const COVER = "/mascot-wink.png";
@@ -65,12 +73,22 @@ const MANY: Release[] = Array.from({ length: 100 }, (_, i) => ({
   source: "dmhy",
 }));
 
+/** 24 groups of one to three releases each: wider than the drawer, let alone the sheet. */
+const GROUP_COUNT = 24;
+const WIDE_RELEASES: Release[] = Array.from({ length: GROUP_COUNT }, (_, g) =>
+  Array.from({ length: (g % 3) + 1 }, (_, i) => ({
+    title: `[E2E 组 ${g + 1}] E2E Wide Show - ${String(i + 1).padStart(2, "0")} [1080P][简体]`,
+    fansub: `E2E 组 ${g + 1}`,
+    source: "dmhy",
+  })),
+).flat();
+
 async function answerTorrents(page: Page) {
   await page.route(
     (url) => url.pathname === "/api/anime/torrents",
     (route: Route) => {
       const id = Number(new URL(route.request().url()).searchParams.get("anilistId"));
-      const items = wire(id === LONG ? MANY : RELEASES);
+      const items = wire(id === LONG ? MANY : id === WIDE ? WIDE_RELEASES : RELEASES);
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: items }) });
     },
   );
@@ -115,14 +133,57 @@ async function stripLabels(dialog: Locator): Promise<string[]> {
   return strip(dialog).evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""));
 }
 
+/** The strip's scrolling row (its role="group"), and the slider under it (aria-hidden: its range input is what assistive technology uses). */
+const stripRail = (dialog: Locator) => dialog.getByRole("group", { name: "字幕组" });
+const stripSlider = (dialog: Locator) => dialog.locator("[data-overflow]");
+
+const scrollLeftOf = (rail: Locator) => rail.evaluate((el) => el.scrollLeft);
+
+/** Where the strip may come to rest: a cell first, flush with the gutter, or either end. */
+const stopsOf = (rail: Locator) =>
+  rail.evaluate((el) => {
+    const pad = parseFloat(getComputedStyle(el).paddingLeft) || 0;
+    const max = el.scrollWidth - el.clientWidth;
+    const cells = Array.from(el.children, (c) => Math.min(max, Math.max(0, (c as HTMLElement).offsetLeft - pad)));
+    return [0, max, ...cells];
+  });
+
+const AT_REST = "still, at a stop";
+
+/**
+ * Waits for the strip to come to rest on a stop, and returns where. Still is
+ * not enough on its own: the settle after a release is a short smooth scroll,
+ * and a browser can take longer to start it than the gap between two reads,
+ * which then both see the spot it is about to leave.
+ */
+async function restsAtAStop(rail: Locator): Promise<number> {
+  let rest = Number.NaN;
+  await expect
+    .poll(
+      async () => {
+        const before = await scrollLeftOf(rail);
+        await rail.page().waitForTimeout(120);
+        rest = await scrollLeftOf(rail);
+        const stops = await stopsOf(rail);
+        const still = Math.abs(rest - before) < 0.5;
+        const onStop = stops.some((stop) => Math.abs(stop - rest) <= 1);
+        return still && onStop ? AT_REST : `at ${rest} (${still ? "still" : "moving"}), stops ${stops.join(", ")}`;
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(AT_REST);
+  return rest;
+}
+
 test.beforeAll(async () => {
-  for (const [anilistId, title] of [
-    [ANIME, "E2E 磁力番 第二季"],
-    [LONG, "E2E 长列表"],
+  for (const [anilistId, title, romaji] of [
+    [ANIME, "E2E 磁力番 第二季", "E2E Magnet Show Season 2"],
+    [LONG, "E2E 长列表", "E2E Long Show"],
+    [WIDE, "E2E 多字幕组", "E2E Wide Show"],
   ] as const) {
     await ensureAnimeDetail({
       anilistId,
-      titleRomaji: anilistId === ANIME ? "E2E Magnet Show Season 2" : "E2E Long Show",
+      titleRomaji: romaji,
       titleChinese: title,
       episodes: EPISODES,
       status: "FINISHED",
@@ -134,6 +195,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await removeAnimeFixture(ANIME);
   await removeAnimeFixture(LONG);
+  await removeAnimeFixture(WIDE);
   await closePg();
 });
 
@@ -259,6 +321,66 @@ test.describe("desktop", () => {
     await expect(rows(dialog)).toHaveCount(100);
     await expect(more).toHaveCount(0);
   });
+
+  test("with more groups than fit, dragging the slider's thumb scrolls the strip, which rests on a cell", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    const { dialog } = await openPanel(page, WIDE);
+    const rail = stripRail(dialog);
+    const slider = stripSlider(dialog);
+    await expect(slider).toHaveAttribute("data-overflow", "true");
+    // It says which groups are in view, out of how many ("All" is not one).
+    await expect(dialog.getByRole("slider", { name: "横向滚动字幕组" })).toHaveAttribute(
+      "aria-valuetext",
+      new RegExp(`共 ${GROUP_COUNT} 个$`),
+    );
+    expect(await scrollLeftOf(rail)).toBe(0);
+
+    const thumb = slider.locator(":scope > span").last();
+    const t = (await thumb.boundingBox())!;
+    await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+    await page.mouse.down();
+    await expect(slider).toHaveAttribute("data-dragging", "true");
+    await page.mouse.move(t.x + t.width / 2 + 200, t.y + t.height / 2, { steps: 10 });
+    expect(await scrollLeftOf(rail)).toBeGreaterThan(300);
+    await page.mouse.up();
+    await expect(slider).not.toHaveAttribute("data-dragging", "true");
+    await restsAtAStop(rail);
+    // Moving the strip picks nothing.
+    await expect(strip(dialog).filter({ hasText: "全部" })).toHaveAttribute("aria-pressed", "true");
+
+    expect(errors, `Unexpected console errors:\n${errors.join("\n")}`).toEqual([]);
+  });
+
+  test("a mouse drag along the strip scrolls it and leaves the selected group alone; a plain click still picks one", async ({ page }) => {
+    const { dialog } = await openPanel(page, WIDE);
+    const rail = stripRail(dialog);
+    const total = `磁力资源 ${WIDE_RELEASES.length} / ${WIDE_RELEASES.length} 条`;
+    await expect(dialog).toContainText(total);
+
+    // Pressed on a cell well inside the strip, dragged toward its start, let go over another cell.
+    const box = (await rail.boundingBox())!;
+    const y = box.y + box.height / 2;
+    const x0 = box.x + 420;
+    await page.mouse.move(x0, y);
+    await page.mouse.down();
+    await page.mouse.move(x0 - 300, y, { steps: 12 });
+    await expect(rail).toHaveAttribute("data-dragging", "true");
+    expect(await scrollLeftOf(rail)).toBeGreaterThan(250);
+    await page.mouse.up();
+    await expect(rail).not.toHaveAttribute("data-dragging", "true");
+    await restsAtAStop(rail);
+
+    await expect(strip(dialog).filter({ hasText: "全部" })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog).toContainText(total);
+
+    // A click with no drag picks the group.
+    const cell = strip(dialog).nth(5);
+    const label = (await cell.getAttribute("aria-label")) ?? "";
+    const count = Number(/(\d+) 条$/.exec(label)?.[1]);
+    await cell.click();
+    await expect(cell).toHaveAttribute("aria-pressed", "true");
+    await expect(rows(dialog)).toHaveCount(count);
+  });
 });
 
 test.describe("phone", () => {
@@ -303,6 +425,28 @@ test.describe("phone", () => {
       await page.waitForTimeout(200);
     }
     await expect(rows(dialog)).toHaveCount(80);
+  });
+
+  test("the strip's slider is finger-sized, and a finger sliding its thumb carries the strip all the way", async ({ page }) => {
+    const { dialog } = await openPanel(page, WIDE);
+    const rail = stripRail(dialog);
+    const slider = stripSlider(dialog);
+    await expect(slider).toHaveAttribute("data-overflow", "true");
+    const s = (await slider.boundingBox())!;
+    expect(s.height).toBeGreaterThanOrEqual(44);
+    expect(await scrollLeftOf(rail)).toBe(0);
+
+    // The finger lands on the thumb, which the browser hands the press to,
+    // and the slider takes it over once the finger slides. The strip must
+    // follow to the end of the slide, not let go after its first move.
+    const t = (await slider.locator(":scope > span").last().boundingBox())!;
+    await swipe(page, { x: t.x + t.width / 2, y: s.y + s.height / 2 }, { x: 120, y: 0 });
+    const rest = await restsAtAStop(rail);
+    expect(rest, `a 120px slide on a ${Math.round(s.width)}px track left the strip at ${rest}`).toBeGreaterThan(600);
+    await expect(strip(dialog).filter({ hasText: "全部" })).toHaveAttribute("aria-pressed", "true");
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
   });
 });
 

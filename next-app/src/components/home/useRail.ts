@@ -560,7 +560,14 @@ export function useRailSlider(
       },
       onPointerUp: release,
       onPointerCancel: release,
-      onLostPointerCapture: release,
+      // A finger's press belongs to the thumb or track it landed on (touch
+      // pointers are captured implicitly) until onPointerMove takes it for
+      // the slider. The thumb losing it then fires lostpointercapture there,
+      // which bubbles up here; only the slider's own loss ends the press, or
+      // the thumb would let go after the first move.
+      onLostPointerCapture: (e) => {
+        if (e.target === e.currentTarget) release(e);
+      },
       onPointerEnter: (e) => {
         if (e.pointerType === "mouse") setHovered(true);
       },
