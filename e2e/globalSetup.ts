@@ -9,6 +9,7 @@ import {
   ensureSeedUserInPostgres,
 } from "./fixtures/pg";
 import { waitForHydration } from "./fixtures/hydration";
+import { RUN_STARTED_AT_ENV } from "./fixtures/runClock";
 import { seedTopRankings } from "./fixtures/topRankings";
 
 /**
@@ -82,6 +83,10 @@ const SEED_USER_USERNAME = "e2e-sandbox";
 // is what makes them safe to run fullyParallel against one shared user.
 
 export default async function globalSetup(_config: FullConfig): Promise<void> {
+  // One "now" for the whole run, retries included: workers inherit it
+  // (fixtures/runClock.ts). Kept when the caller set it already.
+  process.env[RUN_STARTED_AT_ENV] ??= String(Date.now());
+
   // Sandbox-only setup: seed Postgres, then browser-login to mint the
   // storageState the chromium-sandbox project reuses. The read-only
   // chromium-prod project (and any `playwright test --project=chromium-prod`,
