@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { waitForHydration } from "../../fixtures/hydration";
 import { closePg, insertPgUser, readSubscription, resetSubscriptions, seedSubscription } from "../../fixtures/pg";
 import { removeSeasonFixture, seedSeason, type SeedSeasonRow } from "../../fixtures/seasonal";
+import { runStartedAt } from "../../fixtures/runClock";
 import { makeUser } from "../../fixtures/users";
 import { collectConsoleErrors } from "../_helpers";
 
@@ -22,10 +23,11 @@ import { collectConsoleErrors } from "../_helpers";
  * a menu; another season loads behind the page's one skeleton; the follow
  * button writes a subscription; and on a phone, the sheet.
  *
- * Times are seeded from the hour this run started in (ANCHOR), so every
- * worker — and a retry — writes the same rows: the page's server fetch is
- * cached for minutes, and a row re-seeded with other seconds would make it
- * answer with the first worker's data while this one computes from its own.
+ * Times are seeded from the hour this run started in (ANCHOR, from
+ * fixtures/runClock.ts), so every worker — and a retry, even one past the
+ * hour — writes the same rows: the page's server fetch is cached for
+ * minutes, and a row re-seeded with other times would make it answer with
+ * the first worker's data while this one computes from its own.
  * The file runs in order in one worker for the same reason.
  */
 
@@ -34,7 +36,7 @@ test.describe.configure({ mode: "default" });
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const BEIJING = 8 * HOUR;
-const ANCHOR = Math.floor(Date.now() / HOUR) * HOUR;
+const ANCHOR = Math.floor(runStartedAt() / HOUR) * HOUR;
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 /** 1 = Monday … 7 = Sunday, on the Beijing clock. */

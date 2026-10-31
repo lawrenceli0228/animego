@@ -5,6 +5,7 @@ import {
   removeAnimeFixture,
   seedRelation,
 } from "../../fixtures/pg";
+import { runStartedAt } from "../../fixtures/runClock";
 
 // The phase-2 data on the detail page: the next-episode strip in the hero
 // and the popularity line -- and the rows the info table deliberately does
@@ -22,8 +23,17 @@ import {
 
 const AIRING = 990_100_020;
 const PREQUEL = 990_100_021;
-/** Three days ahead: enough for the strip to read "3 天后" for the whole run. */
-const NEXT_AT = new Date(Date.now() + 3 * 86_400_000 + 3_600_000).toISOString();
+/**
+ * Three days ahead: enough for the strip to read "3 天后" for the whole run.
+ * Counted from the run's start, not this worker's: a retry is a new worker,
+ * and the page it reads is still cached with the first attempt's time.
+ */
+const NEXT_AT = new Date(runStartedAt() + 3 * 86_400_000 + 3_600_000).toISOString();
+/**
+ * A client-side transition to a detail page the dev server has not rendered
+ * yet can take longer than expect's 5 s on a CI runner.
+ */
+const NAVIGATION_MS = 15_000;
 /**
  * The synopsis section — and the score panel inside it, where the popularity
  * line lives — renders only when there is a description. A fixture without
@@ -80,9 +90,9 @@ test("the next episode is in the hero, reached by clicking through from a relate
   // Two hops so the second detail page is a client-side transition, not the
   // page that was server-rendered for the initial request.
   await page.getByRole("link", { name: /E2E Facts Season One|E2E 事实 第一季/ }).first().click();
-  await expect(page).toHaveURL(new RegExp(`/anime/${PREQUEL}$`));
+  await expect(page).toHaveURL(new RegExp(`/anime/${PREQUEL}$`), { timeout: NAVIGATION_MS });
   await page.getByRole("link", { name: /E2E Facts Season Two|E2E 事实 第二季/ }).first().click();
-  await expect(page).toHaveURL(new RegExp(`/anime/${AIRING}$`));
+  await expect(page).toHaveURL(new RegExp(`/anime/${AIRING}$`), { timeout: NAVIGATION_MS });
 
   // The strip is the only <time> in <main> on this page.
   const time = page.locator("main time[datetime]");
