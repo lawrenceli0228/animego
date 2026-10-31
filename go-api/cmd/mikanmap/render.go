@@ -16,8 +16,9 @@ const Attribution = "Mikan Project bangumi ids from bangumi-data " +
 	"(https://creativecommons.org/licenses/by/4.0/). " +
 	"Extracted and re-keyed by AniList id and Bangumi subject id by go-api/cmd/mikanmap; do not edit by hand."
 
-// Map is the generated file: the two lookups, the AniList ids left out as
-// conflicts, and the bangumi-data release they were built from.
+// Map is the generated file: the two lookups, the AniList ids linked to
+// several pages (the magnet search reads all of them), and the bangumi-data
+// release they were built from.
 type Map struct {
 	Version          string
 	Anilist          map[int]int   // AniList id -> Mikan bangumi id

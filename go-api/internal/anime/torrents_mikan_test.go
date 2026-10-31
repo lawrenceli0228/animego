@@ -99,9 +99,9 @@ func TestTorrents_ByAnilistID_ResolvesTheMikanIDFromTheAnilistID(t *testing.T) {
 
 	var gotAnilist int32
 	var gotBgm *int32
-	lookup := func(anilistID int32, bgmID *int32) (int32, bool) {
+	lookup := func(anilistID int32, bgmID *int32) []int32 {
 		gotAnilist, gotBgm = anilistID, bgmID
-		return 3141, true
+		return []int32{3141}
 	}
 
 	agg, keyword, feedIDs := mikanProbeAggregator(t, nil)
@@ -133,9 +133,10 @@ func TestTorrents_ByAnilistID_MikanLookupWithBgmFallback(t *testing.T) {
 		{"bgm fallback", "anilistId=777", int32p(999001), []int{4001}},
 		{"miss on both", "anilistId=777", int32p(5), nil},
 		{"miss, no bgm_id", "anilistId=777", nil, nil},
-		// No one page has all of a conflicted show's releases, so its own
-		// bgm_id must not pick one and switch the keyword search off.
-		{"conflicted AniList id, own bgm_id", "anilistId=21", int32p(975), nil},
+		// No one page has all of a conflicted show's releases: every page's
+		// feed is read, and its own bgm_id does not narrow that to one.
+		{"conflicted AniList id, own bgm_id", "anilistId=21", int32p(975), []int{228, 3977}},
+		{"conflicted AniList id, no bgm_id", "anilistId=21", nil, []int{228, 3977}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -147,7 +148,7 @@ func TestTorrents_ByAnilistID_MikanLookupWithBgmFallback(t *testing.T) {
 				httptest.NewRequest(http.MethodGet, "/api/anime/torrents?"+tc.query, nil))
 
 			require.Equal(t, http.StatusOK, rec.Code)
-			assert.Equal(t, tc.wantFeed, feedIDs())
+			assert.ElementsMatch(t, tc.wantFeed, feedIDs())
 			if tc.wantFeed == nil {
 				assert.Equal(t, int32(2), keyword.Load(), "no Mikan id: Mikan is searched for each title, as before")
 			} else {
@@ -175,7 +176,7 @@ func TestTorrents_ByAnilistID_MikanFeedKeepsTheResponseShape(t *testing.T) {
 	}}
 
 	agg, _, _ := mikanProbeAggregator(t, feed)
-	lookup := func(int32, *int32) (int32, bool) { return 3821, true }
+	lookup := func(int32, *int32) []int32 { return []int32{3821} }
 	rec := httptest.NewRecorder()
 	Torrents(agg, torrentInputs(nil), lookup).ServeHTTP(rec,
 		httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=182255", nil))

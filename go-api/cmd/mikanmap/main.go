@@ -16,7 +16,7 @@
 // "latest" asks the npm registry for the newest bangumi-data release, which
 // is then downloaded from that release's git tag, so the release recorded in
 // the output is the one the map was built from.  The report is the refresh
-// PR's body: the conflicts the build left out and what changed against the
+// PR's body: the conflicts the build found and what changed against the
 // map already at --out.
 package main
 

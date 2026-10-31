@@ -47,13 +47,13 @@ func TestRenderReport_SummaryConflictsAndChanges(t *testing.T) {
 		"| Items linking a Mikan page | 8 of 9 |",
 		"| AniList keys | 4 (was 2): +3 / −1 / changed 0 |",
 		"| Bangumi keys | 5 (was 2): +3 / −0 / changed 1 |",
-		"| Conflicts, left out | AniList 1, Bangumi 1 |",
+		"| Conflicts | AniList 1 (every page read), Bangumi 1 (left out) |",
 		"| Items with no AniList link | 2 (reachable by Bangumi id only) |",
 		"| Ids skipped as not numeric | 2 |",
 		// The conflict names both pages with their titles.
 		"| AniList | [21](https://anilist.co/anime/21) | [228](https://mikanani.me/Home/Bangumi/228) ONE PIECE / 海贼王 (1999-10-20)<br>" +
 			"[3977](https://mikanani.me/Home/Bangumi/3977) ONE PIECE エルバフ編 / 航海王 埃鲁巴夫篇 (2026-04-05) |",
-		"### Conflicts, left out of the map (2)",
+		"### Conflicts: AniList ids read from every page, Bangumi ids left out (2)",
 		// Bangumi 515759 moved from page 3800 to 3821.
 		"| Bangumi | [515759](https://bgm.tv/subject/515759) | [3800](https://mikanani.me/Home/Bangumi/3800) | " +
 			"[3821](https://mikanani.me/Home/Bangumi/3821) 葬送のフリーレン(第2期) / 葬送的芙莉莲 第二季 (2026-01-16) |",

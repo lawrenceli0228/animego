@@ -70,11 +70,12 @@ func RenderReport(in ReportInput) string {
 		"[bangumi-data](https://github.com/bangumi-data/bangumi-data) (CC BY 4.0).\n\n" +
 		"An anime whose id is in this map gets Mikan's per-bangumi RSS feed in its magnet list instead of " +
 		"Mikan's keyword search, so a wrong page puts another show's releases in that list. Check the " +
-		"Changed and Removed rows against the pages they name; corrections belong upstream in bangumi-data. " +
+		"Changed and Removed rows, and the AniList conflicts (every page of one is read), against the pages they name; " +
+		"corrections belong upstream in bangumi-data. " +
 		"Merge and redeploy go-api to ship it: the map is embedded via go:embed.\n\n")
 	r.summary(in, anilist, bgm)
 
-	r.table(fmt.Sprintf("### Conflicts, left out of the map (%d)", len(in.Conflicts)), "| Key | Id | Mikan pages |", len(in.Conflicts), func(i int) string {
+	r.table(fmt.Sprintf("### Conflicts: AniList ids read from every page, Bangumi ids left out (%d)", len(in.Conflicts)), "| Key | Id | Mikan pages |", len(in.Conflicts), func(i int) string {
 		c := in.Conflicts[i]
 		return row(keyName(c.Key), idLink(c.Key, c.ID), r.pageList(c.Mikan))
 	})
@@ -117,7 +118,7 @@ func (r *reportWriter) summary(in ReportInput, anilist, bgm Diff) {
 		len(in.Next.Anilist), len(in.Prev.Anilist), len(anilist.Added), len(anilist.Removed), len(anilist.Changed))
 	fmt.Fprintf(&r.b, "| Bangumi keys | %d (was %d): +%d / −%d / changed %d |\n",
 		len(in.Next.Bgm), len(in.Prev.Bgm), len(bgm.Added), len(bgm.Removed), len(bgm.Changed))
-	fmt.Fprintf(&r.b, "| Conflicts, left out | AniList %d, Bangumi %d |\n", conflicts[KeyAnilist], conflicts[KeyBgm])
+	fmt.Fprintf(&r.b, "| Conflicts | AniList %d (every page read), Bangumi %d (left out) |\n", conflicts[KeyAnilist], conflicts[KeyBgm])
 	fmt.Fprintf(&r.b, "| Items with no AniList link | %d (reachable by Bangumi id only) |\n", in.Stats.NoAnilist)
 	fmt.Fprintf(&r.b, "| Ids skipped as not numeric | %d |\n\n", in.Stats.BadIDs)
 }
