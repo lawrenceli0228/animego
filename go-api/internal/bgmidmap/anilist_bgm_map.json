@@ -32932,6 +32932,13 @@
     "source": "mal"
   },
   {
+    "anilist_id": 12951,
+    "bgm_id": 72654,
+    "mal_id": 12951,
+    "anidb_id": 4677,
+    "source": "mal"
+  },
+  {
     "anilist_id": 12963,
     "bgm_id": 37136,
     "mal_id": 12963,
@@ -64749,6 +64756,13 @@
     "source": "mal"
   },
   {
+    "anilist_id": 127180,
+    "bgm_id": 716365,
+    "mal_id": 45042,
+    "anidb_id": 16099,
+    "source": "mal"
+  },
+  {
     "anilist_id": 127227,
     "bgm_id": 322349,
     "mal_id": 44586,
@@ -71489,6 +71503,12 @@
     "anilist_id": 143742,
     "bgm_id": 173209,
     "mal_id": 43640,
+    "source": "mal"
+  },
+  {
+    "anilist_id": 143748,
+    "bgm_id": 173210,
+    "mal_id": 43637,
     "source": "mal"
   },
   {
@@ -80861,13 +80881,6 @@
     "source": "mal"
   },
   {
-    "anilist_id": 177699,
-    "bgm_id": 496276,
-    "mal_id": 58929,
-    "anidb_id": 18652,
-    "source": "mal"
-  },
-  {
     "anilist_id": 177704,
     "bgm_id": 496391,
     "mal_id": 58934,
@@ -89785,8 +89798,9 @@
   {
     "anilist_id": 214593,
     "bgm_id": 688204,
+    "mal_id": 64717,
     "anidb_id": 20463,
-    "source": "anidb"
+    "source": "mal"
   },
   {
     "anilist_id": 214650,
@@ -90093,6 +90107,12 @@
     "bgm_id": 700581,
     "mal_id": 64960,
     "anidb_id": 20346,
+    "source": "mal"
+  },
+  {
+    "anilist_id": 216858,
+    "bgm_id": 701566,
+    "mal_id": 65223,
     "source": "mal"
   },
   {
