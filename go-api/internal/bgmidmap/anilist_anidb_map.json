@@ -50396,6 +50396,10 @@
     "anidb_id": 20275
   },
   {
+    "anilist_id": 185645,
+    "anidb_id": 20276
+  },
+  {
     "anilist_id": 185646,
     "anidb_id": 19058
   },
@@ -53776,6 +53780,10 @@
     "anidb_id": 20379
   },
   {
+    "anilist_id": 217008,
+    "anidb_id": 20405
+  },
+  {
     "anilist_id": 217011,
     "anidb_id": 20404
   },
@@ -53840,10 +53848,6 @@
     "anidb_id": 20426
   },
   {
-    "anilist_id": 217577,
-    "anidb_id": 20465
-  },
-  {
     "anilist_id": 217578,
     "anidb_id": 20432
   },
@@ -53888,6 +53892,10 @@
     "anidb_id": 20456
   },
   {
+    "anilist_id": 218008,
+    "anidb_id": 20149
+  },
+  {
     "anilist_id": 218025,
     "anidb_id": 20459
   },
@@ -53914,5 +53922,25 @@
   {
     "anilist_id": 218530,
     "anidb_id": 20495
+  },
+  {
+    "anilist_id": 218740,
+    "anidb_id": 20500
+  },
+  {
+    "anilist_id": 218835,
+    "anidb_id": 20504
+  },
+  {
+    "anilist_id": 218942,
+    "anidb_id": 20437
+  },
+  {
+    "anilist_id": 218956,
+    "anidb_id": 20505
+  },
+  {
+    "anilist_id": 219034,
+    "anidb_id": 20458
   }
 ]
