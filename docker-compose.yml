@@ -52,6 +52,11 @@ services:
       # outliers (US/EU users) will still mismatch — those callsites
       # need suppressHydrationWarning as a separate fix.
       TZ: Asia/Shanghai
+      # The V8 heap ceiling, set explicitly rather than derived by Node from
+      # the container limit. Keep it in step with mem_limit below: the heap
+      # plus what V8 does not count (code, buffers, sockets) has to fit under
+      # the limit.
+      NODE_OPTIONS: --max-old-space-size=1024
     depends_on:
       - go-api
     networks:
@@ -66,8 +71,10 @@ services:
       timeout: 3s
       retries: 3
       start_period: 30s
-    # Headroom for SSR while caches are still cold after a deploy.
-    mem_limit: 1g
+    # Headroom for SSR while caches are still cold after a deploy, and room
+    # for the heap set in NODE_OPTIONS above. Written in m because it is not
+    # a whole number of gigabytes.
+    mem_limit: 1536m
     logging:
       driver: json-file
       options:
