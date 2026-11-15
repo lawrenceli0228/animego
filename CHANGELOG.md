@@ -4,6 +4,17 @@
 
 ## [未发布]
 
+### next-app：显式设定 Node 堆上限，容器内存上限随之调整
+
+改动：
+- `docker-compose.yml` 的 next-app 加 `NODE_OPTIONS`，用 `--max-old-space-size` 显式设定 V8 堆上限，不再由 Node 按容器限额推算；`mem_limit` 相应调整。两个值要一起改，注释里写明了。
+- next-image 有自己的 `environment`，不受影响。
+- 不需要重新构建镜像，重建 next-app 这一个容器即可生效。
+
+测试：
+- `docker compose config` 解析出的 next-app 配置里有新的 `mem_limit` 和 `NODE_OPTIONS`。
+- 用同一个镜像起临时容器，确认堆上限参数生效。
+
 ### e2e：详情页「下一集」那条用例第一次超时后，重试一定失败
 
 `detail-facts.spec.ts` 在模块加载时用 `Date.now()` 算出下一集时间，写进测试库。重试会起一个新 worker，重新算出一个晚几秒的时间写进去，但详情页还缓存着第一次的时间。于是只要第一次失败，不管原因是什么，重试都会因为两个时间差十几秒而失败（#269 的 CI 第 1 片就是这样）。`seasonal-browse.spec.ts` 用的是本小时的整点，重试一旦跨过整点也会出同样的问题。
