@@ -72,7 +72,10 @@ ENV GIT_SHA=$GIT_SHA
 # the flag when turbopack stabilises asset-handling for those paths.
 RUN bun --bun next build --webpack
 
-FROM node:22-alpine AS runner
+# Runtime: Node 24 (LTS). The stages above build with bun; this one only runs
+# the standalone server, so the Node major is a runtime choice alone. Run
+# against this build on 24.22.3 before the switch.
+FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
