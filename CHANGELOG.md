@@ -4,6 +4,15 @@
 
 ## [未发布]
 
+### nginx：渲染页面的 location 引用私有规则，维护页带 Retry-After
+
+改动：
+- `nginx/default.p9.conf` 里所有渲染页面的 location（21 个，不含只发文件的 `/_next/` 和 `/jassub/`）引用 `nginx/private/next-app-*.conf`。和已有的 `http-*.conf`、`next-image-*.conf` 一样，这些文件只在服务器上，目录为空时什么都不加。
+- 维护页（`/maintenance.html`）的响应加上 `Retry-After: 30`：会落到这里的情况都是暂时的，爬虫会等一会儿再来，不会把维护页当成页面内容。
+
+测试：
+- `scripts/nginx-test/run.sh` 新增一组：测试用的私有页面规则对 21 个页面路径生效，对 `/_next/` 和 `/jassub/` 不生效；被规则拦下的页面拿到维护页，带 `Retry-After` 和 `no-store`。改配置前这组 23 条失败，改后全套 221 条通过。
+
 ### next-app：显式设定 Node 堆上限，容器内存上限随之调整
 
 改动：
