@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+### next-app：运行时换成 Node 24（LTS）
+
+改动：
+- `next-app/Dockerfile` 运行阶段的基础镜像从 `node:22-alpine` 换成 `node:24-alpine`。构建阶段用 bun，不受影响；ws-server 仍是 Node 20，这次不动。
+
+测试：
+- 本机用这个 Dockerfile 完整构建镜像（在 Linux 容器里构建），容器健康检查通过，`node -v` 为 24.22.3，以 nextjs 用户运行。
+- 对着测试用的 go-api 起容器：首页、详情、角色、人物、登录、排行、评论页、sitemap、robots 返回 200；重放 1 万条真实访问路径，返回码分布和 Node 22 镜像一致。
+- CI 不构建这个镜像：沙箱 e2e 的 next-app 跑的是 `next dev`，CI 的结果覆盖不到这次改动，验证以上面本机的为准。
+
 ### nginx：渲染页面的 location 引用私有规则，维护页带 Retry-After
 
 改动：
