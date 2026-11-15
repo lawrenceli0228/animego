@@ -172,6 +172,10 @@ mkdir -p "$T/private" "$T/flood"
 # urls starting with /blocked.
 printf '%s\n' 'map $arg_url $test_blocked { default 0; "~^%2Fblocked" 1; }' > "$T/private/http-test.conf"
 printf '%s\n' 'if ($test_blocked) { return 403; }' > "$T/private/next-image-test.conf"
+# The locations that render pages include next-app-*.conf.  This stand-in
+# refuses with a 503 whatever asks for it with ?test_refuse=1, the status a
+# private page rule answers with.
+printf '%s\n' 'if ($arg_test_refuse) { return 503; }' > "$T/private/next-app-test.conf"
 
 pull_once "$NGINX_IMAGE"
 pull_once "$PY_IMAGE"
@@ -263,6 +267,18 @@ ok "$(tr -d '\r' < "$busy" | awk -F': ' 'tolower($1)=="cache-control" {print $2}
 echo "== private rules (nginx/private) are applied"
 ok "$(code '/_next/image?url=%2Fblocked-x.png&w=640&q=85')" 403 "a private rule refuses what it matches"
 ok "$(code '/_next/image?url=%2Fallowed-x.png&w=640&q=85')" 200 "and nothing else"
+echo "== private page rules (nginx/private/next-app-*.conf) are applied to every page location"
+for p in / /sitemap.xml /robots.txt /search /anime/1 /seasonal /seasonal/winter/2026 /admin /library /player/1 \
+         /login /register /forgot-password /reset-password/x /welcome /profile /u/x /calendar /faq /season /character/1; do
+  ok "$(code "$p?test_refuse=1")" 503 "a private page rule applies to $p"
+done
+ok "$(code '/_next/static/x.js?test_refuse=1')" 200 "but not to the static bundle"
+ok "$(code '/jassub/x.wasm?test_refuse=1')" 200 "nor to the subtitle engine's files"
+ok "$(code '/anime/1')" 200 "a page the rule does not match is served"
+c -o "$T/body" -D "$T/head" "$B/anime/1?test_refuse=1" >/dev/null
+ok "$(head_of retry-after)|$(head_of cache-control)" "30|no-store" \
+  "a refused page gets the maintenance answer, with Retry-After and no-store"
+ok "$(grep -c -i maintenance "$T/body" | awk '{print ($1 > 0)}')" 1 "and the maintenance page as its body"
 
 # The 60s read timeout check takes 40s; it runs in the background from here
 # and is read at the end.  Wait until the optimizer has counted it, so the
