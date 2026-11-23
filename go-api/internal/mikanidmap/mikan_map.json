@@ -1,6 +1,6 @@
 {
   "attribution": "Mikan Project bangumi ids from bangumi-data (https://github.com/bangumi-data/bangumi-data), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Extracted and re-keyed by AniList id and Bangumi subject id by go-api/cmd/mikanmap; do not edit by hand.",
-  "bangumiDataVersion": "0.3.234",
+  "bangumiDataVersion": "0.3.237",
   "anilist": {
     "235": 227,
     "966": 1235,
@@ -3091,6 +3091,7 @@
     "202523": 3959,
     "202957": 3883,
     "202985": 3910,
+    "203275": 4129,
     "203296": 3848,
     "203490": 4006,
     "203880": 4003,
@@ -3144,7 +3145,8 @@
     "213506": 4010,
     "213665": 4041,
     "213666": 4044,
-    "216557": 4081
+    "216557": 4081,
+    "216895": 4123
   },
   "bgm": {
     "899": 227,
@@ -6003,6 +6005,7 @@
     "502142": 3688,
     "502272": 3662,
     "502408": 3735,
+    "502499": 4128,
     "502875": 3610,
     "502876": 3875,
     "503268": 3522,
@@ -6330,6 +6333,7 @@
     "609183": 3959,
     "610703": 3910,
     "611077": 3883,
+    "612608": 4129,
     "612697": 3987,
     "613256": 4117,
     "613438": 4006,
