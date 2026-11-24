@@ -425,6 +425,24 @@ func (c *Client) Search(ctx context.Context, v SearchVars) (*SearchAnimeResponse
 	return &dest, nil
 }
 
+// SearchNoWait is Search for a caller with an answer of its own to fall back
+// on.  If the token bucket is empty it returns ErrBudgetBusy at once without
+// sending anything; a 429 is not retried but trips the breaker and returns
+// ErrRateLimited.  It never sleeps.
+//
+// The search endpoint uses it for a keyword its local catalogue does not
+// hold.  That catalogue carries nearly all of AniList, so such a keyword is
+// mostly one nobody has (half-typed input, a crawler's invented query), and
+// queueing it on the shared limiter is what pushed searches past their 5s
+// deadline.
+func (c *Client) SearchNoWait(ctx context.Context, v SearchVars) (*SearchAnimeResponse, error) {
+	var dest SearchAnimeResponse
+	if err := c.doMode(ctx, SearchAnimeQuery, v, &dest, false); err != nil {
+		return nil, err
+	}
+	return &dest, nil
+}
+
 // Seasonal runs SeasonalAnimeQuery.  See Search for error semantics.
 func (c *Client) Seasonal(ctx context.Context, v SeasonalVars) (*SeasonalAnimeResponse, error) {
 	var dest SeasonalAnimeResponse

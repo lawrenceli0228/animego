@@ -25,9 +25,12 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"runtime/debug"
 	"strings"
 
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
@@ -50,12 +53,16 @@ const searchDefaultPerPage = 20
 const searchMaxPerPage = 50
 
 // AniListSearcher is the narrow interface SearchService depends on —
-// only the Search method.  *anilist.Client satisfies it; tests inject a
+// the two search methods.  *anilist.Client satisfies it; tests inject a
 // stub via the fakeSearcher struct in search_test.go.  Defined here at
 // the consumer (anime package) per the "accept interfaces, return
 // structs" rule.
+//
+// Search queues on the shared AniList limiter; SearchNoWait never does and
+// returns anilist.ErrBudgetBusy instead (see run for which path uses which).
 type AniListSearcher interface {
 	Search(ctx context.Context, v anilist.SearchVars) (*anilist.SearchAnimeResponse, error)
+	SearchNoWait(ctx context.Context, v anilist.SearchVars) (*anilist.SearchAnimeResponse, error)
 }
 
 // SearchService composes the AniList client, the ristretto cache, the
@@ -72,6 +79,10 @@ type SearchService struct {
 	db       dbgen.Querier
 	enqueuer queue.Enqueuer
 	folder   KeywordFolder
+	// lookups merges concurrent requests for one cache key into a single
+	// run, so the page render and the browser asking for the same keyword
+	// (or a reader retyping it) cost one lookup, not one each.
+	lookups singleflight.Group
 }
 
 // KeywordFolder rewrites a search keyword into the other Chinese script.
@@ -191,7 +202,9 @@ func (s *SearchService) Handler() http.HandlerFunc {
 			perPage = searchMaxPerPage
 		}
 
-		result, err := s.run(ctx, q, genre, page, perPage)
+		result, err := s.shared(ctx, searchKey(q, genre, page, perPage), func(lctx context.Context) (*SearchPage, error) {
+			return s.run(lctx, q, genre, page, perPage)
+		})
 		if err != nil {
 			s.writeError(w, err)
 			return
@@ -229,10 +242,7 @@ func (s *SearchService) Handler() http.HandlerFunc {
 // the populated SearchPage on success; on AniList error it returns the
 // raw error so writeError can map it to the correct HTTP status.
 func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage int) (*SearchPage, error) {
-	// Cache key: "q|genre|page|perPage" — byte-exact match with the
-	// Express service-layer key construction so a future shared cache
-	// (Redis) lookup hits the same entries.
-	key := fmt.Sprintf("%s|%s|%d|%d", q, genre, page, perPage)
+	key := searchKey(q, genre, page, perPage)
 	if hit, ok := s.cache.Get(key); ok {
 		return &hit, nil
 	}
@@ -256,6 +266,11 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 	// Only for keyword search. A genre filter stays on AniList because the
 	// local query has no genre predicate — the genres live in a side table
 	// and joining them is a separate change, not a detail of this one.
+	//
+	// waitForAniList says whether AniList is worth waiting for. It is when
+	// AniList is the whole answer: a genre search, or a keyword the catalogue
+	// could not be asked about. It is not after the catalogue answered "none".
+	waitForAniList := true
 	if q != "" && genre == "" {
 		local, lErr := s.runLocal(ctx, q, page, perPage)
 		if lErr != nil {
@@ -267,10 +282,16 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 		} else if local != nil {
 			s.cache.Set(key, *local)
 			return local, nil
+		} else {
+			// local == nil means the catalogue has nothing for this keyword.
+			// It carries nearly all of AniList, so that is mostly a keyword
+			// nobody has: half-typed input, a crawler's invented query. Ask
+			// AniList only if that costs no wait (a title we have not
+			// ingested yet is still found and filed below); otherwise the
+			// answer is "none", without queueing behind every other AniList
+			// caller and failing at the 5s deadline.
+			waitForAniList = false
 		}
-		// local == nil means the catalogue has nothing for this keyword — a
-		// title we have not ingested yet. Fall through: AniList answers, the
-		// upsert below files the row, and the next search for it is local.
 	}
 
 	// Build SearchVars with pointer fields so omitempty drops nil
@@ -284,7 +305,19 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 		vars.Genre = &genre
 	}
 
-	resp, err := s.anilist.Search(ctx, vars)
+	var resp *anilist.SearchAnimeResponse
+	var err error
+	if waitForAniList {
+		resp, err = s.anilist.Search(ctx, vars)
+	} else {
+		resp, err = s.anilist.SearchNoWait(ctx, vars)
+		if errors.Is(err, anilist.ErrBudgetBusy) || errors.Is(err, anilist.ErrRateLimited) {
+			// No budget to spare (our bucket is empty, or AniList is
+			// rate-limiting us). Not cached: the next request for this
+			// keyword may find budget free.
+			return emptySearchPage(page, perPage), nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -353,6 +386,56 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 	}
 	s.cache.Set(key, sp)
 	return &sp, nil
+}
+
+// searchKey is the cache key, and the key concurrent requests merge on:
+// "q|genre|page|perPage", byte-exact with the Express service-layer key so a
+// future shared cache (Redis) lookup hits the same entries.
+func searchKey(q, genre string, page, perPage int) string {
+	return fmt.Sprintf("%s|%s|%d|%d", q, genre, page, perPage)
+}
+
+// emptySearchPage is the answer "nothing found" for the given page.
+func emptySearchPage(page, perPage int) *SearchPage {
+	return &SearchPage{
+		PageInfo: anilist.PageInfo{Total: 0, CurrentPage: page, PerPage: perPage},
+		Anime:    []dbgen.GetAnimeByAnilistIDsRow{},
+	}
+}
+
+// shared runs load once for every concurrent request with the same key.
+//
+// The load runs on a context detached from any one caller, with its own
+// queryTimeout, so the request that happened to start it disconnecting
+// (a reader typing on, a tab closed) does not fail the others; each caller
+// still stops waiting at its own deadline. DoChan runs load on a goroutine of
+// its own, where httpmw.Recoverer cannot reach a panic, hence the recover.
+func (s *SearchService) shared(
+	ctx context.Context,
+	key string,
+	load func(context.Context) (*SearchPage, error),
+) (*SearchPage, error) {
+	ch := s.lookups.DoChan(key, func() (val any, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.ErrorContext(ctx, "anime/search: lookup panic",
+					"key", key, "panic", rec, "stack", string(debug.Stack()))
+				val, err = nil, fmt.Errorf("anime/search: lookup panic: %v", rec)
+			}
+		}()
+		lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), queryTimeout)
+		defer cancel()
+		return load(lctx)
+	})
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*SearchPage), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // runLocal answers a keyword search from anime_cache alone.
