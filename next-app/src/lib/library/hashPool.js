@@ -7,12 +7,23 @@
  *   pool.dispose();
  *
  * Architecture:
- *   pending queue + fixed idle-worker array; each hash() call dequeues
- *   the next idle worker (or enqueues a waiter), sends the file, and
- *   returns the worker to the idle list when done. Callers queue in the
- *   order they want files read: a batch's import queues every file at
- *   once, cluster by cluster. A worker is only replaced when a hash times
- *   out (see hash()).
+ *   pending queue + idle-worker list. Workers start only when a file needs
+ *   one: hash() takes an idle worker, or starts one while fewer than the pool
+ *   size are running, or queues. A worker goes back to the idle list (or
+ *   straight to the next queued file) when it answers. Callers queue in the
+ *   order they want files read: a batch's import queues every file at once,
+ *   cluster by cluster.
+ *
+ *   Every worker is started through start(), which gives it its error
+ *   handler. A worker raises an error when its script fails to load (a
+ *   dropped connection on a phone, a blocked request); it then never answers.
+ *   Such a worker leaves the pool for good: the file it was reading settles
+ *   to '' at once, and if files are queued a new worker starts for the first
+ *   of them, since nothing else would ever hand them one. After
+ *   MAX_FAILURES_IN_A_ROW failures with no answer in between, the pool stops
+ *   starting workers and every waiting and later hash() settles to ''.
+ *
+ *   A worker that times out is replaced at once (see replace()).
  *
  * Injection point for tests:
  *   pass workerFactory to createHashPool({ workerFactory }) to supply
@@ -24,6 +35,13 @@ const DEFAULT_POOL_SIZE = typeof navigator !== 'undefined'
   : 4;
 
 const MAX_POOL_SIZE = 4;
+
+/**
+ * Worker failures in a row, with no worker answering in between, after which
+ * the pool gives up: by then the worker script is not coming, and starting
+ * one more worker per queued file would only repeat the failure.
+ */
+const MAX_FAILURES_IN_A_ROW = 3;
 
 const defaultWorkerFactory = () =>
   new Worker(
@@ -41,21 +59,77 @@ export function createHashPool({
 } = {}) {
   const size = Math.min(poolSize, MAX_POOL_SIZE);
 
-  // All workers, created eagerly so dispose() knows the full set.
-  const workers = Array.from({ length: size }, workerFactory);
+  /** Workers started and not yet retired; dispose() ends these. */
+  const running = new Set();
 
-  // Queue of idle workers (initially all).
-  const idle = [...workers];
+  /** Running workers with no file. */
+  /** @type {Worker[]} */
+  const idle = [];
 
-  // Queue of pending requests waiting for a worker.
+  /** Requests waiting for a worker. */
   /** @type {Array<(worker: Worker | null) => void>} */
   const waiters = [];
 
+  /**
+   * How to settle the file a worker is reading, for its error handler.
+   * @type {Map<Worker, () => void>}
+   */
+  const reading = new Map();
+
   let isDisposed = false;
+  let hasGivenUp = false;
+  let failuresInARow = 0;
+
+  /** Start a worker with the pool's error handler. */
+  function start() {
+    const worker = workerFactory();
+    running.add(worker);
+    worker.onerror = (event) => {
+      // Handled here: otherwise the browser reports it to the page as an
+      // uncaught error.
+      event.preventDefault();
+      fail(worker);
+    };
+    return worker;
+  }
 
   /**
-   * Acquire an idle worker, or wait until one becomes available. Resolves
-   * null when the pool is disposed or `signal` aborts first.
+   * Retire a worker that raised an error: it never answers after that.
+   * @param {Worker} worker
+   */
+  function fail(worker) {
+    if (isDisposed || !running.has(worker)) return;
+    running.delete(worker);
+    const at = idle.indexOf(worker);
+    if (at >= 0) idle.splice(at, 1);
+    worker.terminate();
+
+    const settleReading = reading.get(worker);
+    reading.delete(worker);
+    settleReading?.();
+
+    failuresInARow += 1;
+    if (failuresInARow >= MAX_FAILURES_IN_A_ROW) {
+      giveUp();
+      return;
+    }
+    // Queued files wait for a release; with this worker gone, start one
+    // for the first of them.
+    if (waiters.length > 0 && running.size < size) release(start());
+  }
+
+  /** Stop starting workers; queued and later files settle to ''. */
+  function giveUp() {
+    hasGivenUp = true;
+    while (waiters.length > 0) {
+      waiters.shift()(null);
+    }
+  }
+
+  /**
+   * Take an idle worker, start one if the pool has room, or wait until one
+   * is released. Resolves null when the pool is disposed or gives up, or
+   * when `signal` aborts first.
    * @param {AbortSignal} [signal]
    * @returns {Promise<Worker | null>}
    */
@@ -63,6 +137,10 @@ export function createHashPool({
     return new Promise((resolve) => {
       if (idle.length > 0) {
         resolve(idle.shift());
+        return;
+      }
+      if (running.size < size) {
+        resolve(start());
         return;
       }
       /** @param {Worker | null} worker */
@@ -96,11 +174,10 @@ export function createHashPool({
    * @param {Worker} worker
    */
   function replace(worker) {
+    running.delete(worker);
     worker.terminate();
-    if (isDisposed) return;
-    const fresh = workerFactory();
-    workers[workers.indexOf(worker)] = fresh;
-    release(fresh);
+    if (isDisposed || hasGivenUp) return;
+    release(start());
   }
 
   /**
@@ -115,22 +192,29 @@ export function createHashPool({
    * @returns {Promise<string>} hex md5 or '' on timeout/error/disposed/aborted
    */
   async function hash(file, { timeoutMs = 10000, signal } = {}) {
-    if (isDisposed || signal?.aborted) return '';
+    if (isDisposed || hasGivenUp || signal?.aborted) return '';
 
     const worker = await acquire(signal);
 
-    // Pool was disposed, or the caller gave up, while this call was waiting
-    // in the queue.
+    // Pool was disposed or gave up, or the caller gave up, while this call
+    // was waiting in the queue.
     if (worker === null) return '';
 
     return new Promise((resolve) => {
       let settled = false;
 
-      const timer = setTimeout(() => {
-        if (settled) return;
+      /** Stop listening for this file; true when it was still open. */
+      const close = () => {
+        if (settled) return false;
         settled = true;
+        clearTimeout(timer);
         worker.onmessage = null;
-        worker.onerror = null;
+        reading.delete(worker);
+        return true;
+      };
+
+      const timer = setTimeout(() => {
+        if (!close()) return;
         // The worker is still reading this file and will answer for it
         // later. Handed to the next file, that answer would be taken as the
         // next file's hash, and every answer after it would be one file late.
@@ -139,24 +223,16 @@ export function createHashPool({
       }, timeoutMs);
 
       worker.onmessage = (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        worker.onmessage = null;
-        worker.onerror = null;
+        if (!close()) return;
+        failuresInARow = 0;
         release(worker);
         resolve(e.data.hash ?? '');
       };
 
-      worker.onerror = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        worker.onmessage = null;
-        worker.onerror = null;
-        release(worker);
-        resolve('');
-      };
+      // The worker's error handler (see start()) settles this file.
+      reading.set(worker, () => {
+        if (close()) resolve('');
+      });
 
       worker.postMessage({ file });
     });
@@ -166,7 +242,7 @@ export function createHashPool({
   function dispose() {
     if (isDisposed) return;
     isDisposed = true;
-    for (const w of workers) {
+    for (const w of running) {
       w.terminate();
     }
     // Drain waiters: resolve with null so hash() returns '' without touching
