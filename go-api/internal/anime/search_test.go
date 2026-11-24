@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,22 +29,46 @@ import (
 // inline; calls counter records invocation count for cache-hit
 // assertions (atomic so the race detector stays happy if a test ever
 // fires concurrent requests).
+//
+// Search (queues on the limiter) and SearchNoWait (never queues) both answer
+// through fn unless fnNoWait is set; waits and noWaits count them apart so a
+// test can assert which path a request took.
 type fakeSearcher struct {
-	mu    sync.Mutex
-	fn    func(ctx context.Context, v anilist.SearchVars) (*anilist.SearchAnimeResponse, error)
-	calls atomic.Int32
-	last  anilist.SearchVars
+	mu       sync.Mutex
+	fn       func(ctx context.Context, v anilist.SearchVars) (*anilist.SearchAnimeResponse, error)
+	fnNoWait func(ctx context.Context, v anilist.SearchVars) (*anilist.SearchAnimeResponse, error)
+	calls    atomic.Int32
+	waits    atomic.Int32
+	noWaits  atomic.Int32
+	last     anilist.SearchVars
 }
 
 func (f *fakeSearcher) Search(ctx context.Context, v anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+	f.waits.Add(1)
+	return f.answer(ctx, v, f.fn)
+}
+
+func (f *fakeSearcher) SearchNoWait(ctx context.Context, v anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+	f.noWaits.Add(1)
+	if f.fnNoWait != nil {
+		return f.answer(ctx, v, f.fnNoWait)
+	}
+	return f.answer(ctx, v, f.fn)
+}
+
+func (f *fakeSearcher) answer(
+	ctx context.Context,
+	v anilist.SearchVars,
+	fn func(context.Context, anilist.SearchVars) (*anilist.SearchAnimeResponse, error),
+) (*anilist.SearchAnimeResponse, error) {
 	f.calls.Add(1)
 	f.mu.Lock()
 	f.last = v
 	f.mu.Unlock()
-	if f.fn == nil {
+	if fn == nil {
 		return &anilist.SearchAnimeResponse{}, nil
 	}
-	return f.fn(ctx, v)
+	return fn(ctx, v)
 }
 
 func (f *fakeSearcher) callCount() int32 { return f.calls.Load() }
@@ -535,8 +560,11 @@ func TestSearch_AniListRateLimited_503(t *testing.T) {
 	fq := &searchFakeQuerier{}
 	svc := newSearchService(t, fs, fq, nil)
 
+	// A genre search: AniList is its only source, so it still queues and
+	// still reports the limit. (A keyword the local catalogue misses answers
+	// empty instead; see TestSearchLocal_MissWhileRateLimitedAnswersEmpty.)
 	rec := httptest.NewRecorder()
-	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?genre=Action", nil))
 
 	// 503 (not 502): rate-limiting is transient and clears after the
 	// breaker cooldown — distinct from a hard upstream failure.
@@ -1237,6 +1265,8 @@ func TestSearchLocal_EmptyCatalogueFallsThroughToAniList(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, int32(1), fs.callCount(), "an empty catalogue must still reach AniList")
+	assert.Equal(t, int32(1), fs.noWaits.Load(), "the fallback must not queue on the limiter")
+	assert.Zero(t, fs.waits.Load(), "the fallback must not queue on the limiter")
 	assert.Contains(t, fq.upsertedIDs, int32(999), "the fallback must file what it found")
 }
 
@@ -1263,6 +1293,10 @@ func TestSearchLocal_DatabaseErrorFallsThroughRatherThanFailing(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code, "a local DB error must not surface as a failed search")
 	assert.Equal(t, int32(1), fs.callCount())
+	// The catalogue could not answer at all, so AniList is the whole answer
+	// here and is worth waiting for.
+	assert.Equal(t, int32(1), fs.waits.Load(), "a local failure still queues for AniList")
+	assert.Zero(t, fs.noWaits.Load())
 }
 
 func TestSearchLocal_GenreSearchStaysOnAniList(t *testing.T) {
@@ -1289,6 +1323,8 @@ func TestSearchLocal_GenreSearchStaysOnAniList(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code, url)
 		assert.Equal(t, int32(1), fs.callCount(), "genre search must reach AniList: "+url)
+		assert.Equal(t, int32(1), fs.waits.Load(), "genre search has no other source, so it queues: "+url)
+		assert.Zero(t, fs.noWaits.Load(), url)
 		assert.Zero(t, fq.localCalls, "genre search must not consult the local catalogue: "+url)
 	}
 }
@@ -1463,4 +1499,169 @@ func TestSearchLocal_FoldedPatternIsEscapedToo(t *testing.T) {
 	require.NotEmpty(t, fq.searchParams)
 	assert.Equal(t, `%100\%%`, fq.searchParams[0].ContainsFolded,
 		"an unescaped folded pattern would match every row just as an unescaped raw one would")
+}
+
+// -----------------------------------------------------------------------------
+// A keyword the local catalogue misses: AniList only when it costs no wait.
+// -----------------------------------------------------------------------------
+
+func TestSearchLocal_MissWithBudgetBusyAnswersEmpty(t *testing.T) {
+	t.Parallel()
+
+	// The local catalogue holds nearly all of AniList, so a miss is mostly a
+	// keyword nobody has: half-typed input, a crawler's made-up query. Queueing
+	// those behind the shared limiter is what turned into 500s and 504s.
+	fs := &fakeSearcher{
+		fnNoWait: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			return nil, anilist.ErrBudgetBusy
+		},
+	}
+	fq := &searchFakeQuerier{} // catalogue reports empty
+	svc := newSearchService(t, fs, fq, nil)
+
+	for i := 1; i <= 2; i++ {
+		rec := httptest.NewRecorder()
+		svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=nobody", nil))
+
+		require.Equal(t, http.StatusOK, rec.Code, "a busy budget is not a failed search")
+		assert.Contains(t, rec.Body.String(), `"data":[]`)
+		assert.Contains(t, rec.Body.String(), `"total":0`)
+		// Not cached: the next request for the keyword may find budget free.
+		assert.Equal(t, int32(i), fs.noWaits.Load(), "request %d must try AniList again", i)
+	}
+	assert.Zero(t, fs.waits.Load(), "a local miss never queues")
+}
+
+func TestSearchLocal_MissWhileRateLimitedAnswersEmpty(t *testing.T) {
+	t.Parallel()
+
+	// AniList itself saying "slow down" (or the breaker that remembers it) is
+	// the same situation as an empty bucket: no budget to spend on a keyword
+	// the catalogue does not have.
+	rateLimited := func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+		return nil, anilist.ErrRateLimited
+	}
+	fs := &fakeSearcher{fn: rateLimited, fnNoWait: rateLimited}
+	svc := newSearchService(t, fs, &searchFakeQuerier{}, nil)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=nobody", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"data":[]`)
+	assert.Contains(t, rec.Body.String(), `"total":0`)
+}
+
+// -----------------------------------------------------------------------------
+// The same keyword at the same time: one lookup.
+// -----------------------------------------------------------------------------
+
+func foundOne(id int) *anilist.SearchAnimeResponse {
+	return &anilist.SearchAnimeResponse{
+		Page: anilist.MediaPage{
+			PageInfo: anilist.PageInfo{Total: 1, CurrentPage: 1, PerPage: 20},
+			Media:    []anilist.Media{mediaWith(id)},
+		},
+	}
+}
+
+func TestSearch_ConcurrentSameKeywordAsksAniListOnce(t *testing.T) {
+	t.Parallel()
+
+	// The page render and the browser ask for the same keyword at once, and
+	// a reader retyping repeats it; none of them is in the cache yet.
+	const n = 5
+	var entered atomic.Int32
+	release := make(chan struct{})
+	fs := &fakeSearcher{
+		fn: func(ctx context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			entered.Add(1)
+			select {
+			case <-release:
+				return foundOne(5), nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		},
+	}
+	svc := newSearchService(t, fs, &searchFakeQuerier{}, nil)
+
+	codes := make([]int, n)
+	bodies := make([]string, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rec := httptest.NewRecorder()
+			svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=same", nil))
+			codes[i], bodies[i] = rec.Code, rec.Body.String()
+		}(i)
+	}
+	// Unmerged, every request reaches AniList while the first is still out;
+	// give them the time to before answering.
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for entered.Load() < n && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(release)
+	wg.Wait()
+
+	assert.Equal(t, int32(1), fs.callCount(), "concurrent requests for one keyword must share one lookup")
+	for i := 0; i < n; i++ {
+		assert.Equal(t, http.StatusOK, codes[i], "request %d", i)
+		assert.Contains(t, bodies[i], `"total":1`, "request %d", i)
+	}
+}
+
+func TestSearch_SharedLookupOutlivesTheCallerThatStartedIt(t *testing.T) {
+	t.Parallel()
+
+	// The reader who started a lookup typing on (or closing the tab) must not
+	// fail the requests that joined it.
+	var once sync.Once
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	fs := &fakeSearcher{
+		fn: func(ctx context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			once.Do(func() { close(entered) })
+			<-release
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return foundOne(6), nil
+		},
+	}
+	svc := newSearchService(t, fs, &searchFakeQuerier{}, nil)
+
+	starterCtx, cancelStarter := context.WithCancel(context.Background())
+	starterDone := make(chan struct{})
+	go func() {
+		defer close(starterDone)
+		req := httptest.NewRequest(http.MethodGet, "/api/anime/search?q=shared", nil).WithContext(starterCtx)
+		svc.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-entered
+
+	follower := httptest.NewRecorder()
+	followerDone := make(chan struct{})
+	go func() {
+		defer close(followerDone)
+		svc.Handler().ServeHTTP(follower, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=shared", nil))
+	}()
+	time.Sleep(100 * time.Millisecond) // let the follower join the lookup
+
+	cancelStarter()
+	select {
+	case <-starterDone:
+	case <-time.After(time.Second):
+		t.Error("the starter must stop waiting once its own client has gone")
+	}
+	close(release)
+	<-followerDone
+	<-starterDone
+
+	require.Equal(t, http.StatusOK, follower.Code, "the follower must get the shared answer")
+	assert.Contains(t, follower.Body.String(), `"total":1`)
+	assert.Equal(t, int32(1), fs.callCount(), "the follower joined the starter's lookup")
 }

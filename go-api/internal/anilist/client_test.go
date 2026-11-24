@@ -974,3 +974,49 @@ func TestClient_EveryQueryPathCarriesTheHeaders(t *testing.T) {
 		assert.Equal(t, requestReferer, ref, "query path %d sent no Referer and would 403 in production", i)
 	}
 }
+
+// SearchNoWait is the search endpoint's opportunistic lookup for a keyword
+// the local catalogue does not hold: with a free token it is Search.
+func TestClient_SearchNoWait_TokenFree_Fetches(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSON(w, http.StatusOK, `{"data":{"Page":{"pageInfo":{"total":1,"currentPage":1,"perPage":20},"media":[{"id":7,"title":{"romaji":"Found"}}]}}}`)
+	}))
+	defer srv.Close()
+
+	c, _ := noWaitClient(t, srv.URL)
+	q := "found"
+	resp, err := c.SearchNoWait(context.Background(), SearchVars{Search: &q, Page: 1, PerPage: 20})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Page.Media, 1)
+	assert.Equal(t, 7, resp.Page.Media[0].ID)
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+// No token → ErrBudgetBusy with nothing sent and the breaker left closed, so
+// a burst of unknown keywords never queues on the limiter it shares with
+// every other AniList caller.
+func TestClient_SearchNoWait_NoToken_BudgetBusy(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSON(w, http.StatusOK, `{"data":{"Page":{"pageInfo":{"total":0},"media":[]}}}`)
+	}))
+	defer srv.Close()
+
+	c, _ := noWaitClient(t, srv.URL)
+	require.True(t, c.limiter.Allow(), "drain the single token")
+
+	q := "busy"
+	_, err := c.SearchNoWait(context.Background(), SearchVars{Search: &q, Page: 1, PerPage: 20})
+
+	require.ErrorIs(t, err, ErrBudgetBusy)
+	assert.Equal(t, int32(0), calls.Load(), "no token → nothing sent")
+	assert.False(t, c.breakerOpen(), "our own queue must not open the breaker")
+}
