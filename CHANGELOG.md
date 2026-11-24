@@ -4,6 +4,23 @@
 
 ## [未发布]
 
+### go-api：客户端先断开不算服务器错误，Sentry 按路由分开归类
+
+客户端在请求处理完之前断开连接时，处理函数的工作随之被取消，最后写出 5xx。请求日志以前把它和真正的服务器错误一样记成 ERROR 并转发到 Sentry。另外，每条请求日志的消息都是 `http`，所有路由的 5xx 在 Sentry 里都归进同一个 issue，标题也都是 `http`。
+
+改动：
+- **客户端已断开的 5xx 记成 499**：`httpmw.RequestLog` 在处理函数返回后检查请求的 context 是否已被取消（`context.Canceled`）。状态码是 5xx、客户端已断开、整个请求的处理时间不到 5 秒时，日志里的状态记成 499、级别为 WARN，不再转发到 Sentry。返回给客户端的状态码不变。客户端没断开的 5xx、以及处理了 5 秒或更久的，照旧记原状态码和 ERROR；客户端断开但状态码不到 500 的不改；context 超时不算客户端断开。判定放在一个单独的纯函数里。
+- **Sentry 按路由归类**：`RequestLog` 只在记成 ERROR 的日志上加 `sentry_group` 属性，值为「状态码 方法 路由模板」，如 `500 GET /api/comments/summary/{anilistId}`。路由模板在路由完成后从 chi 读取，同一路由的不同 id 归在一起；chi 没有记录模板时为 `unmatched`。WARN 和 INFO 的日志不带这个属性，stdout 里的消息仍是 `http`。
+- `obs.SentryErrorHandler` 遇到带 `sentry_group`（非空字符串）的记录时，fingerprint 设为「消息 + 分组值」，标题变成如 `http 500 GET /api/anime/search`，属性仍保留在事件的 slog 上下文里。不带这个属性的记录（包括 river 后台任务的错误）生成的事件和以前完全一样。属性名只在 `obs.SentryGroupAttr` 定义一次，httpmw 引用这个常量。
+- `logger.go` 包注释里的中间件顺序图按 `cmd/server/main.go` 实际的顺序重写，补上 sentryhttp 和 Timeout 之后的几层，并写明 RequestLog 在 Timeout 外层、它看到的 context 只会因客户端断开而取消。
+
+测试：
+- 状态判定的表驱动测试：客户端没断开的 500 仍是 500/ERROR；断开且不到 5 秒的 500、503 记成 499/WARN；断开但正好 5 秒或更久的 500 仍是 500/ERROR；断开的 200、404 不改。原有的级别映射测试不改，全部通过。
+- 经过中间件：处理函数写 500 之前请求 context 已取消，日志为 499/WARN、不带分组属性，返回的状态码仍是 500；context 是超时而不是取消时仍记 500/ERROR。
+- 用真实的 chi 路由器（`r.Use` 挂载）：`/api/x/{id}` 返回 500 时，请求 `/api/x/123` 的分组值是 `500 GET /api/x/{id}`；`r.Route` 挂载的子路由拼出完整模板；顶层没有匹配到的路径为 `unmatched`；在子路由里没匹配到时，chi 报告的是挂载点的模板（如 `/api/y/*`），测试按这个实际行为断言；404 和 200 的日志不带分组属性。
+- Sentry 转发：两个不同的分组值得到两个不同的 fingerprint，标题里带分组值；不带属性的记录，事件与改动前逐字段相同（没有 fingerprint、消息不变、上下文相同）；分组值为空字符串时视同没有。
+- `gofmt`、`go vet` 干净；`go test -race` 跑 httpmw、obs、cmd/server 全部通过。
+
 ### next-app：运行时换成 Node 24（LTS）
 
 改动：

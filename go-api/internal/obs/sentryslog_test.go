@@ -267,6 +267,91 @@ func itoa(i int) string {
 }
 
 // ---------------------------------------------------------------------------
+// Grouping
+// ---------------------------------------------------------------------------
+
+// TestSentryErrorHandler_GroupAttrSplitsIssues is why SentryGroupAttr exists:
+// every request log line has the message "http", so without it every server
+// error of every route lands in one Sentry issue.
+func TestSentryErrorHandler_GroupAttrSplitsIssues(t *testing.T) {
+	t.Parallel()
+
+	rec := &recorder{}
+	logger, buf := newTestLogger(t, rec, Options{})
+
+	logger.Error("http", SentryGroupAttr, "500 GET /api/anime/search", "status", 500)
+	logger.Error("http", SentryGroupAttr, "500 GET /api/comments/summary/{anilistId}", "status", 500)
+
+	events := rec.all()
+	require.Len(t, events, 2)
+
+	assert.Equal(t, []string{"http", "500 GET /api/anime/search"}, events[0].Fingerprint)
+	assert.Equal(t, []string{"http", "500 GET /api/comments/summary/{anilistId}"}, events[1].Fingerprint)
+	assert.NotEqual(t, events[0].Fingerprint, events[1].Fingerprint,
+		"different routes must not share an issue")
+
+	assert.Equal(t, "http 500 GET /api/anime/search", events[0].Message,
+		"the title must say which route failed")
+	assert.Contains(t, events[1].Message, "500 GET /api/comments/summary/{anilistId}")
+
+	assert.Equal(t, "500 GET /api/anime/search", slogFields(t, events[0])[SentryGroupAttr],
+		"the group stays readable among the record's attributes")
+	assert.EqualValues(t, 500, slogFields(t, events[0])["status"])
+
+	// The container log keeps the plain message.
+	assert.Contains(t, buf.String(), `"msg":"http"`)
+}
+
+// TestSentryErrorHandler_NoGroupAttrEventUnchanged pins that a record without
+// the group attribute — every river background error, for one — produces
+// exactly the event it did before grouping existed: no fingerprint, the
+// message as logged, the same contexts.
+func TestSentryErrorHandler_NoGroupAttrEventUnchanged(t *testing.T) {
+	t.Parallel()
+
+	rec := &recorder{}
+	var buf bytes.Buffer
+	h := NewSentryErrorHandler(
+		slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}),
+		Options{Capturer: rec})
+
+	at := time.Date(2026, 9, 8, 22, 0, 0, 0, time.UTC)
+	r := slog.NewRecord(at, slog.LevelError, "sweep failed", 0)
+	r.AddAttrs(slog.String("err", "boom"))
+	require.NoError(t, h.Handle(context.Background(), r))
+
+	// What forward() built before SentryGroupAttr was introduced.
+	want := sentry.NewEvent()
+	want.Level = sentry.LevelError
+	want.Message = "sweep failed"
+	want.Logger = "slog"
+	want.Timestamp = at
+	want.Contexts[slogContextKey] = sentry.Context{"err": "boom"}
+
+	events := rec.all()
+	require.Len(t, events, 1)
+	assert.Empty(t, events[0].Fingerprint, "no group, no custom fingerprint")
+	assert.Equal(t, want, events[0])
+}
+
+// TestSentryErrorHandler_EmptyGroupAttrIgnored: an empty group value would
+// make a title of "http " and a fingerprint that groups nothing useful, so it
+// is treated as absent.
+func TestSentryErrorHandler_EmptyGroupAttrIgnored(t *testing.T) {
+	t.Parallel()
+
+	rec := &recorder{}
+	logger, _ := newTestLogger(t, rec, Options{})
+
+	logger.Error("http", SentryGroupAttr, "")
+
+	events := rec.all()
+	require.Len(t, events, 1)
+	assert.Empty(t, events[0].Fingerprint)
+	assert.Equal(t, "http", events[0].Message)
+}
+
+// ---------------------------------------------------------------------------
 // Rate limiting
 // ---------------------------------------------------------------------------
 

@@ -61,6 +61,21 @@ const (
 	// slogContextKey names the Sentry context that carries the record's
 	// attributes.
 	slogContextKey = "slog"
+
+	// SentryGroupAttr names the record attribute that splits one log message
+	// into separate Sentry issues.  When a forwarded record carries it as a
+	// non-empty string, the event's fingerprint becomes {message, value} and
+	// its title "message value"; the attribute also stays among the record's
+	// attributes in the event context.
+	//
+	// Only an attribute on the record itself counts.  One attached with
+	// Logger.With would stamp the same group on every line that logger emits,
+	// which is the single-issue problem again.
+	//
+	// httpmw.RequestLog sets it to "<status> <METHOD> <route pattern>" on the
+	// records it logs at ERROR, because every one of those has the message
+	// "http" and would otherwise collapse into a single issue.
+	SentryGroupAttr = "sentry_group"
 )
 
 // Options tunes SentryErrorHandler.  The zero value is the production
@@ -211,7 +226,9 @@ func (h *SentryErrorHandler) clone() *SentryErrorHandler {
 	}
 }
 
-// forward builds and sends the Sentry event for one record.
+// forward builds and sends the Sentry event for one record.  A record carrying
+// SentryGroupAttr gets its own fingerprint and title (see the constant); any
+// other record gets Sentry's default grouping and its message as the title.
 func (h *SentryErrorHandler) forward(ctx context.Context, rec slog.Record) {
 	capturer := h.capturer
 	if capturer == nil {
@@ -246,8 +263,13 @@ func (h *SentryErrorHandler) forward(ctx context.Context, rec slog.Record) {
 	for _, a := range h.attrs {
 		fields[a.Key] = a.Value.Resolve().Any()
 	}
+	group := ""
 	rec.Attrs(func(a slog.Attr) bool {
-		fields[qualify(h.groups, a.Key)] = a.Value.Resolve().Any()
+		v := a.Value.Resolve()
+		fields[qualify(h.groups, a.Key)] = v.Any()
+		if a.Key == SentryGroupAttr && v.Kind() == slog.KindString {
+			group = v.String()
+		}
 		return true
 	})
 	if dropped > 0 {
@@ -255,6 +277,10 @@ func (h *SentryErrorHandler) forward(ctx context.Context, rec slog.Record) {
 	}
 	if len(fields) > 0 {
 		event.Contexts[slogContextKey] = fields
+	}
+	if group != "" {
+		event.Fingerprint = []string{rec.Message, group}
+		event.Message = rec.Message + " " + group
 	}
 
 	capturer.CaptureEvent(event)

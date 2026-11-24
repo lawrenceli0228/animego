@@ -115,7 +115,7 @@ func NewAPIRateLimiterWithBurst(r rate.Limit, burst int) *apiLimiterStore {
 //   - /api/health       → skip (same handler at /api/health alias)
 //   - /api/* (else)     → rate limit
 //   - everything else   → skip (no app paths outside /api at this
-//                         layer; SPA + static is Next.js's domain)
+//     layer; SPA + static is Next.js's domain)
 //
 // Failure mode: when the bucket is empty, emit 429 with the canonical
 // English message so the frontend's i18n key
