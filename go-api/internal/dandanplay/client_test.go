@@ -424,6 +424,86 @@ func TestSearchAnime_Happy(t *testing.T) {
 	}
 }
 
+// /match now searches dandanplay for every import whose hash and
+// anime_cache both miss, through the same 800ms limiter every other call
+// waits on.  A library of one show's episodes asks the same question once
+// per cluster, and the player asks it again on every open.
+
+func TestSearchAnime_CacheHit(t *testing.T) {
+	c, calls := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"animes":[{"animeId":1,"animeTitle":"A","type":"tvseries","episodeCount":12}]}`))
+	})
+	for i := 0; i < 2; i++ {
+		out, err := c.SearchAnime(context.Background(), "Nama-Anaru")
+		if err != nil || len(out) != 1 {
+			t.Fatalf("call %d: out=%+v err=%v", i, out, err)
+		}
+		c.searchCh.Wait()
+	}
+	// Case and surrounding space do not make a different question.
+	if _, err := c.SearchAnime(context.Background(), "  nama-anaru "); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("HTTP call count = %d, want 1", calls.Load())
+	}
+}
+
+func TestSearchAnime_EmptyAnswerIsCachedToo(t *testing.T) {
+	c, calls := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"animes":[]}`))
+	})
+	for i := 0; i < 2; i++ {
+		if _, err := c.SearchAnime(context.Background(), "nobody"); err != nil {
+			t.Fatal(err)
+		}
+		c.searchCh.Wait()
+	}
+	if calls.Load() != 1 {
+		t.Errorf("HTTP call count = %d, want 1", calls.Load())
+	}
+}
+
+func TestSearchAnime_DistinctKeywordsAreDistinctQuestions(t *testing.T) {
+	c, calls := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"animes":[{"animeId":1,"animeTitle":"` + r.URL.Query().Get("keyword") + `"}]}`))
+	})
+	a, _ := c.SearchAnime(context.Background(), "alpha")
+	c.searchCh.Wait()
+	b, _ := c.SearchAnime(context.Background(), "beta")
+	if calls.Load() != 2 || a[0].Title != "alpha" || b[0].Title != "beta" {
+		t.Fatalf("calls=%d a=%+v b=%+v", calls.Load(), a, b)
+	}
+}
+
+func TestSearchAnime_UpstreamErrorIsNotCached(t *testing.T) {
+	var failing atomic.Bool
+	failing.Store(true)
+	c, calls := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		if failing.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"animes":[{"animeId":1,"animeTitle":"A"}]}`))
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if _, err := c.SearchAnime(ctx, "kaguya"); err == nil {
+		t.Fatal("want an error from a failing upstream")
+	}
+	c.searchCh.Wait()
+	failing.Store(false)
+	before := calls.Load()
+	out, err := c.SearchAnime(context.Background(), "kaguya")
+	if err != nil || len(out) != 1 || calls.Load() != before+1 {
+		t.Fatalf("after recovery: out=%+v err=%v calls %d→%d", out, err, before, calls.Load())
+	}
+}
+
 func TestFetchComments_4xxReturnsEmpty(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

@@ -53,7 +53,7 @@ func LooseNormalize(s string) string {
 	b.Grow(len(lower))
 	for _, r := range lower {
 		// Whitespace catch-all (matches \s in JS regex).
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' || r == '\v' || r == ' ' {
+		if isLooseSpace(r) {
 			continue
 		}
 		if _, drop := stripChars[r]; drop {
@@ -65,8 +65,19 @@ func LooseNormalize(s string) string {
 }
 
 // LooselyMatchesKeyword returns true when either LooseNormalize-d string
-// is a substring of the other.  Empty inputs return false (avoids the
+// contains the other, starting and ending on a word boundary wherever the
+// text is Latin.  Empty inputs return false (avoids the
 // empty-string is-substring-of-anything trap).  The relation is symmetric.
+//
+// The boundary rule is the one change from the JS source below.  Plain
+// substring containment let a release group's short name ("Tensei shita",
+// for Tensei Shita Daiseijo wa…) match "Tensei Shitara Slime Datta Ken",
+// because LooseNormalize joins the words and "tenseishita" is a prefix of
+// "tenseishitara…".  A match may not begin or end between two ASCII letters
+// or digits that sat next to each other in the original text.  CJK titles,
+// which do not separate words, keep plain containment ("葬送的芙莉莲" is in
+// "葬送的芙莉莲第二季"), and a keyword that writes words together still
+// matches ("ReZERO" is in "Re:Zero kara…").
 //
 // JS source:
 //
@@ -77,10 +88,74 @@ func LooseNormalize(s string) string {
 //	  return a.includes(k) || k.includes(a);
 //	}
 func LooselyMatchesKeyword(animeTitle, keyword string) bool {
-	a := LooseNormalize(animeTitle)
-	k := LooseNormalize(keyword)
-	if a == "" || k == "" {
+	a, aSep := looseRunes(animeTitle)
+	k, kSep := looseRunes(keyword)
+	if len(a) == 0 || len(k) == 0 {
 		return false
 	}
-	return strings.Contains(a, k) || strings.Contains(k, a)
+	return containsOnBoundaries(a, aSep, k) || containsOnBoundaries(k, kSep, a)
+}
+
+// looseRunes is LooseNormalize as runes, plus, for each kept rune, whether
+// a dropped one (whitespace, bracket, punctuation) came right before it.
+func looseRunes(s string) ([]rune, []bool) {
+	lower := strings.ToLower(s)
+	runes := make([]rune, 0, len(lower))
+	sepBefore := make([]bool, 0, len(lower))
+	dropped := false
+	for _, r := range lower {
+		if isLooseSpace(r) {
+			dropped = true
+			continue
+		}
+		if _, drop := stripChars[r]; drop {
+			dropped = true
+			continue
+		}
+		runes = append(runes, r)
+		sepBefore = append(sepBefore, dropped)
+		dropped = false
+	}
+	return runes, sepBefore
+}
+
+func isLooseSpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' || r == '\v' || r == '\u00a0'
+}
+
+// containsOnBoundaries reports whether needle occurs in hay at a position
+// that does not cut a Latin word in hay.
+func containsOnBoundaries(hay []rune, sepBefore []bool, needle []rune) bool {
+	for i := 0; i+len(needle) <= len(hay); i++ {
+		if !runesEqual(hay[i:i+len(needle)], needle) {
+			continue
+		}
+		if cutsLatinWord(hay, sepBefore, i) || cutsLatinWord(hay, sepBefore, i+len(needle)) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// cutsLatinWord reports whether the gap before hay[p] falls inside a Latin
+// word: an ASCII letter or digit on each side, with nothing dropped between.
+func cutsLatinWord(hay []rune, sepBefore []bool, p int) bool {
+	if p <= 0 || p >= len(hay) || sepBefore[p] {
+		return false
+	}
+	return isASCIIAlnum(hay[p-1]) && isASCIIAlnum(hay[p])
+}
+
+func isASCIIAlnum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+}
+
+func runesEqual(a, b []rune) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

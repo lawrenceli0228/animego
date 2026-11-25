@@ -88,7 +88,14 @@ export interface DandanClient {
   match(
     hash16M: string,
     fileName: string,
-    opts?: { fileSize?: number },
+    opts?: {
+      fileSize?: number;
+      /**
+       * What go-api searches by when the hash is not indexed (see
+       * matchKeyword.ts). Omitted from the request when blank.
+       */
+      keyword?: string;
+    },
   ): Promise<DandanMatchResult | null>;
 }
 
@@ -126,11 +133,13 @@ export function createDandanClient(): DandanClient {
     async match(hash16M, fileName, opts = {}) {
       if (!hash16M || !fileName) return null;
       const fileSize = opts.fileSize ?? 0;
+      const keyword = opts.keyword?.trim();
       try {
         const body = {
           fileName,
           fileHash: hash16M,
           fileSize,
+          ...(keyword ? { keyword } : {}),
           episodes: [1],
           files: [{ fileName, fileHash: hash16M, fileSize, episode: 1 }],
         };

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   parseAbsoluteEpisode,
+  parseAnimeKeyword,
   parseEpisodeMeta,
   parseEpisodeNumber,
   parseSeason,
@@ -167,5 +168,80 @@ describe("the two signals numberSpace is derived from", () => {
     // Its own doc is explicit that a null means "the name has no such marker",
     // never "this file has no absolute number".
     expect(parseAbsoluteEpisode("[Group] Show [67].mkv")).toBeNull();
+  });
+});
+
+describe("parseAnimeKeyword — the title ends where the season-episode token starts", () => {
+  // The title is what the library searches by when the file hash is unknown,
+  // and what an unmatched card is called. `- S01` or a release year left on
+  // it finds nothing: dandanplay answers "Nama-Anaru" with the right show and
+  // "Nama-Anaru - S01" with nothing at all.
+  test("★ `Title - S01E08` drops the ` - S01`", () => {
+    expect(parseAnimeKeyword("[Judas] Nama-Anaru - S01E08.mkv")).toBe("Nama-Anaru");
+    expect(parseAnimeKeyword("[Judas] Kusuriya - S03E08.mkv")).toBe("Kusuriya");
+  });
+
+  test("`Title S04E09 [..]` with no dash", () => {
+    expect(
+      parseAnimeKeyword(
+        "[Feibanyama] ReZERO Starting Life in Another World S04E09 [IQIYI WebRip 2160p HEVC AAC Multi-Audio Multi-Subs].mkv",
+      ),
+    ).toBe("ReZERO Starting Life in Another World");
+  });
+
+  test("`[Group] - Title - S01E08` (Doomdos) has no leading dash", () => {
+    expect(parseAnimeKeyword("[Doomdos] - Mononoke - S01E08 [Dub] [720p OV WEB-DL].mkv")).toBe("Mononoke");
+  });
+
+  test("a release year before the SxxEyy token stays: it tells a remake from the original", () => {
+    expect(
+      parseAnimeKeyword("Super no Ura de Yani Suu Futari 2026 S01E11-[1080p][WEBRIP][AV1.AAC].mkv"),
+    ).toBe("Super no Ura de Yani Suu Futari 2026");
+    expect(parseAnimeKeyword("Hunter x Hunter 2011 S01E05.mkv")).toBe("Hunter x Hunter 2011");
+  });
+
+  test("a title starting with a dot keeps it", () => {
+    expect(parseAnimeKeyword("[Group] .hack Sign - 03 [1080p].mkv")).toBe(".hack Sign");
+  });
+
+  test("an episode title after the SxxEyy token is not part of the title", () => {
+    expect(
+      parseAnimeKeyword(
+        "The Detective Is Already Dead S02E06 Guardian of the World 1080p CR WEB-DL DUAL AAC2.0 H.264-VARYG.mkv",
+      ),
+    ).toBe("The Detective Is Already Dead");
+  });
+
+  test("★ a trailing `S2` before ` - 07` is a season, not title", () => {
+    expect(parseAnimeKeyword("[LoliHouse] Ao Ashi S2 - 07 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv")).toBe(
+      "Ao Ashi",
+    );
+    expect(
+      parseAnimeKeyword(
+        "[LoliHouse] Youkoso Jitsuryoku Shijou Shugi no Kyoushitsu e S4 - 04 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv",
+      ),
+    ).toBe("Youkoso Jitsuryoku Shijou Shugi no Kyoushitsu e");
+  });
+
+  test("a folder name ending in a bare season token", () => {
+    expect(parseAnimeKeyword("[WEBrip] Super no Ura de Yani Suu Futari S01 [ktnbytes]")).toBe(
+      "Super no Ura de Yani Suu Futari",
+    );
+  });
+
+  test("titles that merely end in a number or a year keep them", () => {
+    expect(parseAnimeKeyword("[LoliHouse] Mato Seihei no Slave 2 - 03 [WebRip 1080p].mkv")).toBe(
+      "Mato Seihei no Slave 2",
+    );
+    expect(parseAnimeKeyword("[ANi] Ranma 1/2 2024 - 08 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4")).toBe(
+      "Ranma 1/2 2024",
+    );
+  });
+
+  test("the season is still read from the SxxEyy token", () => {
+    const meta = parseEpisodeMeta("[Judas] Kusuriya - S03E08.mkv");
+    expect(meta.title).toBe("Kusuriya");
+    expect(meta.season).toBe(3);
+    expect(meta.number).toBe(8);
   });
 });

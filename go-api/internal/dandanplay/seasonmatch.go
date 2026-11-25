@@ -61,10 +61,11 @@ func rowMatchesQuery(row *dbgen.SearchAnimeCacheForDandanplayRow, query string) 
 // a caller that walks the slice (Phase 2) a chance to pick it.
 //
 // Ties break on ascending anilist_id so the result is deterministic.
+// A lone row is judged like any other — one row is not one answer.
 // An empty query returns rows unchanged: with nothing to rank against,
 // preserving the caller's order beats inventing one.
 func rankCacheRows(rows []dbgen.SearchAnimeCacheForDandanplayRow, query string) []dbgen.SearchAnimeCacheForDandanplayRow {
-	if query == "" || len(rows) < 2 {
+	if query == "" {
 		return rows
 	}
 	want := titlematch.ExtractMarker(query)

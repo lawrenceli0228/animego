@@ -4,6 +4,41 @@
 
 ## [未发布]
 
+### 库导入：发布组的简称和 `S01E08` 写法也能匹配到番
+
+以前，库导入向 `/api/dandanplay/match` 只发文件名和哈希，不发关键词。弹弹play 还没收录一个文件的哈希时，按标题匹配的几步（第一步的宽松接受、第二步的本地目录搜索）一步都不会执行，文件就变成一张没绑定的卡。英文发布组 Judas 的文件名用的是自己起的简称，比如 `[Judas] Nama-Anaru - S01E08.mkv` 对应《学生会也有洞！》。本地目录不认识这些简称，弹弹play 的搜索认识。
+
+改动：
+- 解析器（`episodeParser.js`）：`番名 - S01E08`、`番名 S04E09 …` 这类写法，番名在 `SxxEyy` 前结束，去掉前面的横杠；年份保留（`Hunter x Hunter 2011` 靠它区分重制版）。`番名 S2 - 07` 末尾的 `S2` 不算番名。`[组] - 番名` 开头的分隔符去掉，开头的点保留（`.hack`）。用 1,874 个真实文件名和种子标题比对：只有带季号标记的名字结果变了，没有名字变成空。
+- 新增 `matchKeyword.ts`：关键词是番名，第二季起加上 `Season N`（go-api 读得懂这种写法，读不懂 `S3`）；番名里已经写了季的，不重复加。
+- `dandanClient.ts` 在请求里带上关键词；`importPipeline.js` 用代表文件的番名和季号拼出关键词，同一文件同一关键词只问一次。
+- go-api 新增一步（`internal/dandanplay/search_match.go`），在本地目录搜索落空后执行：
+  - 去掉季的写法和末尾年份后，用弹弹play 搜索，只保留季号对得上的候选；候选为零或超过 3 个就不回答。
+  - 每个候选只按弹弹play 给出的 AniList id / Bangumi id 在目录里找，不按标题猜。
+  - 任何一个候选加载失败或找不到，都不回答，因为它可能就是还没关联的新番；所有候选指向同一部番才算匹配。
+- go-api 弹弹play 搜索结果按关键词缓存：有结果 1 小时，空结果 10 分钟，出错不缓存。
+- go-api 第一步的宽松接受：除了番名相互包含，还要求季号一致。`我推的孩子 第二季` 包含 `我推的孩子`，以前会接受第一季。
+- go-api 第二步：
+  - 关键词末尾的年份不参与搜索，改为优先选当年开播的那一条。
+  - 只搜到一行时，也要过季号和匹配检查。以前一行就直接采用。
+- go-api `titlematch.LooselyMatchesKeyword`：拉丁字母的包含判断不能从一个词的中间开始或结束。以前 `Tensei shita`（另一部番的简称）被当成包含在 `Tensei Shitara Slime Datta Ken` 里，中文、日文照旧按字符包含。这个函数由第一步的宽松接受和第二步的目录搜索使用；以前库导入不带关键词，这两步遇不到这种情况。
+
+还没处理：分割放送第二部分按 `S01E13` 编号的文件，关键词里没有 part 信息，可能被绑到第一部分，和跨季连续编号是同一类问题。
+
+测试：
+- go-api：
+  - `search_match_test.go` 11 条：简称匹配、按季筛选且只请求那一季、两部不同的番不回答、一个候选找不到或加载失败不回答、同一部番的两个条目照常匹配、没有对应季的候选、候选过多、目录里找不到、不带关键词时不搜索、去掉季的写法。
+  - `keyword_year_test.go` 3 条；`client_test.go` 搜索缓存 4 条；`match_test.go` 宽松接受的季号 1 条；`seasonmatch_test.go` 单行判断 1 条；`titlematch_test.go` 词边界 6 条。
+  - 改实现之前先在旧代码上跑过，新增用例里描述新行为的那些都失败。
+  - `TestMatch_Phase2_CacheHit` 的测试数据补上了罗马音名：关键词 `Kaguya` 原来只能靠「一行直接采用」通过。
+  - `go test ./internal/dandanplay/ ./internal/queue/ ./internal/titlematch/` 与 `go vet ./...` 通过。
+- next-app：`episodeParser.test.js` 新增 10 条，`matchKeyword.test.ts` 5 条，`dandanClient.test.ts` 2 条，`importPipeline.matchKeyword.test.js` 3 条；`bun test` 全部通过。
+- 本机用这个分支的 go-api 接真实的弹弹play 实测：
+  - `[Judas] Nama-Anaru - S01E08.mkv` 不带关键词仍然匹配不上，带上关键词后匹配到 生徒会にも穴はある！。
+  - Judas 近期 27 个简称（按文件名里的季号拼关键词），在补齐目录数据后，20 个匹配正确，7 个不回答，没有匹配错的。
+  - 改词边界之前，`Tensei shita` 被第二步匹配到了史莱姆的剧场版。
+  - `Super no Ura de Yani Suu Futari 2026` 匹配到这部番。
+
 ### next-app：库文件夹的授权查询不再无限等待；失效的文件夹可以重新选择
 
 Chrome 158 对旧版 Chrome 存进 IndexedDB 的库文件夹句柄调用 `queryPermission()` 时，既不返回也不报错。库页面要先探测完每个文件夹才显示「继续看」「最近添加」，于是一直停在骨架屏；重新授权和播放库里的剧集也卡在同一个调用上。重新选一次同一个文件夹拿到的新句柄没有这个问题。

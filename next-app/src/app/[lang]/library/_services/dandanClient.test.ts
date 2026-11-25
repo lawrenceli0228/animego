@@ -384,3 +384,37 @@ describe("match — refusals", () => {
     expect(await createDandanClient().match(HASH, FILE)).toBeNull();
   });
 });
+
+describe("match — keyword", () => {
+  // Without a keyword go-api skips every title-based step: the loose phase-1
+  // gate, the anime_cache search and the dandanplay search. A file whose hash
+  // dandanplay has not indexed then cannot be placed at all.
+  test("★ the keyword rides in the request body", async () => {
+    // Arrange
+    const spy = jsonResponse({ matched: false });
+    globalThis.fetch = spy;
+
+    // Act
+    await createDandanClient().match(HASH, FILE, { keyword: "Nama-Anaru" });
+
+    // Assert
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string).keyword).toBe("Nama-Anaru");
+  });
+
+  test("no keyword, no field", async () => {
+    // Arrange
+    const spy = jsonResponse({ matched: false });
+    globalThis.fetch = spy;
+
+    // Act
+    await createDandanClient().match(HASH, FILE, { keyword: "  " });
+    await createDandanClient().match(HASH, FILE);
+
+    // Assert
+    for (const call of spy.mock.calls) {
+      const body = JSON.parse((call[1] as RequestInit).body as string);
+      expect("keyword" in body).toBe(false);
+    }
+  });
+});
