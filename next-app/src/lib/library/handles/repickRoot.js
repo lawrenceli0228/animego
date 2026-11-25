@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Replace a library's stored folder handle with one the user picks again.
 //
 // A handle saved by an older Chrome can stop answering queryPermission (see
