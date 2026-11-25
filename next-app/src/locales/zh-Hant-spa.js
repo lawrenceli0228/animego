@@ -1277,6 +1277,8 @@ const zhHant = {
     noSeries: '尚無系列 — 新增資料夾以開始。',
     downloadFolderHint: '建議選擇下載工具的預設儲存目錄；以後下載完成，媒體庫會自動發現新劇集。',
     fileMissing: '檔案丟失或未授權訪問',
+    repickMismatch: '選的不是庫資料夾「{{name}}」，沒有做任何改動。',
+    repickPrompt: '請選擇庫資料夾「{{name}}」',
     // 本地库打不开 / 升级被别的标签页挡住。渲染点 = LibraryDbAlert.tsx。
     // 另一份同义副本在 `lib/library/db/dbOpenErrors.js`(开发者 / Sentry 文本),
     // 故意不去重 —— 那个模块是数据层,不能 import t()。改这里就一起改那边。

@@ -1086,8 +1086,15 @@ function PlayerShellInner() {
   }, [seriesDetail.fileRefByEpisode]);
 
   const handleReauthorize = useCallback(async () => {
-    for (const libId of libraryIdsForReauth) {
-      await fileHandles.reauthorize(libId);
+    try {
+      for (const libId of libraryIdsForReauth) {
+        // A stale library re-picks its folder, which spends this click's
+        // activation; another picker in the same loop would be refused.
+        if (await fileHandles.reauthorize(libId)) break;
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[player] reauthorize failed:", err);
     }
     setDenialDetected(false);
     seriesDetail.refresh();

@@ -1221,6 +1221,8 @@ const en = {
     noSeries: 'No series yet — add a folder to get started.',
     downloadFolderHint: "Tip: choose your downloader's default save folder. Future completed downloads will be discovered automatically.",
     fileMissing: 'File not found or permission denied',
+    repickMismatch: 'That isn\'t the library folder “{{name}}”, so nothing was changed.',
+    repickPrompt: 'Pick the library folder “{{name}}”',
     // Rendered by LibraryDbAlert.tsx. A second, deliberately un-deduped copy
     // lives in lib/library/db/dbOpenErrors.js as developer / Sentry text — that
     // module is the data layer and must not import t(). Change both together.

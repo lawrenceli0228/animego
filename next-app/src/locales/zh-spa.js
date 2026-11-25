@@ -1278,6 +1278,8 @@ const zh = {
     noSeries: '尚无系列 — 添加文件夹以开始。',
     downloadFolderHint: '建议选择下载工具的默认保存目录；以后下载完成，媒体库会自动发现新剧集。',
     fileMissing: '文件丢失或未授权访问',
+    repickMismatch: '选的不是库文件夹「{{name}}」，没有做任何改动。',
+    repickPrompt: '请选择库文件夹「{{name}}」',
     // 本地库打不开 / 升级被别的标签页挡住。渲染点 = LibraryDbAlert.tsx。
     // 另一份同义副本在 `lib/library/db/dbOpenErrors.js`(开发者 / Sentry 文本),
     // 故意不去重 —— 那个模块是数据层,不能 import t()。改这里就一起改那边。

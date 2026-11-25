@@ -1210,6 +1210,8 @@ const en = {
     reauthorize: 'Reauthorize',
     noSeries: 'No series yet — add a folder to get started.',
     fileMissing: 'File not found or permission denied',
+    repickMismatch: 'That isn\'t the library folder “{{name}}”, so nothing was changed.',
+    repickPrompt: 'Pick the library folder “{{name}}”',
     refreshMeta: 'Update series info',
     refreshMetaProgress: 'Updating series info ({{done}}/{{total}})',
     refreshMetaDone: 'Updated {{changed}} of {{total}} series',

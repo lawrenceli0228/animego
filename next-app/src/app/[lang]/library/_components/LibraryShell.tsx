@@ -1263,7 +1263,10 @@ export function LibraryShell() {
     setAvailReauthorizing(true);
     try {
       for (const libId of reauthorizableLibIds) {
-        await reauthorizeHandle(libId);
+        // A stale library re-picks its folder, which spends this click's
+        // activation; any further picker in the same loop would be refused.
+        // The rest stay listed for the next click.
+        if (await reauthorizeHandle(libId)) break;
       }
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -1280,7 +1283,10 @@ export function LibraryShell() {
     if (rescanBusy) return;
     try {
       for (const libId of reauthorizableLibIds) {
-        await reauthorizeHandle(libId);
+        // A stale library re-picks its folder, which spends this click's
+        // activation; any further picker in the same loop would be refused.
+        // The rest stay listed for the next click.
+        if (await reauthorizeHandle(libId)) break;
       }
       await manualRescan();
     } catch (err) {
