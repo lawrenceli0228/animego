@@ -33,6 +33,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/titlematch"
 )
 
@@ -238,14 +239,17 @@ func looselyAccepted(combined *MatchResult, keyword string) bool {
 	return titlematch.ExtractMarker(combined.AnimeTitle).SameEntry(titlematch.ExtractMarker(keyword))
 }
 
-// tryPhase2 runs the AnimeCache keyword search and walks the
-// candidates in order, returning on the first candidate whose
-// dandanplay episodes resolve to a non-empty episodeMap.
+// tryPhase2 runs the AnimeCache keyword search and answers with the one
+// entry the keyword names, or not at all.
 //
-// Express's loop ran sequentially — each iteration depends on the
-// previous one missing.  We preserve that semantic to match
-// observable behaviour; parallelising would change which candidate
-// "wins" on a tie.
+// It used to walk the ranked rows and take the first whose episodes
+// resolved.  For a folder keyword that was usually right, but /match now
+// gets a keyword for every library import whose hash dandanplay has not
+// indexed, and a release group's short name can fit several shows: on the
+// live catalogue Judas's "Tensei shita" (Tensei Shita Daiseijo wa…) went
+// to Tensei Shitara Ken Deshita, the highest-scoring of three.  The library
+// writes the answer as a lasting binding, so an ambiguous keyword is a miss
+// (the dandanplay search step and the library's unmatched flow come next).
 func (h *Handlers) tryPhase2(ctx context.Context, req *MatchRequest) (matchResponse, bool) {
 	keyword, year := splitTrailingYear(req.Keyword)
 	cacheRows, err := h.searchAnimeCache(ctx, keyword)
@@ -254,53 +258,75 @@ func (h *Handlers) tryPhase2(ctx context.Context, req *MatchRequest) (matchRespo
 			"err", err, "keyword", req.Keyword)
 		return matchResponse{}, false
 	}
-	// Walk in ranked order, not index order.  The loop accepts the first
-	// candidate whose episodes resolve, and for a multi-season franchise
-	// EVERY season resolves episodes 1..n — so whichever row came back
-	// first silently won.  rankCacheRows drops rows whose season/part
-	// contradicts the keyword and orders the rest by title similarity,
-	// making the first-wins loop pick the entry the user actually has.
-	cacheRows = rankCacheRows(preferYear(cacheRows, year), keyword)
-	for i := range cacheRows {
-		row := cacheRows[i]
-		if row.BgmID == nil {
-			continue
-		}
-		epData, err := h.Client.FetchEpisodesByBgmID(ctx, *row.BgmID)
-		if err != nil {
-			slog.DebugContext(ctx, "dandanplay phase2 episodes fetch error",
-				"err", err, "bgmId", *row.BgmID)
-			continue
-		}
-		if epData == nil {
-			continue
-		}
-		episodeMap := BuildEpisodeMap(epData.Episodes, req.Episodes)
-		h.matchUnmappedFiles(ctx, episodeMap, req.Episodes, req.Files)
-		if len(episodeMap) == 0 {
-			continue
-		}
-		// Phase 2 hit — project the cache row twice: once into the
-		// shallow `anime` envelope and once into the full `siteAnime`
-		// (Express did the same; siteAnime gets the genres+studios
-		// enrichment, anime stays light).
-		siteAnime := h.pickSiteAnime(ctx, &row)
-		return matchResponse{
-			Matched: true,
-			Anime: phase2Anime{
-				AnilistID:     row.AnilistID,
-				TitleChinese:  row.TitleChinese,
-				TitleNative:   row.TitleNative,
-				TitleRomaji:   row.TitleRomaji,
-				CoverImageUrl: row.CoverImageUrl,
-				Episodes:      row.Episodes,
-			},
-			SiteAnime:  siteAnime,
-			EpisodeMap: episodeMap,
-			Source:     "animeCache",
-		}, true
+	// rankCacheRows drops rows whose season/part contradicts the keyword
+	// or whose titles do not match it, and orders the rest by similarity.
+	row, ok := soleAnswer(rankCacheRows(preferYear(cacheRows, year), keyword), keyword)
+	if !ok || row.BgmID == nil {
+		return matchResponse{}, false
 	}
-	return matchResponse{}, false
+	epData, err := h.Client.FetchEpisodesByBgmID(ctx, *row.BgmID)
+	if err != nil {
+		slog.DebugContext(ctx, "dandanplay phase2 episodes fetch error",
+			"err", err, "bgmId", *row.BgmID)
+		return matchResponse{}, false
+	}
+	if epData == nil {
+		return matchResponse{}, false
+	}
+	episodeMap := BuildEpisodeMap(epData.Episodes, req.Episodes)
+	h.matchUnmappedFiles(ctx, episodeMap, req.Episodes, req.Files)
+	if len(episodeMap) == 0 {
+		return matchResponse{}, false
+	}
+	// Phase 2 hit — project the cache row twice: once into the shallow
+	// `anime` envelope and once into the full `siteAnime` (Express did the
+	// same; siteAnime gets the genres+studios enrichment, anime stays light).
+	siteAnime := h.pickSiteAnime(ctx, &row)
+	return matchResponse{
+		Matched: true,
+		Anime: phase2Anime{
+			AnilistID:     row.AnilistID,
+			TitleChinese:  row.TitleChinese,
+			TitleNative:   row.TitleNative,
+			TitleRomaji:   row.TitleRomaji,
+			CoverImageUrl: row.CoverImageUrl,
+			Episodes:      row.Episodes,
+		},
+		SiteAnime:  siteAnime,
+		EpisodeMap: episodeMap,
+		Source:     "animeCache",
+	}, true
+}
+
+// soleAnswer picks the entry a keyword names among rows that already
+// cleared rankCacheRows: the only one, or — when several do — the only one
+// with a title equal to the keyword ("Sousou no Frieren" over "Sousou no
+// Frieren: Marumaru no Mahou").  Anything else is ambiguous.
+func soleAnswer(rows []dbgen.SearchAnimeCacheForDandanplayRow, keyword string) (dbgen.SearchAnimeCacheForDandanplayRow, bool) {
+	switch len(rows) {
+	case 0:
+		return dbgen.SearchAnimeCacheForDandanplayRow{}, false
+	case 1:
+		return rows[0], true
+	}
+	want := titlematch.LooseNormalize(keyword)
+	exact := -1
+	for i := range rows {
+		for _, t := range cacheRowTitles(&rows[i]) {
+			if titlematch.LooseNormalize(t) != want {
+				continue
+			}
+			if exact >= 0 {
+				return dbgen.SearchAnimeCacheForDandanplayRow{}, false
+			}
+			exact = i
+			break
+		}
+	}
+	if exact < 0 {
+		return dbgen.SearchAnimeCacheForDandanplayRow{}, false
+	}
+	return rows[exact], true
 }
 
 // tryPhase3 is the per-file hash-only fallback when neither Phase 1

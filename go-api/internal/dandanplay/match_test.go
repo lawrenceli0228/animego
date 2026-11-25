@@ -411,39 +411,55 @@ func TestMatch_Phase2_CacheHit(t *testing.T) {
 	assert.Contains(t, fmt.Sprint(site["genres"]), "Romance")
 }
 
-func TestMatch_Phase2_SkipsRowsWithoutBgmID(t *testing.T) {
-	bgmID := int32(555)
-	rows := []dbgen.SearchAnimeCacheForDandanplayRow{
-		{AnilistID: 1, BgmID: nil, TitleNative: strPtr("x")},    // skipped
-		{AnilistID: 2, BgmID: &bgmID, TitleNative: strPtr("x")}, // tried
-	}
+func TestMatch_Phase2_TheAnswerNeedsABgmID(t *testing.T) {
+	// The episodes come from bgm.tv; a sole answer without a bgm id cannot
+	// be fetched, and another row is not a substitute for it.
 	db := &fakeDB{
 		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
-			return rows, nil
+			return []dbgen.SearchAnimeCacheForDandanplayRow{
+				{AnilistID: 1, BgmID: nil, TitleNative: strPtr("x")},
+			}, nil
 		},
 	}
-	var episodesCalledFor int32
-	client := &fakeClient{
-		episodesBgmFn: func(_ context.Context, id int32) (*EpisodeData, error) {
-			episodesCalledFor = id
-			return makeEpisodeData(int64(id), "x"), nil
-		},
-	}
+	client := &fakeClient{}
 	h := newTestHandlers(db, client, nil)
-	rec := postMatch(t, h, MatchRequest{Keyword: "x", Episodes: []int{1}})
-	_ = unmarshalMatch(t, rec)
-	assert.Equal(t, int32(555), episodesCalledFor, "should skip nil-bgm row")
+	out := unmarshalMatch(t, postMatch(t, h, MatchRequest{Keyword: "x", Episodes: []int{1}}))
+	assert.False(t, isMatched(t, out))
+	assert.Equal(t, int32(0), client.episodesBgmCalls.Load())
 }
 
-func TestMatch_Phase2_CandidateMissesFallThrough(t *testing.T) {
-	// First candidate's episodes endpoint returns nil → continue.
-	// Second candidate succeeds.
+func TestMatch_Phase2_TwoEntriesWithTheSameTitleAreAMiss(t *testing.T) {
+	// Phase 2 used to take whichever row resolved first.  Two entries
+	// answering the keyword equally well is no answer at all.
 	bgmA := int32(1)
 	bgmB := int32(2)
-	rows := []dbgen.SearchAnimeCacheForDandanplayRow{
-		{AnilistID: 10, BgmID: &bgmA, TitleNative: strPtr("x")},
-		{AnilistID: 20, BgmID: &bgmB, TitleNative: strPtr("x")},
+	db := &fakeDB{
+		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
+			return []dbgen.SearchAnimeCacheForDandanplayRow{
+				{AnilistID: 10, BgmID: &bgmA, TitleNative: strPtr("x")},
+				{AnilistID: 20, BgmID: &bgmB, TitleNative: strPtr("x")},
+			}, nil
+		},
 	}
+	client := &fakeClient{
+		episodesBgmFn: func(_ context.Context, id int32) (*EpisodeData, error) {
+			return makeEpisodeData(int64(id), "x"), nil
+		},
+	}
+	h := newTestHandlers(db, client, nil)
+	out := unmarshalMatch(t, postMatch(t, h, MatchRequest{Keyword: "x", Episodes: []int{1}}))
+	assert.False(t, isMatched(t, out))
+	assert.Equal(t, int32(0), client.episodesBgmCalls.Load())
+}
+
+func romajiRow(anilistID, bgmID int32, romaji string) dbgen.SearchAnimeCacheForDandanplayRow {
+	return dbgen.SearchAnimeCacheForDandanplayRow{
+		AnilistID: anilistID, BgmID: i32Ptr(bgmID), TitleRomaji: strPtr(romaji), Episodes: i32Ptr(12),
+	}
+}
+
+func phase2Outcome(t *testing.T, rows []dbgen.SearchAnimeCacheForDandanplayRow, keyword string) (int32, *fakeClient) {
+	t.Helper()
 	db := &fakeDB{
 		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
 			return rows, nil
@@ -451,18 +467,45 @@ func TestMatch_Phase2_CandidateMissesFallThrough(t *testing.T) {
 	}
 	client := &fakeClient{
 		episodesBgmFn: func(_ context.Context, id int32) (*EpisodeData, error) {
-			if id == 1 {
-				return nil, nil // miss
-			}
 			return makeEpisodeData(int64(id), "x"), nil
 		},
 	}
-	h := newTestHandlers(db, client, nil)
-	rec := postMatch(t, h, MatchRequest{Keyword: "x", Episodes: []int{1}})
-	out := unmarshalMatch(t, rec)
-	var matched bool
-	require.NoError(t, json.Unmarshal(out["matched"], &matched))
-	assert.True(t, matched)
+	out := unmarshalMatch(t, postMatch(t, newTestHandlers(db, client, nil), MatchRequest{Keyword: keyword, Episodes: []int{1}}))
+	if !isMatched(t, out) {
+		return 0, client
+	}
+	return matchedAnilistID(t, out), client
+}
+
+func TestMatch_Phase2_AShortNameSeveralShowsAnswerIsAMiss(t *testing.T) {
+	// Judas's "Tensei shita" (Tensei Shita Daiseijo wa…) — on the live
+	// catalogue it went to Tensei Shitara Ken Deshita, which scored highest.
+	rows := []dbgen.SearchAnimeCacheForDandanplayRow{
+		romajiRow(139587, 1, "Tensei Shitara Ken Deshita"),
+		romajiRow(176191, 2, "Neko ni Tensei Shita Oji-san"),
+		romajiRow(187402, 3, "Tensei shita Dai Seijo wa, Seijo de Aru Koto wo Hita Kakusu"),
+	}
+	got, client := phase2Outcome(t, rows, "Tensei shita")
+	assert.Equal(t, int32(0), got)
+	assert.Equal(t, int32(0), client.episodesBgmCalls.Load())
+}
+
+func TestMatch_Phase2_AnExactTitleAnswersAmongSeveral(t *testing.T) {
+	rows := []dbgen.SearchAnimeCacheForDandanplayRow{
+		romajiRow(154587, 1, "Sousou no Frieren"),
+		romajiRow(170068, 2, "Sousou no Frieren: Marumaru no Mahou"),
+	}
+	got, _ := phase2Outcome(t, rows, "Sousou no Frieren")
+	assert.Equal(t, int32(154587), got)
+}
+
+func TestMatch_Phase2_TwoExactTitlesAreStillAMiss(t *testing.T) {
+	rows := []dbgen.SearchAnimeCacheForDandanplayRow{
+		romajiRow(1, 1, "Ranma 1/2"),
+		romajiRow(2, 2, "Ranma 1/2"),
+	}
+	got, _ := phase2Outcome(t, rows, "Ranma 1/2")
+	assert.Equal(t, int32(0), got)
 }
 
 // ─── Phase 3: per-file matching ────────────────────────────────────────────
@@ -1000,31 +1043,23 @@ func TestMatch_Phase2_CacheSearchError_FallsThrough(t *testing.T) {
 	assert.False(t, matched)
 }
 
-func TestMatch_Phase2_EpisodesFetchError_ContinuesToNext(t *testing.T) {
-	bgmA := int32(1)
-	bgmB := int32(2)
+func TestMatch_Phase2_EpisodesFetchErrorIsAMiss(t *testing.T) {
+	bgm := int32(1)
 	db := &fakeDB{
 		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
 			return []dbgen.SearchAnimeCacheForDandanplayRow{
-				{AnilistID: 10, BgmID: &bgmA, TitleNative: strPtr("x")},
-				{AnilistID: 20, BgmID: &bgmB, TitleNative: strPtr("x")},
+				{AnilistID: 10, BgmID: &bgm, TitleNative: strPtr("x")},
 			}, nil
 		},
 	}
 	client := &fakeClient{
-		episodesBgmFn: func(_ context.Context, id int32) (*EpisodeData, error) {
-			if id == 1 {
-				return nil, errors.New("upstream boom")
-			}
-			return makeEpisodeData(int64(id), "x"), nil
+		episodesBgmFn: func(_ context.Context, _ int32) (*EpisodeData, error) {
+			return nil, errors.New("upstream boom")
 		},
 	}
 	h := newTestHandlers(db, client, nil)
-	rec := postMatch(t, h, MatchRequest{Keyword: "x", Episodes: []int{1}})
-	out := unmarshalMatch(t, rec)
-	var matched bool
-	require.NoError(t, json.Unmarshal(out["matched"], &matched))
-	assert.True(t, matched, "second candidate should win")
+	out := unmarshalMatch(t, postMatch(t, h, MatchRequest{Keyword: "x", Episodes: []int{1}}))
+	assert.False(t, isMatched(t, out))
 }
 
 // ─── Phase 1 error paths ──────────────────────────────────────────────────
