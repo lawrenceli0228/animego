@@ -1276,6 +1276,8 @@ const zhHant = {
     reauthorize: '重新授權',
     noSeries: '尚無系列 — 新增資料夾以開始。',
     fileMissing: '檔案丟失或未授權訪問',
+    repickMismatch: '選的不是庫資料夾「{{name}}」，沒有做任何改動。',
+    repickPrompt: '請選擇庫資料夾「{{name}}」',
     refreshMeta: '更新番劇資訊',
     refreshMetaProgress: '更新番劇資訊 ({{done}}/{{total}})',
     refreshMetaDone: '已更新 {{changed}} / {{total}} 部番劇',

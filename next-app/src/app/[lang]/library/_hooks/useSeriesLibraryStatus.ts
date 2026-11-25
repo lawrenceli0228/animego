@@ -15,6 +15,7 @@ export type RootStatus =
   | "ready"
   | "disconnected"
   | "denied"
+  | "stale"
   | "error";
 
 export type SeriesAvailability = "ok" | "partial" | "offline" | "unknown";
@@ -108,7 +109,12 @@ export function useSeriesLibraryStatus({
     for (const libId of libs) {
       const st = libStatus.get(libId);
       if (st === "ready") anyOnline = true;
-      else if (st === "disconnected" || st === "denied" || st === "error")
+      else if (
+        st === "disconnected" ||
+        st === "denied" ||
+        st === "stale" ||
+        st === "error"
+      )
         anyOffline = true;
       // libraries we never probed (e.g. in-memory drop-zone "mem:" libraryIds)
       // don't move either flag — they'll stay 'unknown' below.

@@ -1264,6 +1264,8 @@ const zh = {
     reauthorize: '重新授权',
     noSeries: '尚无系列 — 添加文件夹以开始。',
     fileMissing: '文件丢失或未授权访问',
+    repickMismatch: '选的不是库文件夹「{{name}}」，没有做任何改动。',
+    repickPrompt: '请选择库文件夹「{{name}}」',
     refreshMeta: '更新番剧信息',
     refreshMetaProgress: '更新番剧信息 ({{done}}/{{total}})',
     refreshMetaDone: '已更新 {{changed}} / {{total}} 部番剧',

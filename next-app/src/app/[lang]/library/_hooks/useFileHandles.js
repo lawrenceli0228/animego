@@ -2,10 +2,13 @@
 // @ts-nocheck
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Sentry from '@sentry/nextjs';
+import toast from 'react-hot-toast';
+import { useLang } from '@/lib/lang-client';
 import { isFsaSupported } from '@/lib/library/handles/fsaFeatureCheck.js';
 import { ensurePermission } from '@/lib/library/handles/permissionGate.js';
 import { makeFileHandleStore } from '@/lib/library/handles/fileHandleStore.js';
 import { probeRootStatus } from '@/lib/library/handles/probeRoot.js';
+import { repickRoot, VERIFY_SAMPLE_SIZE } from '@/lib/library/handles/repickRoot.js';
 import { pickLargestSameExt } from '@/lib/library/enumerator.js';
 import { listSubtitlesNear as listNear } from '@/lib/subtitles/listNearby';
 
@@ -23,6 +26,11 @@ function isAbortError(err) {
   return Boolean(err) && typeof err === 'object' && err.name === 'AbortError';
 }
 
+// A stale handle is a browser fault, not something the user did, and it
+// recurs on every page load until the folder is picked again. One report per
+// page load is enough to count how many libraries are affected.
+let staleReported = false;
+
 /** @typedef {import('@/lib/library/types').HandleRecord} HandleRecord */
 /** @typedef {import('@/lib/library/handles/probeRoot.js').RootStatus} RootStatus */
 
@@ -36,7 +44,9 @@ function isAbortError(err) {
  * On mount: if FSA is supported, loads all persisted handles and probes each
  * one (read-only — never prompts for permission). Per-library status is
  * exposed via `libraryStatus` so the UI can distinguish 'disconnected'
- * (drive unplugged) from 'denied' (permission lost).
+ * (drive unplugged) from 'denied' (permission lost) and 'stale' (a stored
+ * handle the browser no longer answers for — only picking the folder again
+ * recovers it, which `reauthorize` does for such a library).
  *
  * @param {{ db: import('dexie').Dexie }} options
  * @returns {{
@@ -44,7 +54,7 @@ function isAbortError(err) {
  *   roots: HandleRecord[],
  *   libraryStatus: Map<string, RootStatus>,
  *   pickFolder(libraryId: string): Promise<HandleRecord|null>,
- *   reauthorize(libraryId: string): Promise<void>,
+ *   reauthorize(libraryId: string): Promise<import('@/lib/library/handles/repickRoot.js').RepickResult|void>,
  *   dropFolder(id: string): Promise<void>,
  *   selectFileByName(libraryId: string, relPath: string): Promise<File|null>,
  *   listSubtitlesNear(libraryId: string, relPath: string): Promise<{ file: File, relPath: string }[]>,
@@ -60,6 +70,17 @@ export function useFileHandles({ db }) {
   const [libraryStatus, setLibraryStatus] = useState(
     /** @type {Map<string, RootStatus>} */ (new Map()),
   );
+  // reauthorize reads this synchronously: the picker must open before any
+  // await, and it only opens for a library whose last probe came back stale.
+  const libraryStatusRef = useRef(/** @type {Map<string, RootStatus>} */ (new Map()));
+  // The folder name shown when asking the user to pick it again.
+  const rootsRef = useRef(/** @type {HandleRecord[]} */ ([]));
+  // A stale root keeps a probe pending for PERMISSION_QUERY_TIMEOUT_MS, so
+  // refreshes overlap (mount, post-scan, a re-pick's own refresh). Only the
+  // latest one may write, or an older probe of the replaced handle lands
+  // after the re-pick and marks the library stale again.
+  const refreshGenRef = useRef(0);
+  const { t } = useLang();
 
   // Lazily initialise the store once per db instance
   function getStore() {
@@ -71,6 +92,7 @@ export function useFileHandles({ db }) {
 
   /** Reload roots from IDB and re-classify each via a read-only probe. */
   const refresh = useCallback(async () => {
+    const gen = ++refreshGenRef.current;
     const store = getStore();
     const allRoots = await store.listRoots();
 
@@ -82,18 +104,33 @@ export function useFileHandles({ db }) {
         await probeRootStatus(rec.handle),
       ])),
     );
+    if (gen !== refreshGenRef.current) return;
     const newStatus = new Map(probes);
 
     let anyDenied = false;
+    let staleCount = 0;
     for (const [, st] of newStatus) {
       if (st === 'denied') anyDenied = true;
+      if (st === 'stale') staleCount += 1;
+    }
+    if (staleCount > 0 && !staleReported) {
+      staleReported = true;
+      Sentry.captureMessage('library: stored folder handle never answered queryPermission', {
+        level: 'warning',
+        extra: { staleCount, rootCount: allRoots.length },
+      });
     }
 
+    libraryStatusRef.current = newStatus;
+    rootsRef.current = allRoots;
     setRoots(allRoots);
     setLibraryStatus(newStatus);
     // Global status keeps its old contract: 'denied' when any handle is denied,
-    // otherwise 'ready'. Disconnected drives don't flip the global flag — the
-    // per-library `libraryStatus` map is the surface for that signal.
+    // otherwise 'ready'. Disconnected and stale roots don't flip the global
+    // flag — the per-library `libraryStatus` map is the surface for those.
+    // The player hides a series' episodes behind a global 'denied', and a
+    // stale library must not do that to a healthy one; playing from a stale
+    // library flips it through selectFileByName instead.
     setStatus(anyDenied ? 'denied' : 'ready');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db]);
@@ -143,12 +180,45 @@ export function useFileHandles({ db }) {
   }, [refresh]);
 
   /**
-   * Re-request permission for the handle associated with libraryId.
+   * Re-request permission for the handle associated with libraryId, or — when
+   * its last probe came back stale — open the picker and swap in the folder
+   * the user picks, if it is the same folder (see lib/library/handles/repickRoot).
    * @param {string} libraryId
-   * @returns {Promise<void>}
+   * @returns {Promise<import('@/lib/library/handles/repickRoot.js').RepickResult|void>}
    */
   const reauthorize = useCallback(async (libraryId) => {
     const store = getStore();
+    if (libraryStatusRef.current.get(libraryId) === 'stale') {
+      // requestPermission on a stale handle hangs like queryPermission does,
+      // so the only way back is picking the folder again. repickRoot opens
+      // the picker before its first await, inside this click's activation.
+      const name = rootsRef.current.find((r) => r.libraryId === libraryId)?.name ?? '';
+      const result = await repickRoot({
+        libraryId,
+        pick: () => {
+          // The picker has no title of its own; say which folder to pick.
+          toast(t('library.repickPrompt').replace('{{name}}', name));
+          return window.showDirectoryPicker();
+        },
+        findByLibrary: (id) => store.findByLibrary(id),
+        // Newest rows first (ULID ids sort by import time), skipping rows a
+        // re-import replaced: old episodes are the ones deleted after watching.
+        sampleRelPaths: async (id) => {
+          const refs = await db.fileRefs
+            .reverse()
+            .filter((r) => r.libraryId === id && !r.supersededAt && typeof r.relPath === 'string')
+            .limit(VERIFY_SAMPLE_SIZE)
+            .toArray();
+          return refs.map((r) => r.relPath);
+        },
+        saveRoot: (handle, id) => store.saveRoot(handle, id),
+      });
+      if (result.status === 'mismatch') {
+        toast.error(t('library.repickMismatch').replace('{{name}}', name));
+      }
+      await refresh();
+      return result;
+    }
     const rec = await store.findByLibrary(libraryId);
     if (!rec) return;
     // P6 verify: gesture-bound. ensurePermission() calls handle.requestPermission()
@@ -158,7 +228,7 @@ export function useFileHandles({ db }) {
     await ensurePermission(rec.handle);
     await refresh();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh]);
+  }, [refresh, db, t]);
 
   /**
    * Delete a persisted handle record by id.
@@ -190,6 +260,14 @@ export function useFileHandles({ db }) {
       // on first call after a stale grant — selectFileByName should be reached
       // from an onClick (e.g. play button) and not from a useEffect chain.
       const perm = await ensurePermission(rec.handle);
+      if (perm === 'stale') {
+        // Mark it so the reauthorize CTA this denial surfaces re-picks the
+        // folder instead of requesting permission on a handle that hangs.
+        const next = new Map(libraryStatusRef.current);
+        next.set(libraryId, 'stale');
+        libraryStatusRef.current = next;
+        setLibraryStatus(next);
+      }
       if (perm !== 'granted') {
         setStatus('denied');
         return null;
