@@ -281,6 +281,16 @@ func TestLooselyMatchesKeyword(t *testing.T) {
 		{"unrelated", "紫罗兰永恒花园", "无职转生", false},
 		{"empty title", "", "无职转生", false},
 		{"empty keyword", "无职转生", "", false},
+		// A Latin keyword must start and end on word boundaries. Judas names
+		// a show "Tensei shita"; its letters are a prefix of "Tensei Shitara
+		// Slime Datta Ken", which used to count as containing it and bound
+		// the file to the wrong show.
+		{"★ does not stop inside a Latin word", "Tensei Shitara Slime Datta Ken", "Tensei shita", false},
+		{"does not start inside a Latin word", "Anime Yasei no Sakebi", "nime Yasei no", false},
+		{"whole Latin words", "Tensei shita Dai Seijo wa, Seijo de Aru Koto wo Hita Kakusu", "Tensei shita", true},
+		{"words written together on one side", "Re:Zero kara Hajimeru Isekai Seikatsu", "ReZERO", true},
+		{"a number after a separator is a new word", "Kaguya-sama Season 2", "kaguya-sama season", true},
+		{"CJK runs on without a separator", "葬送的芙莉莲第二季", "葬送的芙莉莲", true},
 	}
 
 	for _, tc := range tests {

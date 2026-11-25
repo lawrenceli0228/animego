@@ -25,6 +25,7 @@ import { normalizeTokens } from '@/lib/library/normalize.js';
 import { batchOnDisk, dropCopiesWithin, relocateFileRef } from './fileRefCopies.js';
 import { folderOf, splitClusterByFolder } from './splitClusterByFolder.js';
 import { hashClustersInOrder } from './hashClustersInOrder.js';
+import { buildMatchKeyword } from './matchKeyword';
 // The one door in and out of `Series.anilistId`. Imported rather than
 // re-implemented: the guarantee that an automatic write can never stomp a
 // binding the user set by hand lives in that module, and an import is about as
@@ -882,7 +883,7 @@ function askOncePerFile(dandan) {
   const asked = new Map();
   return {
     match(hash16M, fileName, opts = {}) {
-      const key = JSON.stringify([hash16M, fileName, opts.fileSize ?? 0]);
+      const key = JSON.stringify([hash16M, fileName, opts.fileSize ?? 0, opts.keyword ?? '']);
       let pending = asked.get(key);
       if (!pending) {
         pending = Promise.resolve().then(() => dandan.match(hash16M, fileName, opts));
@@ -956,7 +957,10 @@ async function callDandan(dandan, rep) {
   const hash16M = rep.hash16M ?? '';
   const fileName = rep.fileName ?? '';
   const fileSize = rep.file?.size ?? 0;
-  const result = await dandan.match(hash16M, fileName, { fileSize });
+  // What go-api searches by when dandanplay has not indexed this hash —
+  // without it a release group's own name for a show never matches.
+  const keyword = buildMatchKeyword(rep.parsedTitle, rep.parsedSeason);
+  const result = await dandan.match(hash16M, fileName, { fileSize, keyword });
 
   if (!result) return { isAmbiguous: false };
 

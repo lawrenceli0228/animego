@@ -296,6 +296,31 @@ func TestMatch_Phase1_LooseMatchGate(t *testing.T) {
 	assert.True(t, matched, "loose match should be accepted; body=%s", rec.Body.String())
 }
 
+func TestMatch_Phase1_LooseMatchKeepsTheKeywordsSeason(t *testing.T) {
+	// The season-2 keyword contains the season-1 title, so containment alone
+	// would accept dandanplay's guess of season 1 — and the library now
+	// writes what /match answers as a lasting binding.
+	client := &fakeClient{
+		matchFn: func(_ context.Context, _, _ string, _ int64) (*MatchResult, error) {
+			return &MatchResult{IsMatched: false, AnimeID: 88, AnimeTitle: "我推的孩子"}, nil
+		},
+		episodesDanFn: func(_ context.Context, _ int64) (*EpisodeData, error) {
+			return makeEpisodeData(88, "我推的孩子"), nil
+		},
+	}
+	h := newTestHandlers(&fakeDB{}, client, nil)
+	rec := postMatch(t, h, MatchRequest{
+		FileName: "[Sub] 我推的孩子 第二季 - 03.mkv",
+		Keyword:  "我推的孩子 第二季",
+		Episodes: []int{3},
+	})
+	out := unmarshalMatch(t, rec)
+	var matched bool
+	require.NoError(t, json.Unmarshal(out["matched"], &matched))
+	assert.False(t, matched, "a season-1 guess must not answer a season-2 keyword; body=%s", rec.Body.String())
+	assert.Equal(t, int32(0), client.episodesDanCalls.Load())
+}
+
 func TestMatch_Phase1_LooseMatchRejectedWithoutKeyword(t *testing.T) {
 	client := &fakeClient{
 		matchFn: func(_ context.Context, _, _ string, _ int64) (*MatchResult, error) {
@@ -350,7 +375,10 @@ func TestMatch_Phase2_CacheHit(t *testing.T) {
 		BgmID:        &bgmID,
 		TitleChinese: strPtr("辉夜大小姐"),
 		TitleNative:  strPtr("かぐや様"),
-		Episodes:     i32Ptr(12),
+		// The romaji is what a Latin keyword is judged against; a lone row
+		// is ranked like any other (rankCacheRows).
+		TitleRomaji: strPtr("Kaguya-sama wa Kokurasetai"),
+		Episodes:    i32Ptr(12),
 	}
 	db := &fakeDB{
 		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {

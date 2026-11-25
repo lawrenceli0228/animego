@@ -49,6 +49,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -88,6 +89,17 @@ const (
 	// session while still letting a newly-indexed file be found in the
 	// same sitting.
 	matchMissTTL = 10 * time.Minute
+
+	// searchHitTTL / searchMissTTL bound the /api/v2/search/anime cache.
+	// /match searches by keyword whenever a file's hash and anime_cache
+	// both miss, so one library's worth of a show asks the same question
+	// once per cluster.  A hit is kept for an hour, not a day: the search
+	// step reads "only one entry answers this name" off the list, and a
+	// newly listed show must be able to make it ambiguous the same day.
+	// An empty answer gets matchMissTTL's ten minutes for the same reason
+	// a match miss does — "not listed yet" must not become "not today".
+	searchHitTTL  = time.Hour
+	searchMissTTL = matchMissTTL
 )
 
 // Retry policy constants.
@@ -109,6 +121,7 @@ type Client struct {
 	commentsCh *cache.Cache[CommentsResponse]
 	episodesCh *cache.Cache[EpisodeData]
 	matchCh    *cache.Cache[matchCacheEntry]
+	searchCh   *cache.Cache[[]DandanAnime]
 }
 
 // Option configures a Client at construction.
@@ -202,6 +215,19 @@ func NewClient(opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("dandanplay: match cache: %w", err)
 	}
 	c.matchCh = matchCh
+
+	// Keys are free text, like the match cache's: bounded by entry count
+	// (IgnoreInternalCost, cost 1 each), not by ristretto's byte estimate.
+	searchCh, err := cache.New[[]DandanAnime](cache.Config{
+		NumCounters:        1e5,
+		MaxCost:            2e4,
+		IgnoreInternalCost: true,
+		DefaultTTL:         searchHitTTL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("dandanplay: search cache: %w", err)
+	}
+	c.searchCh = searchCh
 	return c, nil
 }
 
@@ -216,6 +242,9 @@ func (c *Client) Close() {
 	}
 	if c.matchCh != nil {
 		c.matchCh.Close()
+	}
+	if c.searchCh != nil {
+		c.searchCh.Close()
 	}
 }
 
@@ -906,17 +935,24 @@ type searchEnvelope struct {
 // to 100 chars (matches Express's `.slice(0, 100)`).  Empty keyword
 // returns an empty slice without hitting the network.
 func (c *Client) SearchAnime(ctx context.Context, keyword string) ([]DandanAnime, error) {
-	keyword = trimMaxRunes(keyword, 100)
+	keyword = trimMaxRunes(strings.TrimSpace(keyword), 100)
 	if keyword == "" {
 		return []DandanAnime{}, nil
+	}
+	cacheKey := strings.ToLower(keyword)
+	if hit, ok := c.searchCh.Get(cacheKey); ok {
+		return hit, nil
 	}
 	path := "/api/v2/search/anime?keyword=" + url.QueryEscape(keyword)
 	var env searchEnvelope
 	ok, err := c.do(ctx, http.MethodGet, path, nil, &env)
 	if err != nil {
+		// Not cached: a failure says nothing about the answer.
 		return nil, err
 	}
 	if !ok {
+		c.searchCh.SetWithTTL(cacheKey, []DandanAnime{}, searchMissTTL)
+		c.searchCh.Wait()
 		return []DandanAnime{}, nil
 	}
 	out := make([]DandanAnime, 0, len(env.Animes))
@@ -929,6 +965,12 @@ func (c *Client) SearchAnime(ctx context.Context, keyword string) ([]DandanAnime
 			Episodes:      a.EpisodeCount,
 		})
 	}
+	if len(out) == 0 {
+		c.searchCh.SetWithTTL(cacheKey, out, searchMissTTL)
+	} else {
+		c.searchCh.Set(cacheKey, out)
+	}
+	c.searchCh.Wait()
 	return out, nil
 }
 

@@ -108,15 +108,39 @@ function tryStandardPath(filename) {
     .replace(/\b\d{3,4}[Pp]\b/g, '') // 720p, 1080P
     .replace(/\b(HEVC|AVC|x26[45]|H\.?26[45]|AAC|FLAC)\b/gi, '')
     .replace(/\b(WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay)\b/gi, '')
-    .trim();
+    .trim()
+    // `[Doomdos] - Title - S01E08`: the separator after the group tag. Not a
+    // dot: `.hack` starts with one.
+    .replace(/^[\s_-]+/, '');
+
+  // `Title - S01E08`, `Title S04E09 …`: the SxxEyy token ends the title, and
+  // the dash before it is not part of it. Checked first because the dash
+  // rule below needs a digit after " - " and the EP rule would stop at the E,
+  // leaving "- S01". A year before the token stays (`Hunter x Hunter 2011`):
+  // it is what tells a remake from the original.
+  const sxe = name.match(/^(.+?)[\s._-]*\bS\d{1,2}E\d{1,4}\b/i);
+  if (sxe) {
+    const title = sxe[1].replace(/[\s._-]+$/, '').trim();
+    if (title) return title;
+  }
 
   const dashMatch = name.match(/^(.+?)\s+-\s+\d+/);
-  if (dashMatch) return dashMatch[1].trim();
+  if (dashMatch) return dropSeasonToken(dashMatch[1]);
 
   const epMatch = name.match(/^(.+?)\s*EP?\s*\d+/i);
   if (epMatch) return epMatch[1].trim();
 
-  return name.replace(/\s+\d+\s*$/, '').trim() || null;
+  return dropSeasonToken(name.replace(/\s+\d+\s*$/, '')) || null;
+}
+
+/**
+ * Drop a trailing `S2` / `S04`: the season, which `parseSeason` reads on its
+ * own, not part of the title (`Ao Ashi S2 - 07`).
+ *
+ * @param {string} title
+ */
+function dropSeasonToken(title) {
+  return title.trim().replace(/\s+S\d{1,2}$/i, '').trim();
 }
 
 function tryBracketHeavy(filename) {

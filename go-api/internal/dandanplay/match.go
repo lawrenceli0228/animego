@@ -11,6 +11,10 @@
 //	Phase 2 — AnimeCache keyword search → per-candidate Bangumi
 //	          episodes fetch.  First candidate with a non-empty
 //	          episodeMap wins.
+//	        — then dandanplay's own search, for release-group names
+//	          anime_cache does not carry (search_match.go).  Answers only
+//	          when every candidate of the requested season links to one
+//	          AniList entry.
 //	Phase 3 — per-file matching with no anime context (last-ditch
 //	          fallback when neither dandanplay nor AnimeCache had a
 //	          hit).  Stricter accept gate — only isMatched=true rows.
@@ -28,6 +32,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/lawrenceli0228/animego/go-api/internal/titlematch"
 )
 
 // MatchRequest is the JSON body POST /api/dandanplay/match accepts.
@@ -136,6 +142,12 @@ func (h *Handlers) Match(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, resp)
 			return
 		}
+		// A release group's own name for the show, which anime_cache
+		// does not carry but dandanplay's search does (search_match.go).
+		if resp, ok := h.tryDandanSearch(ctx, &req); ok {
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
 	}
 
 	// Phase 3: per-file matching with no anime context.
@@ -177,8 +189,7 @@ func (h *Handlers) tryPhase1(ctx context.Context, req *MatchRequest) (matchRespo
 			"err", err, "fileName", req.FileName)
 		return matchResponse{}, false
 	}
-	accept := combined != nil && (combined.IsMatched ||
-		(combined.AnimeID != 0 && TitleLooselyMatchesKeyword(combined.AnimeTitle, req.Keyword)))
+	accept := combined != nil && (combined.IsMatched || looselyAccepted(combined, req.Keyword))
 	if !accept {
 		return matchResponse{}, false
 	}
@@ -216,6 +227,17 @@ func (h *Handlers) tryPhase1(ctx context.Context, req *MatchRequest) (matchRespo
 	}, true
 }
 
+// looselyAccepted is Phase 1's salvage for a hash dandanplay has not
+// indexed: its guess counts when the title loosely matches the keyword AND
+// names the same season.  Containment alone cannot see seasons when one
+// title runs into the other ("我推的孩子 第二季" contains "我推的孩子").
+func looselyAccepted(combined *MatchResult, keyword string) bool {
+	if combined.AnimeID == 0 || !TitleLooselyMatchesKeyword(combined.AnimeTitle, keyword) {
+		return false
+	}
+	return titlematch.ExtractMarker(combined.AnimeTitle).SameEntry(titlematch.ExtractMarker(keyword))
+}
+
 // tryPhase2 runs the AnimeCache keyword search and walks the
 // candidates in order, returning on the first candidate whose
 // dandanplay episodes resolve to a non-empty episodeMap.
@@ -225,7 +247,8 @@ func (h *Handlers) tryPhase1(ctx context.Context, req *MatchRequest) (matchRespo
 // observable behaviour; parallelising would change which candidate
 // "wins" on a tie.
 func (h *Handlers) tryPhase2(ctx context.Context, req *MatchRequest) (matchResponse, bool) {
-	cacheRows, err := h.searchAnimeCache(ctx, req.Keyword)
+	keyword, year := splitTrailingYear(req.Keyword)
+	cacheRows, err := h.searchAnimeCache(ctx, keyword)
 	if err != nil {
 		slog.WarnContext(ctx, "dandanplay phase2 cache search error",
 			"err", err, "keyword", req.Keyword)
@@ -237,7 +260,7 @@ func (h *Handlers) tryPhase2(ctx context.Context, req *MatchRequest) (matchRespo
 	// first silently won.  rankCacheRows drops rows whose season/part
 	// contradicts the keyword and orders the rest by title similarity,
 	// making the first-wins loop pick the entry the user actually has.
-	cacheRows = rankCacheRows(cacheRows, req.Keyword)
+	cacheRows = rankCacheRows(preferYear(cacheRows, year), keyword)
 	for i := range cacheRows {
 		row := cacheRows[i]
 		if row.BgmID == nil {

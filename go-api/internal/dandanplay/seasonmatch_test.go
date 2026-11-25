@@ -188,6 +188,22 @@ func TestRankCacheRowsDropsContradictorySeasons(t *testing.T) {
 	assert.Equal(t, int32(178789), got[0].AnilistID)
 }
 
+func TestRankCacheRowsJudgesALoneRowToo(t *testing.T) {
+	// One row is not one answer: a lone wrong-season or unrelated row used
+	// to come back untouched, and Phase 2 would take it.
+	rows := mushokuRows()
+
+	wrongSeason := rankCacheRows(rows[4:5], "无职转生 第二季 ～到了异世界就拿出真本事～")
+	assert.Empty(t, wrongSeason, "the only row is season 3; the query asks for season 2")
+
+	unrelated := rankCacheRows(rows[0:1], "Nekomoe kissaten")
+	assert.Empty(t, unrelated, "a fansub group's name is not this show")
+
+	same := rankCacheRows(rows[4:5], "无职转生 第三季 ～到了异世界就拿出真本事～")
+	require.Len(t, same, 1)
+	assert.Equal(t, int32(178789), same[0].AnilistID)
+}
+
 func TestRankCacheRowsIsDeterministicAndPreservesUnrankableInput(t *testing.T) {
 	rows := mushokuRows()
 
