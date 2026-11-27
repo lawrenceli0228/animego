@@ -5,8 +5,49 @@
   padding: 20px 12px 12px;
 }
 
-.heading {
+/* The heading and, once there is more than one row, the sort toggle. */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   padding: 0 8px;
+}
+
+/* 按时间 / 未看优先: text buttons in the top page's view-toggle style. */
+.sorts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sort {
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: rgba(235, 235, 245, 0.42);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    background-color 0.2s;
+}
+
+.sort[aria-pressed="true"] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sort:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 .list {
@@ -129,6 +170,10 @@
     background-color: rgba(255, 255, 255, 0.05);
   }
 
+  .sort:hover {
+    color: rgba(235, 235, 245, 0.75);
+  }
+
   .all:hover {
     opacity: 0.78;
   }
@@ -138,11 +183,16 @@
   .all {
     min-height: 44px;
   }
+
+  .sort {
+    height: 36px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .row,
-  .all {
+  .all,
+  .sort {
     transition-duration: 0.01ms;
   }
 }
