@@ -245,3 +245,27 @@ describe("parseAnimeKeyword — the title ends where the season-episode token st
     expect(meta.number).toBe(8);
   });
 });
+
+describe("a year is not an episode number", () => {
+  // heibaiSub writes the release year in brackets, which is where most
+  // groups put the episode: the movie was stored as episode 2026 and its
+  // progress push asked for episode 2026 of a 1-episode entry.
+  test("★ a bracketed year is skipped", () => {
+    expect(
+      parseEpisodeNumber("[heibaiSub] Boku no Kokoro no Yabai Yatsu Movie  [2026] [WEB-DL] [HEVC-8bit 1080P AAC][CHT].mp4"),
+    ).toBeNull();
+  });
+
+  test("the episode after a bracketed year is still read", () => {
+    expect(parseEpisodeNumber("[Group] Show [2026][03][1080p].mkv")).toBe(3);
+  });
+
+  test("a dashed year is skipped too", () => {
+    expect(parseEpisodeNumber("[Group] Show Movie - 2025 [1080p].mkv")).toBeNull();
+  });
+
+  test("long runners keep their four-digit episodes", () => {
+    expect(parseEpisodeNumber("[Group] One Piece - 1122 [1080p].mkv")).toBe(1122);
+    expect(parseEpisodeNumber("[Group] Detective Conan [1180][1080p].mkv")).toBe(1180);
+  });
+});
