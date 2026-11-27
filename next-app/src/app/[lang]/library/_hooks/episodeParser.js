@@ -65,12 +65,24 @@ const EPISODE_NUMBER_PATTERNS = [
  * @param {string} filename
  * @returns {{ number: number, origin: string } | null}
  */
+/**
+ * A release year: heibaiSub writes `[2026]` where most groups write the
+ * episode. Episode numbers this high do not exist (the longest-running TV
+ * anime are in the low thousands), so the range is safe to refuse.
+ *
+ * @param {number} num
+ */
+function isYear(num) {
+  return num >= 1960 && num <= 2099;
+}
+
 function matchEpisodeNumber(filename) {
   for (const { origin, re } of EPISODE_NUMBER_PATTERNS) {
-    const m = filename.match(re);
-    if (m) {
+    // Every match of the pattern, not just the first: `[2026][03]` holds the
+    // year first and the episode second.
+    for (const m of filename.matchAll(new RegExp(re.source, re.flags + 'g'))) {
       const num = parseInt(m[1], 10);
-      if (RESOLUTIONS.has(num)) continue;
+      if (RESOLUTIONS.has(num) || isYear(num)) continue;
       return { number: num, origin };
     }
   }
