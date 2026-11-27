@@ -96,6 +96,7 @@ export function normalizeEpisodeNumbers(
   episodes: readonly GridEpisodeRow[] | null | undefined,
   groupTotal: number | null | undefined,
   absoluteOffset?: number | null,
+  ruleOffsets?: readonly number[],
 ): Map<string, number> {
   const rows = episodes ?? [];
   const out = new Map<string, number>();
@@ -142,6 +143,21 @@ export function normalizeEpisodeNumbers(
   // the identical decision about the identical files before it pushes them,
   // and two copies of a rule this quiet drift without anything failing — the
   // grid would render episode 10 while the push sent 38.
+  // anime-relations' curated shifts come first, as in the watch push: a cour
+  // numbered on from the one before (San no Shou Part 2 as 13–25) is placed
+  // by its rule even where the walked offset (60) cannot. Only a shift that
+  // actually moved something decides; otherwise everything below is as it was.
+  if (ruleOffsets && ruleOffsets.length > 0) {
+    const byRule = toSiteNumbers(numbers, total, undefined, ruleOffsets);
+    if ([...byRule].some(([n, site]) => n !== site)) {
+      for (const row of mains) {
+        const n = episodeNumberOf(row) as number;
+        out.set(row.id, byRule.get(n) ?? n);
+      }
+      return out;
+    }
+  }
+
   const measured = readEpisodeOffset(absoluteOffset);
   if (measured !== undefined) {
     const siteOf = toSiteNumbers(numbers, total, measured);
@@ -214,6 +230,7 @@ export function buildEpisodeNavNumbers(
   groupTotal: number | null | undefined,
   isPlayable: (kind: string | null | undefined) => boolean = () => true,
   absoluteOffset?: number | null,
+  ruleOffsets?: readonly number[],
 ): EpisodeNavModel {
   const rows = (episodes ?? []).filter(
     (row): row is GridEpisodeRow =>
@@ -223,7 +240,7 @@ export function buildEpisodeNavNumbers(
       episodeNumberOf(row) !== undefined &&
       isPlayable(row.kind),
   );
-  const displayNumbers = normalizeEpisodeNumbers(episodes, groupTotal, absoluteOffset);
+  const displayNumbers = normalizeEpisodeNumbers(episodes, groupTotal, absoluteOffset, ruleOffsets);
 
   const owner = new Map<number, GridEpisodeRow>();
   for (const row of rows) {
@@ -315,11 +332,12 @@ export function buildGridCells(
   episodes: readonly GridEpisodeRow[] | null | undefined,
   groupTotal: number | null | undefined,
   absoluteOffset?: number | null,
+  ruleOffsets?: readonly number[],
 ): EpisodeGridModel {
   const rows = (episodes ?? []).filter(
     (row): row is GridEpisodeRow => !!row && typeof row.id === "string" && !!row.id,
   );
-  const displayNumbers = normalizeEpisodeNumbers(rows, groupTotal, absoluteOffset);
+  const displayNumbers = normalizeEpisodeNumbers(rows, groupTotal, absoluteOffset, ruleOffsets);
 
   const total = positiveTotal(groupTotal);
   const inferred = total === undefined;

@@ -41,6 +41,40 @@ export function readEpisodeOffset(value: unknown): number | undefined {
 }
 
 /**
+ * anime-relations' shifts for a series, or `undefined` when none were
+ * fetched. `[]` is a known answer — the curated file has no rule — and is
+ * kept apart from undefined for the same reason as 0 is from undefined above:
+ * the backfill sweep re-asks only for undefined.
+ *
+ * Non-integers and zero are dropped (a zero shift moves nothing); order is
+ * kept, since the first shift that fits wins.
+ */
+export function readRuleOffsets(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: number[] = [];
+  for (const v of value) {
+    if (typeof v === "number" && Number.isInteger(v) && v !== 0 && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Does a curated rule shift describe these files?
+ *
+ * Stricter than `offsetApplies` in one way: some number must lie OUTSIDE the
+ * season. A rule shift is small — 12 for a second cour — so a set already
+ * inside 1..total fits it too, and there the stored numbers are the safe
+ * reading: a lone "13" on a 13-episode cour may be its own finale.
+ */
+function ruleShiftApplies(numbers: readonly number[], total: number, shift: number): boolean {
+  if (!numbers.some((n) => n < 1 || n > total)) return false;
+  return numbers.every((n) => {
+    const site = n - shift;
+    return site >= 1 && site <= total;
+  });
+}
+
+/**
  * Does this offset actually describe these files?
  *
  * The server knows the franchise; only the caller knows what is on disk, and
@@ -85,6 +119,14 @@ export function offsetApplies(
  * seasons on one card look exactly like this, and which file is episode 1 is
  * not knowable here.
  *
+ * RULE SHIFTS FIRST. `ruleOffsets` are anime-relations' curated shifts for
+ * the series (see `readRuleOffsets`). The walked offset sums every earlier
+ * season, which is the numbering of some release groups and not of others:
+ * San no Shou Part 2 ships as 13–25 (shift 12) while the walk says 60. The
+ * first rule shift that moves every number into the season, when some number
+ * lies outside it, is used for the whole set; otherwise the walked offset
+ * decides as before.
+ *
  * Both the grid and the watch push call this with the numbers they hold, so
  * the rule is stated once and the two cannot drift apart.
  */
@@ -92,11 +134,19 @@ export function toSiteNumbers(
   numbers: readonly number[],
   total: number | undefined,
   offset: number | undefined,
+  ruleOffsets?: readonly number[],
 ): Map<number, number> {
   const distinct = [...new Set(numbers)];
   const out = new Map(distinct.map((n) => [n, n] as const));
-  if (offset === undefined || offset <= 0) return out;
   if (typeof total !== "number" || !Number.isInteger(total) || total <= 0) return out;
+  if (distinct.length > 0) {
+    for (const shift of ruleOffsets ?? []) {
+      if (!ruleShiftApplies(distinct, total, shift)) continue;
+      for (const n of distinct) out.set(n, n - shift);
+      return out;
+    }
+  }
+  if (offset === undefined || offset <= 0) return out;
 
   if (offsetApplies(distinct, total, offset)) {
     for (const n of distinct) out.set(n, n - offset);

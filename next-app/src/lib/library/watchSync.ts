@@ -131,7 +131,7 @@ import { authFetch } from "@/lib/authFetch";
 import { parseWatchedSnapshot } from "@/components/anime/watchedEpisodeState";
 import { readBinding } from "./animeBinding";
 import { resolveWatchedEpisodes } from "./watchHighWater";
-import { readEpisodeOffset, toSiteNumbers } from "./episodeOffset";
+import { readEpisodeOffset, readRuleOffsets, toSiteNumbers } from "./episodeOffset";
 
 // ─── Row shapes (structural, so tests can hand in plain objects) ────────────
 
@@ -184,6 +184,12 @@ export interface WatchSyncSeries {
    * describing these files and must not be applied.
    */
   readonly totalEpisodes?: number | null;
+  /**
+   * anime-relations' shifts for this season, written next to
+   * `episodeOffset`. Read through `readRuleOffsets`. See
+   * `lib/library/episodeOffset`.
+   */
+  readonly episodeRuleOffsets?: readonly number[] | null;
 }
 
 /** The `Progress` fields this module reads. */
@@ -486,6 +492,8 @@ export function decidePush(input: {
   readonly episodeOffset?: number;
   /** `Series.totalEpisodes` — the upper bound an offset is checked against. */
   readonly totalEpisodes?: number;
+  /** anime-relations' shifts, tried before `episodeOffset`. */
+  readonly ruleOffsets?: readonly number[];
 }): PushPlan {
   // First, because a merged-in source can carry a stale binding of its own and
   // pushing it would write another show's progress.
@@ -515,7 +523,7 @@ export function decidePush(input: {
   //
   // A number the offset does not apply to maps to itself — the same answer
   // the grid gives by rendering the stored number.
-  const siteOf = toSiteNumbers(watched, input.totalEpisodes, input.episodeOffset);
+  const siteOf = toSiteNumbers(watched, input.totalEpisodes, input.episodeOffset, input.ruleOffsets);
   const site = episodes.map((n) => siteOf.get(n) ?? n);
 
   return { push: true, anilistId, episodes, siteEpisodes: site };
@@ -1505,6 +1513,7 @@ async function planPush(
     // is the root's and so is everything it is compared against.
     episodeOffset: readEpisodeOffset(seriesRow?.episodeOffset),
     totalEpisodes: readEpisodeOffset(seriesRow?.totalEpisodes),
+    ruleOffsets: readRuleOffsets(seriesRow?.episodeRuleOffsets),
   };
   const synced = readSyncedEpisodes(seriesRow);
   const plan = decidePush({ ...base, synced });

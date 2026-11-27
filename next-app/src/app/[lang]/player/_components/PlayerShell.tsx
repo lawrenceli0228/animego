@@ -873,8 +873,14 @@ function PlayerShellInner() {
         seriesDetail.episodes,
         seriesDetail.groupTotal,
         seriesDetail.episodeOffset,
+        seriesDetail.episodeRuleOffsets,
       ),
-    [seriesDetail.episodes, seriesDetail.groupTotal, seriesDetail.episodeOffset],
+    [
+      seriesDetail.episodes,
+      seriesDetail.groupTotal,
+      seriesDetail.episodeOffset,
+      seriesDetail.episodeRuleOffsets,
+    ],
   );
 
   const episodeNav = useMemo(
@@ -886,6 +892,7 @@ function PlayerShellInner() {
         seriesDetail.groupTotal,
         isWatchableKind,
         seriesDetail.episodeOffset,
+        seriesDetail.episodeRuleOffsets,
       ),
     [locationSeriesId, seriesDetail.status, seriesDetail.episodes, seriesDetail.groupTotal],
   );

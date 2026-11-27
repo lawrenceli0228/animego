@@ -17,7 +17,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useLocaleRouter } from "@/components/ui/LocaleLink";
-import { readEpisodeOffset } from "@/lib/library/episodeOffset";
+import { readEpisodeOffset, readRuleOffsets } from "@/lib/library/episodeOffset";
 import toast from "react-hot-toast";
 import { motion, useReducedMotion } from "motion/react";
 
@@ -77,6 +77,11 @@ import {
   type EpisodeOffsetDb,
   type OffsetBackfillSeriesRow,
 } from "../_services/episodeOffsetBackfill";
+import {
+  backfillEpisodeRuleOffsets,
+  type RuleOffsetDb,
+  type RuleOffsetBackfillSeriesRow,
+} from "../_services/episodeRuleOffsetBackfill";
 import {
   bindUnboundSeries,
   type SweepSeriesRow,
@@ -683,8 +688,8 @@ export function LibraryShell() {
   //     the library would appear to do nothing at all.
   const bindSweepRef = useRef(false);
   const reconcileRearmedRef = useRef(false);
-  // Three independent sweeps write Series rows on mount — the binding sweep,
-  // the episode-offset backfill and the duplicate merge — and ALL of them have
+  // Four independent sweeps write Series rows on mount — the binding sweep,
+  // the episode-offset and rule-offset backfills and the duplicate merge — and ALL of them have
   // to land before reconciliation is worth re-running. Letting each re-arm on its own finish doubled the
   // reconciles: #105's own spec caught it going from 2 pushes to 4, because a
   // second reconcile starting while the first one's push is still in flight
@@ -694,7 +699,7 @@ export function LibraryShell() {
   // written. Failures count as done — a sweep that threw is never going to
   // arrive, and letting it hold the gate shut would strand the other sweep's
   // writes until the next visit, which is the bug this whole mechanism is for.
-  const SWEEP_COUNT = 3;
+  const SWEEP_COUNT = 4;
   const sweepsSettledRef = useRef(0);
   const sweepWroteRef = useRef(false);
   const noteSweepSettled = useCallback((wrote: boolean) => {
@@ -798,6 +803,30 @@ export function LibraryShell() {
       })
       .finally(() => {
         offsetBackfillBusyRef.current = false;
+      });
+  }, [loading, allSeries, noteSweepSettled]);
+
+  // anime-relations' shifts (`episodeRuleOffsets`), a third sweep on the same
+  // endpoint. Separate again because the candidate set differs: every series
+  // already in a library lacks the new field, offset or not. Settles through
+  // the coordinator so the reconcile pushes with the shifts it just wrote —
+  // San no Shou Part 2 pushed 13–25 and took a 400 until it had them.
+  const ruleOffsetBackfillBusyRef = useRef(false);
+  useEffect(() => {
+    if (loading || allSeries.length === 0) return;
+    if (ruleOffsetBackfillBusyRef.current) return;
+    ruleOffsetBackfillBusyRef.current = true;
+    void backfillEpisodeRuleOffsets({
+      db: db as unknown as RuleOffsetDb,
+      series: allSeries as RuleOffsetBackfillSeriesRow[],
+    })
+      .then((summary) => noteSweepSettled(summary.written > 0))
+      .catch((err: unknown) => {
+        noteSweepSettled(false);
+        console.warn("[library] rule-offset backfill failed:", err);
+      })
+      .finally(() => {
+        ruleOffsetBackfillBusyRef.current = false;
       });
   }, [loading, allSeries, noteSweepSettled]);
 
@@ -1773,6 +1802,9 @@ export function LibraryShell() {
               // whose offset was never measured.
               episodeOffset={readEpisodeOffset(
                 (target as { episodeOffset?: unknown }).episodeOffset,
+              )}
+              episodeRuleOffsets={readRuleOffsets(
+                (target as { episodeRuleOffsets?: unknown }).episodeRuleOffsets,
               )}
               onClose={() => setDetailSeriesId(null)}
               onPickEpisode={handlePickEpisode}

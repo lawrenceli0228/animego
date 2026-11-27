@@ -488,3 +488,32 @@ describe("the sheet and the player show the same number for the same episode", (
     expect(nav.displayByRaw.size).toBe(nav.rawByDisplay.size);
   });
 });
+
+describe("anime-relations rule shifts", () => {
+  // San no Shou Part 2 (13 episodes) ships as 13–25. The walked offset (60)
+  // cannot place it; the curated rule's shift (12) can.
+  const part2 = run("p2-", 13, 25);
+
+  test("★ a rule shift places the cour where the walked offset cannot", () => {
+    const map = normalizeEpisodeNumbers(part2, 13, 60, [12]);
+    expect(map.get("p2-13")).toBe(1);
+    expect(map.get("p2-25")).toBe(13);
+  });
+
+  test("the grid and the navigation numbers follow it", () => {
+    const model = buildGridCells(part2, 13, 60, [12]);
+    expect(model.cells.every((c) => c.episode !== null)).toBe(true);
+    const nav = buildEpisodeNavNumbers(part2, 13, () => true, 60, [12]);
+    expect(nav.displayByRaw.get(25)).toBe(13);
+    expect(nav.numbers).toEqual(Array.from({ length: 13 }, (_, i) => i + 1));
+  });
+
+  test("a shift that does not fit leaves the old reading in charge", () => {
+    // Without a measured offset the grid reads as before: here the lowest
+    // number is inside the season, so it infers nothing.
+    const map = normalizeEpisodeNumbers(part2, 13, undefined, [99]);
+    expect(map.get("p2-13")).toBe(normalizeEpisodeNumbers(part2, 13).get("p2-13"));
+    // With one, the measured offset decides as before.
+    expect(normalizeEpisodeNumbers(run("x-", 61, 73), 13, 60, [12]).get("x-61")).toBe(1);
+  });
+});

@@ -39,6 +39,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/admin"
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
+	"github.com/lawrenceli0228/animego/go-api/internal/animerelations"
 	"github.com/lawrenceli0228/animego/go-api/internal/auth"
 	"github.com/lawrenceli0228/animego/go-api/internal/avatars"
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
@@ -892,7 +893,7 @@ func main() {
 		// Batch form of /{anilistId}/episode-offset, for the library backfill.
 		// A fixed segment, so it must be registered outside the /{anilistId}
 		// group to avoid being read as an id.
-		r.Get("/episode-offsets", anime.EpisodeOffsets(q))
+		r.Get("/episode-offsets", anime.EpisodeOffsets(q, animerelations.Default()))
 		// Catalogue enumeration for next-app's sitemap. Another fixed
 		// segment sharing the subtree with /{anilistId}.
 		r.Get("/sitemap", anime.SitemapShard(q))
@@ -902,7 +903,7 @@ func main() {
 		// the same reason /watchers is: chi resolves the more specific
 		// pattern first, and a two-segment route added after the catch-all
 		// would never be reached.
-		r.Get("/{anilistId}/episode-offset", anime.EpisodeOffset(q))
+		r.Get("/{anilistId}/episode-offset", anime.EpisodeOffset(q, animerelations.Default()))
 		// The detail tabs' full lists, past the 25 /{anilistId} carries.
 		// Two segments, like /watchers above.
 		r.Get("/{anilistId}/characters", creditListsSvc.Characters())
