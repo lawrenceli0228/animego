@@ -47,6 +47,7 @@
 // sweep runs beside it rather than inside it — and `watchSync.ts` restates that
 // half of the rule at its own injection point.
 
+import { backfillEpisodeRuleOffsets, type RuleOffsetDb } from "./episodeRuleOffsetBackfill";
 import { pickBestHit } from "@/lib/seasonMatch";
 import {
   readBinding,
@@ -435,6 +436,13 @@ export async function resolveSeriesBinding(
   // already-bound library never reaches here. Whatever this misses stays on
   // the inference until the series is re-resolved.
   await persistEpisodeOffset(db, seriesId, await fetchEpisodeOffset(anilistId));
+  // anime-relations' shifts for the same season. Through the batch sweep's
+  // own request and writer so the two stay one rule; a failure here leaves
+  // the field absent, which the mount sweep picks up.
+  await backfillEpisodeRuleOffsets({
+    db: db as unknown as RuleOffsetDb,
+    series: [{ id: seriesId, anilistId }],
+  });
   return {
     anilistId,
     outcome: bound ? "existing" : "resolved",

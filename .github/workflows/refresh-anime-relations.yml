@@ -1,0 +1,83 @@
+name: Refresh anime-relations
+
+# Re-vendors erengy/anime-relations (go-api/internal/animerelations/
+# anime-relations.txt): the hand-curated record of how release groups number
+# a season's episodes when they carry on from the season or cour before.  The
+# library uses its shifts to place those files and to push their progress —
+# Enen no Shouboutai: San no Shou Part 2 ships as "S3 - 13" … "25" though the
+# entry runs 1–13.  See internal/animerelations for how the file is read.
+#
+# The file is in the public domain (CC0), so it is vendored verbatim.
+#
+# Why a vendored file + weekly PR instead of fetching at runtime?  The same
+# reasons as refresh-bgm-map.yml: the binary embeds it (no VPS→GitHub
+# egress, the origin is locked to Cloudflare), and every refresh is a diff
+# that can be read and rolled back.
+
+on:
+  schedule:
+    # Mondays 03:30 UTC, after the id-map refresh.
+    - cron: "30 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-anime-relations
+  cancel-in-progress: true
+
+# See refresh-bgm-map.yml: opening the PR also needs the repository setting
+# "Allow GitHub Actions to create and approve pull requests".
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Re-vendor + open PR if changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go-api/go.mod
+
+      - name: Download the upstream file
+        run: |
+          curl --fail --silent --show-error --location --max-time 60 \
+            https://raw.githubusercontent.com/erengy/anime-relations/master/anime-relations.txt \
+            -o go-api/internal/animerelations/anime-relations.txt
+
+      # A PR opened with GITHUB_TOKEN triggers no workflows, so the unit-test
+      # gate never sees this file.  Parse it here: a format change upstream
+      # should fail this job, not ship a file the server cannot read.
+      - name: Check the new file parses
+        working-directory: go-api
+        run: go test -count=1 ./internal/animerelations/
+
+      - name: Describe the change
+        run: |
+          f=go-api/internal/animerelations/anime-relations.txt
+          {
+            echo "Re-vendors [erengy/anime-relations](https://github.com/erengy/anime-relations) (CC0)."
+            echo
+            echo "- upstream \`last_modified\`: $(grep -m1 'last_modified:' "$f" | sed 's/.*last_modified:[[:space:]]*//')"
+            echo "- rules: $(grep -c '^- [0-9?]' "$f")"
+            echo
+            echo '```diff'
+            git diff --unified=0 -- "$f" | grep -E '^[-+]- ' | head -200 || true
+            echo '```'
+          } > "$RUNNER_TEMP/anime-relations-report.md"
+
+      - name: Open PR if the file changed
+        uses: peter-evans/create-pull-request@v8
+        with:
+          add-paths: |
+            go-api/internal/animerelations/anime-relations.txt
+          branch: chore/refresh-anime-relations
+          commit-message: "chore(library): refresh anime-relations"
+          title: "chore(library): refresh anime-relations"
+          body-path: ${{ runner.temp }}/anime-relations-report.md
+          delete-branch: true

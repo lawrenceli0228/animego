@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from "react";
 import { resolveMergedSeriesIds } from "../_services/resolveMergedIds";
 import { buildGroupTotals } from "../_services/seriesGroups";
 import { alternateFileIdsOf } from "../_services/otherVersions";
-import { readEpisodeOffset } from "@/lib/library/episodeOffset";
+import { readEpisodeOffset, readRuleOffsets } from "@/lib/library/episodeOffset";
 import type Dexie from "dexie";
 
 // Types are JSDoc only on the JS side — mirror them in TS-friendly form.
@@ -120,6 +120,11 @@ export interface UseSeriesDetailResult {
    * undefined leaves it inferring one. See `lib/library/episodeOffset`.
    */
   episodeOffset: number | undefined;
+  /**
+   * anime-relations' shifts for the root series (`Series.episodeRuleOffsets`),
+   * tried before `episodeOffset`. See `lib/library/episodeOffset`.
+   */
+  episodeRuleOffsets: number[] | undefined;
   getFile: (episodeId: string) => Promise<File | null>;
   /** The file behind one FileRef on this card — a primary or an alternate. */
   getFileByRef: (fileRefId: string) => Promise<File | null>;
@@ -145,6 +150,7 @@ export function useSeriesDetail(
   );
   const [groupTotal, setGroupTotal] = useState<number | undefined>(undefined);
   const [episodeOffset, setEpisodeOffset] = useState<number | undefined>(undefined);
+  const [episodeRuleOffsets, setEpisodeRuleOffsets] = useState<number[] | undefined>(undefined);
   const [tick, setTick] = useState(0);
 
   const refresh = useCallback(() => {
@@ -160,6 +166,7 @@ export function useSeriesDetail(
       setFileRefById(new Map());
       setGroupTotal(undefined);
       setEpisodeOffset(undefined);
+      setEpisodeRuleOffsets(undefined);
       return;
     }
 
@@ -184,7 +191,9 @@ export function useSeriesDetail(
           setFileRefById(new Map());
           setGroupTotal(undefined);
           setEpisodeOffset(undefined);
+          setEpisodeRuleOffsets(undefined);
       setEpisodeOffset(undefined);
+      setEpisodeRuleOffsets(undefined);
           return;
         }
 
@@ -266,13 +275,11 @@ export function useSeriesDetail(
         // The ROOT's offset, matching where the total above comes from. A soft
         // merge leaves each member its own rows, so reading any other member
         // would describe a different season.
-        setEpisodeOffset(
-          readEpisodeOffset(
-            (memberSeries as { id?: string; episodeOffset?: unknown }[]).find(
-              (row) => row?.id === rootSeriesId,
-            )?.episodeOffset,
-          ),
-        );
+        const rootRow = (
+          memberSeries as { id?: string; episodeOffset?: unknown; episodeRuleOffsets?: unknown }[]
+        ).find((row) => row?.id === rootSeriesId);
+        setEpisodeOffset(readEpisodeOffset(rootRow?.episodeOffset));
+        setEpisodeRuleOffsets(readRuleOffsets(rootRow?.episodeRuleOffsets));
         setStatus("ready");
       } catch {
         if (!cancelled) {
@@ -325,6 +332,7 @@ export function useSeriesDetail(
     fileRefById,
     groupTotal,
     episodeOffset,
+    episodeRuleOffsets,
     getFile,
     getFileByRef,
     refresh,

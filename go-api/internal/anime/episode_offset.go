@@ -50,6 +50,18 @@ import (
 type episodeOffsetResponse struct {
 	Known  bool  `json:"known"`
 	Offset int32 `json:"offset"`
+	// RuleOffsets are anime-relations' shifts for this entry (see
+	// internal/animerelations): the numbering release groups actually use
+	// when it differs from the franchise-wide walk above — San no Shou Part
+	// 2 ships as 13–25, a shift of 12, while the walk answers 60.  Absent
+	// when the file has no rule.  Independent of `known`: a rule needs no
+	// relation rows.
+	RuleOffsets []int32 `json:"ruleOffsets,omitempty"`
+}
+
+// RuleShifts answers anime-relations' shifts for an AniList id.
+type RuleShifts interface {
+	Shifts(anilistID int32) []int32
 }
 
 // EpisodeOffset serves the absolute episode offset for one anime.
@@ -59,7 +71,7 @@ type episodeOffsetResponse struct {
 // only written for anime whose detail has been fetched — and a client that
 // had to distinguish "unknown" from "request failed" by status code would
 // end up retrying a stable answer forever.
-func EpisodeOffset(q dbgen.Querier) http.HandlerFunc {
+func EpisodeOffset(q dbgen.Querier, rules RuleShifts) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
 		defer cancel()
@@ -82,7 +94,7 @@ func EpisodeOffset(q dbgen.Querier) http.HandlerFunc {
 			// id is perfectly valid and the client's answer is the same one
 			// it gets for a chain that runs off the end of the cache.
 			if errors.Is(err, pgx.ErrNoRows) {
-				httpx.Data(w, http.StatusOK, episodeOffsetResponse{Known: false})
+				httpx.Data(w, http.StatusOK, episodeOffsetResponse{Known: false, RuleOffsets: rules.Shifts(int32(id))})
 				return
 			}
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
@@ -94,7 +106,7 @@ func EpisodeOffset(q dbgen.Querier) http.HandlerFunc {
 		// walk produced a row whose completeness could not be evaluated, so
 		// it collapses to the same refusal rather than to a default.
 		known := row.Known != nil && *row.Known
-		out := episodeOffsetResponse{Known: known}
+		out := episodeOffsetResponse{Known: known, RuleOffsets: rules.Shifts(int32(id))}
 		if known {
 			out.Offset = row.AbsoluteOffset
 		}
@@ -105,9 +117,10 @@ func EpisodeOffset(q dbgen.Querier) http.HandlerFunc {
 // episodeOffsetItem is one row of the batch answer. `known` carries the same
 // meaning it does on the single-id endpoint, and for the same reason.
 type episodeOffsetItem struct {
-	AnilistID int32 `json:"anilistId"`
-	Known     bool  `json:"known"`
-	Offset    int32 `json:"offset"`
+	AnilistID   int32   `json:"anilistId"`
+	Known       bool    `json:"known"`
+	Offset      int32   `json:"offset"`
+	RuleOffsets []int32 `json:"ruleOffsets,omitempty"`
 }
 
 // EpisodeOffsets serves offsets for many anime at once.
@@ -122,7 +135,7 @@ type episodeOffsetItem struct {
 // An id that is not in the cache produces NO ITEM rather than an item saying
 // unknown. Absent and known:false mean the same thing to the caller, and the
 // episode-count sweep already treats a missing row that way.
-func EpisodeOffsets(q dbgen.Querier) http.HandlerFunc {
+func EpisodeOffsets(q dbgen.Querier, rules RuleShifts) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
 		defer cancel()
@@ -143,14 +156,27 @@ func EpisodeOffsets(q dbgen.Querier) http.HandlerFunc {
 			return
 		}
 
-		items := make([]episodeOffsetItem, 0, len(rows))
+		items := make([]episodeOffsetItem, 0, len(ids))
+		answered := make(map[int32]bool, len(rows))
 		for _, r := range rows {
 			known := r.Known != nil && *r.Known
-			item := episodeOffsetItem{AnilistID: r.AnilistID, Known: known}
+			item := episodeOffsetItem{AnilistID: r.AnilistID, Known: known, RuleOffsets: rules.Shifts(r.AnilistID)}
 			if known {
 				item.Offset = r.AbsoluteOffset
 			}
 			items = append(items, item)
+			answered[r.AnilistID] = true
+		}
+		// An id the cache does not hold still has whatever rules the file
+		// gives it; those need no relation rows.
+		for _, id := range ids {
+			if answered[id] {
+				continue
+			}
+			if shifts := rules.Shifts(id); len(shifts) > 0 {
+				items = append(items, episodeOffsetItem{AnilistID: id, RuleOffsets: shifts})
+				answered[id] = true
+			}
 		}
 
 		// The same policy the episode counts use. An offset is a fact about a

@@ -367,6 +367,8 @@ interface SeriesDetailSheetProps {
    * 0 — see `lib/library/episodeOffset`.
    */
   episodeOffset?: number;
+  /** anime-relations' shifts, tried before `episodeOffset`. */
+  episodeRuleOffsets?: readonly number[];
   onClose: () => void;
   /** `fileRefId` names one of the episode's other versions; absent plays its primary. */
   onPickEpisode: (seriesId: string, episodeNumber: number, fileRefId?: string) => void;
@@ -377,6 +379,7 @@ export function SeriesDetailSheet({
   series,
   groupTotal,
   episodeOffset,
+  episodeRuleOffsets,
   onClose,
   onPickEpisode,
   onPlaySeries,
@@ -460,8 +463,8 @@ export function SeriesDetailSheet({
   // effect is out of reach for bun:test here — which is exactly how issue #75
   // shipped — and because the player has to reach the SAME answer.
   const grid = useMemo(
-    () => buildGridCells(episodes, groupTotal, episodeOffset),
-    [episodes, groupTotal, episodeOffset],
+    () => buildGridCells(episodes, groupTotal, episodeOffset, episodeRuleOffsets),
+    [episodes, groupTotal, episodeOffset, episodeRuleOffsets],
   );
 
   // Other releases of the same episodes, numbered like their episode's chip.

@@ -96,6 +96,7 @@
  *   `rematchSeries`,外加 `_services/episodeCountBackfill.ts` 的一次性批量回填
  *   (`GET /api/anime/episodes`)——已绑定的老库走不到前四处,只有回填能补上。
  * @property {number}  [episodeOffset]       - 本季之前有多少集(跨季连续编号的起点)。
+ * @property {number[]} [episodeRuleOffsets] - anime-relations 给这一季的平移量（如 叁之章 Part 2 的 12）；先于 episodeOffset 尝试。[] = 标准里没有规则（已问过），缺省 = 还没问。见 lib/library/episodeOffset
  *   来自 `GET /api/anime/{id}/episode-offset`,由服务端沿 PREQUEL 边递归求和得出。
  *   ★**缺失和 0 是相反的指令,不是同一个「没有」**:`0` = 已确认前面没有任何一季,读取方
  *   (`episodeGridModel.normalizeEpisodeNumbers`)据此**停止**推断位移;缺失 = 没查出来,读取方
