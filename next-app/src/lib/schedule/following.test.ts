@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SITE_TZ } from "@/lib/home/time";
-import { followingThisWeek, rowFollowState, whenLabel } from "./following";
+import { followingThisWeek, rowFollowState, sortFollowing, whenLabel } from "./following";
 
 const HOUR = 3_600_000;
 const NOW = Date.UTC(2026, 8, 23, 12, 40); // Wed 20:40 in Shanghai
@@ -63,6 +63,49 @@ describe("followingThisWeek", () => {
 
   test("nobody followed, nothing listed", () => {
     expect(followingThisWeek(days, {}, NOW)).toEqual([]);
+  });
+});
+
+describe("unseen — episodes already out that the reader has not watched", () => {
+  const days = [{ items: [item(1, -2, 18), item(3, 26, 12)] }];
+
+  test("aired past your progress: everything from your progress to this episode", () => {
+    expect(followingThisWeek(days, { 1: 15 }, NOW)[0].unseen).toBe(3);
+  });
+
+  test("aired and caught up: none", () => {
+    expect(followingThisWeek(days, { 1: 18 }, NOW)[0].unseen).toBe(0);
+  });
+
+  test("not out yet: the episodes before it you have not seen", () => {
+    expect(followingThisWeek(days, { 3: 8 }, NOW)[0].unseen).toBe(3);
+    expect(followingThisWeek(days, { 3: 11 }, NOW)[0].unseen).toBe(0);
+  });
+});
+
+describe("sortFollowing — the box's two orders", () => {
+  // 10 airs first but you are caught up; 11 airs next, 1 unseen; 12 airs last,
+  // 4 unseen; 13 airs between 11 and 12, also 1 unseen.
+  const days = [
+    { items: [item(10, -6, 5), item(11, -4, 9), item(13, -3, 4), item(12, 20, 8)] },
+  ];
+  const progress = { 10: 5, 11: 8, 12: 3, 13: 3 };
+  const entries = followingThisWeek(days, progress, NOW);
+
+  test("time: by when each airs", () => {
+    const shuffled = [entries[2], entries[0], entries[3], entries[1]];
+    expect(sortFollowing(shuffled, "time").map((e) => e.item.id)).toEqual([10, 11, 13, 12]);
+  });
+
+  test("unseen first: most unseen first, ties by air time, caught-up shows last", () => {
+    expect(sortFollowing(entries, "unseen").map((e) => e.item.id)).toEqual([12, 11, 13, 10]);
+  });
+
+  test("returns a new array and leaves the input order alone", () => {
+    const before = entries.map((e) => e.item.id);
+    const out = sortFollowing(entries, "unseen");
+    expect(out).not.toBe(entries);
+    expect(entries.map((e) => e.item.id)).toEqual(before);
   });
 });
 

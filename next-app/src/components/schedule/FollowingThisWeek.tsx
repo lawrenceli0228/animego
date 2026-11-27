@@ -8,14 +8,20 @@
 // the reader's cookie; nothing here fetches. The states and the "今天 21:00"
 // labels move with the same clock as the rows beside them.
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { ChevronIcon } from "@/components/home/icons";
 import type { HomeClock } from "@/components/home/useHomeClock";
 import { fillTemplate } from "@/lib/home/time";
 import { cardToneVars } from "@/lib/home/tone";
-import { followingThisWeek, whenLabel, type FollowEntry } from "@/lib/schedule/following";
+import {
+  followingThisWeek,
+  sortFollowing,
+  whenLabel,
+  type FollowEntry,
+  type FollowSort,
+} from "@/lib/schedule/following";
 import type { ScheduleDayView, ScheduleItemView } from "@/lib/schedule/viewModels";
 import { useLang } from "@/lib/lang-client";
 import aside from "./aside.module.css";
@@ -30,9 +36,37 @@ interface FollowingThisWeekProps {
   clock: HomeClock;
 }
 
+interface SortToggleProps {
+  sort: FollowSort;
+  onSort: (sort: FollowSort) => void;
+}
+
+/** 按时间 / 未看优先. Not remembered: every visit starts in airing order. */
+function SortToggle({ sort, onSort }: SortToggleProps) {
+  const { t } = useLang();
+  const button = (key: FollowSort, label: string) => (
+    <button
+      type="button"
+      className={styles.sort}
+      aria-pressed={sort === key}
+      data-follow-sort={key}
+      onClick={() => onSort(key)}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className={styles.sorts} role="group" aria-label={t("schedule.mineSortAria")}>
+      {button("time", t("schedule.mineSortTime"))}
+      {button("unseen", t("schedule.mineSortUnseen"))}
+    </div>
+  );
+}
+
 export default function FollowingThisWeek({ days, progress, clock }: FollowingThisWeekProps) {
   const { t, lang } = useLang();
-  const entries = followingThisWeek(days, progress, clock.nowMs);
+  const [sort, setSort] = useState<FollowSort>("time");
+  const entries = sortFollowing(followingThisWeek(days, progress, clock.nowMs), sort);
 
   const stateText = (e: FollowEntry<ScheduleItemView>) => {
     switch (e.state) {
@@ -49,9 +83,12 @@ export default function FollowingThisWeek({ days, progress, clock }: FollowingTh
 
   return (
     <section className={`${aside.box} ${styles.mine}`} aria-labelledby="schedule-mine">
-      <h3 id="schedule-mine" className={`${aside.title} ${styles.heading}`}>
-        {t("schedule.mineTitle")}
-      </h3>
+      <div className={styles.header}>
+        <h3 id="schedule-mine" className={aside.title}>
+          {t("schedule.mineTitle")}
+        </h3>
+        {entries.length > 1 ? <SortToggle sort={sort} onSort={setSort} /> : null}
+      </div>
       {entries.length === 0 ? (
         <p className={styles.empty}>{t("schedule.mineEmpty")}</p>
       ) : (

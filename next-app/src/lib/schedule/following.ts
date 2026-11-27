@@ -13,11 +13,16 @@ import { clockParts, weekdayLabel } from "@/lib/home/time";
 
 export type FollowState = "unwatched" | "watched" | "behind" | "upcoming";
 
+/** The box's two orders: by when each show airs, or the most unseen first. */
+export type FollowSort = "time" | "unseen";
+
 export interface FollowEntry<T> {
   item: T;
   state: FollowState;
   /** Episodes already out that the reader has not watched. Only for "behind". */
   behind: number;
+  /** Episodes already out that the reader has not watched, aired or not. */
+  unseen: number;
 }
 
 type Progress = Readonly<Record<number, number>>;
@@ -28,11 +33,20 @@ interface Airing {
   ep: number;
 }
 
-function stateOf(ep: number, watched: number, aired: boolean): { state: FollowState; behind: number } {
-  if (aired) return { state: ep > watched ? "unwatched" : "watched", behind: 0 };
+function stateOf(
+  ep: number,
+  watched: number,
+  aired: boolean,
+): { state: FollowState; behind: number; unseen: number } {
+  if (aired) {
+    const unseen = Math.max(0, ep - watched);
+    return { state: unseen > 0 ? "unwatched" : "watched", behind: 0, unseen };
+  }
   // Episode `ep` is still to come; everything before it is out.
   const behind = ep - 1 - watched;
-  return behind > 0 ? { state: "behind", behind } : { state: "upcoming", behind: 0 };
+  return behind > 0
+    ? { state: "behind", behind, unseen: behind }
+    : { state: "upcoming", behind: 0, unseen: 0 };
 }
 
 /**
@@ -55,6 +69,22 @@ export function followingThisWeek<T extends Airing>(
   return [...first.values()]
     .sort((a, b) => a.at - b.at)
     .map((item) => ({ item, ...stateOf(item.ep, progress[item.id], item.at <= nowMs) }));
+}
+
+/**
+ * The box's rows in the reader's chosen order, as a new array.
+ *
+ * "time" is airing order. "unseen" puts the shows with the most episodes out
+ * and unwatched first, ties broken by airing order, and the caught-up ones
+ * last in airing order — the order to catch up in.
+ */
+export function sortFollowing<T extends Airing>(
+  entries: readonly FollowEntry<T>[],
+  sort: FollowSort,
+): FollowEntry<T>[] {
+  const byTime = (a: FollowEntry<T>, b: FollowEntry<T>) => a.item.at - b.item.at;
+  if (sort === "time") return [...entries].sort(byTime);
+  return [...entries].sort((a, b) => b.unseen - a.unseen || byTime(a, b));
 }
 
 /**
