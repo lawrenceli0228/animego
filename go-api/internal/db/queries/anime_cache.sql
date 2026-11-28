@@ -1303,6 +1303,27 @@ SELECT
 FROM anime_relations
 WHERE anime_id = $1;
 
+-- name: IsPrintOnlyRelation :one
+-- Whether the relation rows know this id only as a print work.  AniList
+-- puts manga, novels and one-shots in the same id space as anime, and a
+-- relation row records the format of the work it points at, so an id
+-- that some row records as MANGA / NOVEL / ONE_SHOT, and no row records
+-- as anything else, is not an anime.  "Anything else" includes a NULL
+-- format: a row that does not know what the id is must not turn it into
+-- a 404.  Served by anime_relations_anilist_id_idx (0056).
+SELECT (
+    EXISTS (
+        SELECT 1 FROM anime_relations p
+        WHERE p.anilist_id = sqlc.arg(anilist_id)::integer
+          AND p.format IN ('MANGA', 'NOVEL', 'ONE_SHOT')
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM anime_relations o
+        WHERE o.anilist_id = sqlc.arg(anilist_id)::integer
+          AND (o.format IS NULL OR o.format NOT IN ('MANGA', 'NOVEL', 'ONE_SHOT'))
+    )
+)::boolean AS print_only;
+
 -- name: GetAnimeCharactersByID :many
 -- Sorted by display_order so the response preserves AniList's order
 -- ([ROLE, RELEVANCE, ID]: MAIN → SUPPORTING → BACKGROUND).

@@ -1582,6 +1582,14 @@ type Querier interface {
 	// transaction carries that transaction's.  The final SELECT still reads the
 	// upsert's RETURNING, so the DO UPDATE guarantee above is untouched.
 	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (InsertSubscriptionIfAbsentRow, error)
+	// Whether the relation rows know this id only as a print work.  AniList
+	// puts manga, novels and one-shots in the same id space as anime, and a
+	// relation row records the format of the work it points at, so an id
+	// that some row records as MANGA / NOVEL / ONE_SHOT, and no row records
+	// as anything else, is not an anime.  "Anything else" includes a NULL
+	// format: a row that does not know what the id is must not turn it into
+	// a 404.  Served by anime_relations_anilist_id_idx (0056).
+	IsPrintOnlyRelation(ctx context.Context, anilistID int32) (bool, error)
 	// Signup cohorts by Monday-start week: the current week and the `weeks - 1`
 	// before it, newest first, one row per week whether or not anybody signed up
 	// in it.
