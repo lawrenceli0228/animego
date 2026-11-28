@@ -3,12 +3,15 @@ import {
   FILTER_GENRES,
   FORMAT_LABEL,
   GENRE_LABEL,
+  PRINT_FORMATS,
   STAFF_ROLE_LABEL,
   STATUS_LABEL,
   formatLabel,
   genreLabel,
+  isPrintFormat,
   normalizeStaffRole,
   pickRelatedTitle,
+  printFormatLabel,
   staffRoleLabel,
   statusLabel,
 } from "./contentLabels";
@@ -496,5 +499,31 @@ describe("pickRelatedTitle", () => {
 
   test("trims the title it returns", () => {
     expect(pickRelatedTitle({ titleChinese: "  你的名字。  " }, "zh")).toBe("你的名字。");
+  });
+});
+
+describe("print formats", () => {
+  test("exactly AniList's three print formats are print works", () => {
+    expect([...PRINT_FORMATS]).toEqual(["MANGA", "NOVEL", "ONE_SHOT"]);
+    for (const f of ["MANGA", "NOVEL", "ONE_SHOT"]) expect(isPrintFormat(f)).toBe(true);
+    for (const f of ["TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA", "MUSIC", "manga", "", null, undefined]) {
+      expect(isPrintFormat(f)).toBe(false);
+    }
+  });
+
+  test("every language labels every print format, never with the raw enum", () => {
+    for (const lang of LANGS) {
+      for (const f of PRINT_FORMATS) {
+        const label = printFormatLabel(f, lang);
+        expect(label).not.toBe(f);
+        expect(label.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test("the labels each language shows", () => {
+    expect(PRINT_FORMATS.map((f) => printFormatLabel(f, "zh"))).toEqual(["漫画", "小说", "单篇"]);
+    expect(PRINT_FORMATS.map((f) => printFormatLabel(f, "zh-Hant"))).toEqual(["漫畫", "小說", "單篇"]);
+    expect(PRINT_FORMATS.map((f) => printFormatLabel(f, "en"))).toEqual(["Manga", "Novel", "One Shot"]);
   });
 });

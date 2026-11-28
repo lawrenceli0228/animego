@@ -29,6 +29,7 @@ import TrailerPreview from "@/components/anime/TrailerPreview";
 // see DetailShell.tsx.
 import x from "./sections.module.css";
 import DetailShell, { detailTrailerLabels } from "./_detail/DetailShell";
+import RelationsSection from "./_detail/RelationsSection";
 import {
   detailStaticParams,
   loadCommunityCount,
@@ -45,7 +46,6 @@ import {
   durationLabel,
   formatLabel,
   pickRelatedTitle,
-  relationLabel,
   sourceLabel,
   staffRoleLabel,
 } from "@/lib/contentLabels";
@@ -74,7 +74,6 @@ import type {
   CreditCounts,
   DetailCharacter,
   DetailRecommendation,
-  DetailRelation,
   DetailStaff,
 } from "@/lib/types";
 
@@ -156,19 +155,6 @@ type AnimeDetailPageProps = PageProps<"/[lang]/anime/[id]">;
 // The status and season labels the hero shares with the information table
 // are in _detail/detailLabels.ts; the character roles, which the 角色 tab
 // prints too, in lib/detail/cast.ts.
-
-const RELATION_ORDER = [
-  "PREQUEL",
-  "SEQUEL",
-  "PARENT",
-  "SIDE_STORY",
-  "SPIN_OFF",
-  "ADAPTATION",
-  "ALTERNATIVE",
-  "SUMMARY",
-  "CHARACTER",
-  "OTHER",
-];
 
 // scoreColor lived here and shipped a bug: it returned one of three band
 // colours while S.scoreBadge hardcoded an amber background, so every anime
@@ -272,8 +258,10 @@ export async function generateMetadata({
 // into the hero.
 const DESC_TRUNCATE_WIDTH = 300;
 
-// --- Relations section ---
+// --- Sections below the hero ---
 
+// 关联作品 is _detail/RelationsSection.tsx.
+//
 // The intrinsic sizes for the images in these four sections live in
 // _detail/sectionImageSizes.ts, with why each is what it is and the
 // contract they hold with nginx's cache.
@@ -607,70 +595,6 @@ function SynopsisSection({
           {trailer}
         </aside>
       ) : null}
-    </section>
-  );
-}
-
-function RelationsSection({
-  relations,
-  lang,
-  dict,
-}: {
-  relations: DetailRelation[];
-  lang: Lang;
-  dict: Dict;
-}) {
-  if (!relations.length) return null;
-  const sorted = [...relations].sort((a, b) => {
-    const ai = RELATION_ORDER.indexOf(a.relationType);
-    const bi = RELATION_ORDER.indexOf(b.relationType);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-
-  return (
-    <section className={x.section}>
-      <header className={x.head}>
-        <h2 className={x.headTitle}>{dict.detail.relations}</h2>
-        <span className={x.headCount}>{sorted.length}</span>
-      </header>
-      <div className={x.posterGrid}>
-        {sorted.map((rel) => {
-          const label = relationLabel(rel.relationType, lang);
-          // Cards mirror the inline hero chips — same helper, same
-          // server-pinned zh, so likewise Chinese-first for everyone. Both
-          // sites previously hardcoded romaji-wins and suppressed titleChinese
-          // outright. Wire field is `title` not `titleRomaji`.
-          const relTitle = pickRelatedTitle(rel, lang);
-          return (
-            <Link
-              key={`${rel.anilistId}-${rel.relationType}`}
-              href={`/anime/${rel.anilistId}`}
-              prefetch={false}
-              // .card-lift is the global reduced-motion-guarded hover lift
-              // (globals.css); the module adds the glow and the image scale,
-              // which it cannot express, and deliberately does not add a
-              // second transform on top of it.
-              className={`card-lift ${x.posterCard}`}
-            >
-              <div className={x.posterFrame}>
-                {rel.coverImageUrl ? (
-                  <FadeImage
-                    src={rel.coverImageUrl}
-                    alt={relTitle}
-                    width={POSTER_SRC_W}
-                    height={POSTER_SRC_H}
-                    className={x.posterImg}
-                  />
-                ) : (
-                  <span className={x.posterEmpty}>N/A</span>
-                )}
-                <span className={x.relBadge}>{label}</span>
-              </div>
-              <p className={x.posterTitle}>{relTitle}</p>
-            </Link>
-          );
-        })}
-      </div>
     </section>
   );
 }
