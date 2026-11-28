@@ -5,6 +5,7 @@ import type { Lang } from "@/lib/i18n/lang";
 import { LanguageProvider } from "@/lib/lang-client";
 import { renderAsNextDev } from "@/lib/test-utils/nextImage";
 import type { DetailRelation } from "@/lib/types";
+import en from "@/locales/en";
 import zh from "@/locales/zh";
 import zhHant from "@/locales/zh-Hant";
 import RelationsSection from "./RelationsSection";
@@ -38,20 +39,21 @@ const RELATIONS: DetailRelation[] = [
   relation(40001, "OTHER", null, "Unknown Format"),
 ];
 
-type Card = { href: string; attrs: string; badge: string; title: string };
+type Card = { href: string; attrs: string; labels: string[]; title: string };
 
 // Read by structure, not class: CSS module classes are undefined under bun
-// test. The badge is the span that closes the cover frame.
+// test. The labels are the spans inside the cover frame, in order: the
+// relation, then on a print work what it is.
 function cards(html: string): Card[] {
-  return [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].map(([, attrs, inner]) => ({
-    href: /href="([^"]+)"/.exec(attrs)?.[1] ?? "",
-    attrs,
-    badge: (/<span[^>]*>([^<]*(?:<svg[\s\S]*?<\/svg>)?)<\/span><\/div>/.exec(inner)?.[1] ?? "").replace(
-      /<[^>]+>/g,
-      "",
-    ),
-    title: (/<p[^>]*>([\s\S]*?)<\/p>/.exec(inner)?.[1] ?? "").replace(/<[^>]+>/g, ""),
-  }));
+  return [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].map(([, attrs, inner]) => {
+    const frame = inner.slice(0, inner.indexOf("</div>"));
+    return {
+      href: /href="([^"]+)"/.exec(attrs)?.[1] ?? "",
+      attrs,
+      labels: [...frame.matchAll(/<span[^>]*>([^<]*)(?:<svg[\s\S]*?<\/svg>)?<\/span>/g)].map((m) => m[1]),
+      title: (/<p[^>]*>([\s\S]*?)<\/p>/.exec(inner)?.[1] ?? "").replace(/<[^>]+>/g, ""),
+    };
+  });
 }
 
 function render(lang: Lang, dict: Dict): Card[] {
@@ -66,15 +68,26 @@ function render(lang: Lang, dict: Dict): Card[] {
 
 describe("RelationsSection", () => {
   test("anime open their page here; print works open AniList's", () => {
-    expect(render("zh", zh).map((c) => [c.href, c.badge])).toEqual([
-      ["/anime/154587", "前传"],
-      ["/anime/209939", "续集"],
-      ["/anime/206425", "番外"],
-      ["https://anilist.co/manga/118586", "改编 · 漫画"],
-      ["https://anilist.co/manga/126268", "替代版 · 小说"],
-      ["https://anilist.co/manga/198506", "其他 · 单篇"],
-      ["/anime/40001", "其他"],
+    expect(render("zh", zh).map((c) => [c.href, c.labels])).toEqual([
+      ["/anime/154587", ["前传"]],
+      ["/anime/209939", ["续集"]],
+      ["/anime/206425", ["番外"]],
+      ["https://anilist.co/manga/118586", ["改编", "漫画"]],
+      ["https://anilist.co/manga/126268", ["替代版", "小说"]],
+      ["https://anilist.co/manga/198506", ["其他", "单篇"]],
+      ["/anime/40001", ["其他"]],
     ]);
+  });
+
+  test("English: relation and format are two labels, each one word", () => {
+    // en is cast for the reason lib/i18n.ts gives at DICTS.
+    const print = render("en", en as unknown as Dict).filter((c) => c.href.startsWith("https://anilist.co/"));
+    expect(print.map((c) => c.labels)).toEqual([
+      ["Adaptation", "Manga"],
+      ["Alternative", "Novel"],
+      ["Other", "One Shot"],
+    ]);
+    expect(print[0].attrs).toContain('title="View on AniList"');
   });
 
   test("no card links a print work to /anime/", () => {
@@ -97,8 +110,11 @@ describe("RelationsSection", () => {
     expect(print!.attrs).toContain('title="在 AniList 查看"');
     expect(print!.title).toBe("Sousou no Frieren");
 
+    // The arrow rides on the format label, not on the relation.
     const printBlock = /<a\b[^>]*href="https:\/\/anilist\.co\/manga\/118586"[^>]*>([\s\S]*?)<\/a>/.exec(html)![1];
-    expect(printBlock).toMatch(/<svg[^>]*aria-hidden="true"/);
+    expect(printBlock).toMatch(/<span[^>]*>漫画<svg[^>]*aria-hidden="true"/);
+    expect(printBlock).toMatch(/<span[^>]*>改编<\/span>/);
+    expect(printBlock.match(/<svg/g)).toHaveLength(1);
 
     const animeBlock = /<a\b[^>]*href="\/anime\/154587"[^>]*>([\s\S]*?)<\/a>/.exec(html)![1];
     expect(animeBlock).not.toContain("<svg");
@@ -110,7 +126,7 @@ describe("RelationsSection", () => {
     const hant = render("zh-Hant", zhHant);
     const print = hant.find((c) => c.href.startsWith("https://anilist.co/"));
     expect(print?.href).toBe("https://anilist.co/manga/118586");
-    expect(print?.badge).toBe("改編 · 漫畫");
+    expect(print?.labels).toEqual(["改編", "漫畫"]);
     expect(print?.attrs).toContain('title="在 AniList 檢視"');
   });
 
