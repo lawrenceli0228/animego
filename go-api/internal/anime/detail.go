@@ -8,6 +8,7 @@
 //	 ├─ ristretto hit ─────────────────────────► 200
 //	 ├─ DB ErrNoRows (cold id)
 //	 │    ├─ absent hit ───────────────────────► 404  (no AniList call)
+//	 │    ├─ relations: print work only ───────► absent.Set → 404  (no AniList call)
 //	 │    └─ singleflight(id) → Detail (queues on the shared limiter)
 //	 │         ├─ Media null / upstream 404 ───► absent.Set → 404
 //	 │         ├─ ErrRateLimited ──────────────► 503  (not remembered)
@@ -409,6 +410,7 @@ type DetailReader interface {
 	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeRecommendationsByIDRow, error)
 	GetAnimeEpisodeTitlesByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeEpisodeTitlesByIDRow, error)
 	GetRelationEnrichmentByIDs(ctx context.Context, ids []int32) ([]dbgen.GetRelationEnrichmentByIDsRow, error)
+	IsPrintOnlyRelation(ctx context.Context, anilistID int32) (bool, error)
 }
 
 // DetailWriter is the upsert slice of DetailDB.  Used only by the
@@ -726,6 +728,10 @@ func (s *DetailService) fetchCold(ctx context.Context, anilistID int32) (*AnimeD
 	if _, ok := s.absent.Get(key); ok {
 		return nil, errAnimeNotFound()
 	}
+	if s.isPrintOnly(ctx, anilistID) {
+		s.absent.Set(key, struct{}{})
+		return nil, errAnimeNotFound()
+	}
 	// The DB read may have spent the whole budget.  Starting a detached
 	// fetch now would still take a limiter reservation for nobody.
 	if err := ctx.Err(); err != nil {
@@ -760,6 +766,25 @@ func (s *DetailService) fetchCold(ctx context.Context, anilistID int32) (*AnimeD
 	case <-ctx.Done():
 		return nil, httpx.WrapError(ctx.Err(), http.StatusBadGateway, httpx.CodeServerError, "AniList upstream error")
 	}
+}
+
+// isPrintOnly reports whether the relation rows already know anilistID
+// as a print work (manga, novel, one-shot) and as nothing else.  AniList
+// shares one id space between anime and print works and this endpoint
+// only describes anime, so for such an id the stored rows give the same
+// answer the AniList call would -- "no such anime" -- without making it.
+// It is remembered in the negative cache like that answer would be.
+//
+// A failed lookup reports false: the id then takes the AniList path, which
+// reaches the same answer by the longer route.
+func (s *DetailService) isPrintOnly(ctx context.Context, anilistID int32) bool {
+	printOnly, err := s.db.IsPrintOnlyRelation(ctx, anilistID)
+	if err != nil {
+		slog.WarnContext(ctx, "anime/detail: print relation lookup failed",
+			"anilistId", anilistID, "err", err)
+		return false
+	}
+	return printOnly
 }
 
 // errAnimeNotFound is the 404 every "no such anime" path returns.

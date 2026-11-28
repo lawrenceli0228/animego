@@ -9,6 +9,7 @@ package anime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
@@ -310,6 +311,104 @@ func TestDetail_Cold_AbsentOverriddenByDBRow(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"titleRomaji":"Arrived Later"`)
 	assert.Equal(t, int32(1), al.detailCalls.Load())
+}
+
+// -----------------------------------------------------------------------------
+// Cold id the relation rows know as a print work: answered from the rows.
+// -----------------------------------------------------------------------------
+
+// An id some relation records only as MANGA / NOVEL / ONE_SHOT is not an
+// anime: 404 without asking AniList, and remembered like AniList's own
+// "no such media", so the second request does not repeat the lookup.
+func TestDetail_Cold_PrintOnlyRelation_NoAniListCall(t *testing.T) {
+	t.Parallel()
+
+	db := coldDB()
+	var lookedUp atomic.Int32
+	db.isPrintOnlyRelationFn = func(_ context.Context, id int32) (bool, error) {
+		lookedUp.Store(id)
+		return true, nil
+	}
+	al := &fakeAniListDetailer{detailFn: nullMedia}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/118586")
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Contains(t, rec.Body.String(), "番剧不存在")
+	svc.absent.Wait()
+
+	rec2 := serveDetail(t, svc, "/api/anime/118586")
+	require.Equal(t, http.StatusNotFound, rec2.Code)
+
+	assert.Equal(t, int32(118586), lookedUp.Load(), "the lookup is for the requested id")
+	assert.Equal(t, int32(0), al.detailCalls.Load(), "a print work must not reach AniList")
+	assert.Equal(t, int32(0), al.noWaitCalls.Load())
+	assert.Equal(t, int32(1), db.printLookupCalls.Load(), "the second request is a negative-cache hit")
+}
+
+// An id the rows do not know as a print work still takes the AniList path.
+func TestDetail_Cold_NotPrintOnly_AsksAniList(t *testing.T) {
+	t.Parallel()
+
+	db := coldDB()
+	db.isPrintOnlyRelationFn = func(context.Context, int32) (bool, error) { return false, nil }
+	al := &fakeAniListDetailer{detailFn: nullMedia}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	require.Equal(t, http.StatusNotFound, serveDetail(t, svc, "/api/anime/36").Code)
+
+	assert.Equal(t, int32(1), db.printLookupCalls.Load())
+	assert.Equal(t, int32(1), al.detailCalls.Load())
+}
+
+// A failed lookup is not an answer: the id falls through to AniList rather
+// than turning a database hiccup into a 404 for a real anime.
+func TestDetail_Cold_PrintLookupFails_AsksAniList(t *testing.T) {
+	t.Parallel()
+
+	title := "Real Anime"
+	db := coldDB()
+	db.isPrintOnlyRelationFn = func(context.Context, int32) (bool, error) {
+		return false, errors.New("connection reset")
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(context.Context, anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return &anilist.AnimeDetailResponse{Media: anilist.Media{ID: 37, Title: &anilist.Title{Romaji: &title}}}, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/37")
+
+	assert.NotEqual(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	assert.Equal(t, int32(1), al.detailCalls.Load())
+}
+
+// An id with a row is served from the row; the print lookup belongs to
+// the cold path only.
+func TestDetail_WarmRow_SkipsPrintLookup(t *testing.T) {
+	t.Parallel()
+
+	title := "Held Row"
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(context.Context, int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:        38,
+				TitleRomaji:      &title,
+				CachedAt:         freshTimestamp(),
+				TrailerCheckedAt: freshTimestamp(),
+				DetailFetchedAt:  freshTimestamp(),
+			}, nil
+		},
+		isPrintOnlyRelationFn: func(context.Context, int32) (bool, error) { return true, nil },
+	}
+	al := &fakeAniListDetailer{detailFn: nullMedia}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/38")
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(0), db.printLookupCalls.Load())
 }
 
 // T-d9: the negative entry lives as long as a stale row does, then AniList

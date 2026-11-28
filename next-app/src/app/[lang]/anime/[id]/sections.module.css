@@ -401,6 +401,27 @@
   pointer-events: none;
 }
 
+/* A print work's badge (RelationsSection): the relation, what the work is,
+ * and an arrow for a card that opens AniList instead of a page here. Same
+ * tint, size and corner as the plain badge, so it reads as the same label
+ * with more to say rather than as a second kind of chip. */
+.relBadgeExt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.relBadgeArrow {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* Score, over the artwork. Colour comes from scoreScrimStyle() applied
  * inline — background and foreground together, never one without the other
  * (components/anime/scoreStyle.ts documents the production bug that rule

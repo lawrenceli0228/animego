@@ -1,0 +1,17 @@
+-- Index anime_relations by the id a relation points AT.
+--
+-- 0002 indexed this table by anime_id, the parent whose detail page lists
+-- the relation, because every read until now came from the parent side.
+-- The detail endpoint now also asks the reverse question before fetching
+-- an id it has no row for: does any relation already record this id as a
+-- print work (MANGA, NOVEL, ONE_SHOT)?  AniList keeps print works in the
+-- same id space as anime, and /api/anime/:anilistId only describes anime,
+-- so for such an id the relation rows already hold the answer ("no such
+-- anime") and the endpoint returns it without an AniList call.  That
+-- lookup filters on anilist_id, which 0002's index cannot serve.
+--
+-- A plain CREATE INDEX, like the siblings in 0002 and 0027: golang-migrate
+-- runs the file inside an implicit transaction, where CONCURRENTLY is not
+-- allowed, and the column is a single integer on a small table, so the
+-- write lock it takes is brief.
+CREATE INDEX anime_relations_anilist_id_idx ON anime_relations (anilist_id);

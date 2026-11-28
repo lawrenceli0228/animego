@@ -2988,6 +2988,35 @@ func (q *Queries) InsertAnimeTag(ctx context.Context, animeID int32, source stri
 	return err
 }
 
+const isPrintOnlyRelation = `-- name: IsPrintOnlyRelation :one
+SELECT (
+    EXISTS (
+        SELECT 1 FROM anime_relations p
+        WHERE p.anilist_id = $1::integer
+          AND p.format IN ('MANGA', 'NOVEL', 'ONE_SHOT')
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM anime_relations o
+        WHERE o.anilist_id = $1::integer
+          AND (o.format IS NULL OR o.format NOT IN ('MANGA', 'NOVEL', 'ONE_SHOT'))
+    )
+)::boolean AS print_only
+`
+
+// Whether the relation rows know this id only as a print work.  AniList
+// puts manga, novels and one-shots in the same id space as anime, and a
+// relation row records the format of the work it points at, so an id
+// that some row records as MANGA / NOVEL / ONE_SHOT, and no row records
+// as anything else, is not an anime.  "Anything else" includes a NULL
+// format: a row that does not know what the id is must not turn it into
+// a 404.  Served by anime_relations_anilist_id_idx (0056).
+func (q *Queries) IsPrintOnlyRelation(ctx context.Context, anilistID int32) (bool, error) {
+	row := q.db.QueryRow(ctx, isPrintOnlyRelation, anilistID)
+	var print_only bool
+	err := row.Scan(&print_only)
+	return print_only, err
+}
+
 const listAnilistRatingCandidates = `-- name: ListAnilistRatingCandidates :many
 SELECT anilist_id
 FROM anime_cache

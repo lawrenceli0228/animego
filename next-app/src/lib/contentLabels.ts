@@ -411,6 +411,36 @@ export function relationLabel(relation: string, lang: Lang): string {
   return labelFor(RELATION_LABEL, relation, lang);
 }
 
+// --- Print works -------------------------------------------------------------
+
+/**
+ * AniList formats that are print works rather than anime. AniList keeps them
+ * in the same id space as anime and lists them among an anime's relations
+ * (the manga it adapts, the novel it came from), but /anime/[id] only
+ * describes anime, so a relation card for one of these leads off-site.
+ */
+export const PRINT_FORMATS = ["MANGA", "NOVEL", "ONE_SHOT"] as const;
+
+export type PrintFormat = (typeof PRINT_FORMATS)[number];
+
+export function isPrintFormat(format: string | null | undefined): format is PrintFormat {
+  return format != null && (PRINT_FORMATS as readonly string[]).includes(format);
+}
+
+/**
+ * What a print work is, for the relation badge. A real en table because the
+ * raw "ONE_SHOT" is not prose.
+ */
+export const PRINT_FORMAT_LABEL: EnumLabels = {
+  zh: { MANGA: "漫画", NOVEL: "小说", ONE_SHOT: "单篇" },
+  en: { MANGA: "Manga", NOVEL: "Novel", ONE_SHOT: "One Shot" },
+  "zh-Hant": { MANGA: "漫畫", NOVEL: "小說", ONE_SHOT: "單篇" },
+};
+
+export function printFormatLabel(format: PrintFormat, lang: Lang): string {
+  return labelFor(PRINT_FORMAT_LABEL, format, lang);
+}
+
 // --- Staff role ------------------------------------------------------------
 
 /**

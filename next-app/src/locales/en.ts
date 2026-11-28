@@ -191,6 +191,7 @@ const en = {
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
+    viewOnAnilist: 'View on AniList',
     watchedShort: 'Watched',
     info: 'Information',
     synopsis: 'Synopsis',

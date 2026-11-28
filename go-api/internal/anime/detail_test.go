@@ -51,6 +51,9 @@ type detailFakeDB struct {
 	getAnimeRecommendationsByIDFn func(ctx context.Context, id int32) ([]dbgen.GetAnimeRecommendationsByIDRow, error)
 	getAnimeEpisodeTitlesByIDFn   func(ctx context.Context, id int32) ([]dbgen.GetAnimeEpisodeTitlesByIDRow, error)
 	getRelationEnrichmentByIDsFn  func(ctx context.Context, ids []int32) ([]dbgen.GetRelationEnrichmentByIDsRow, error)
+	// Nil answers false: no relation row knows the id as a print work.
+	isPrintOnlyRelationFn func(ctx context.Context, id int32) (bool, error)
+	printLookupCalls      atomic.Int32
 
 	// Writers (P2.1.6 re-fetch path).  Defaults return nil error.
 	upsertAnimeCacheFn           func(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
@@ -178,6 +181,14 @@ func (f *detailFakeDB) GetRelationEnrichmentByIDs(ctx context.Context, ids []int
 		return []dbgen.GetRelationEnrichmentByIDsRow{}, nil
 	}
 	return f.getRelationEnrichmentByIDsFn(ctx, ids)
+}
+
+func (f *detailFakeDB) IsPrintOnlyRelation(ctx context.Context, id int32) (bool, error) {
+	f.printLookupCalls.Add(1)
+	if f.isPrintOnlyRelationFn == nil {
+		return false, nil
+	}
+	return f.isPrintOnlyRelationFn(ctx, id)
 }
 
 // -----------------------------------------------------------------------------
