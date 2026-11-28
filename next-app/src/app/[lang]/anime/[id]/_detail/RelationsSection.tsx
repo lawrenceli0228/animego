@@ -35,9 +35,12 @@ function ExternalArrow() {
  *
  * Where a card leads is relationLink's decision. An anime card opens its page
  * here; a print work (manga, novel, one-shot) has no page here and opens
- * AniList in a new tab. Its badge names what it is — 「改编 · 漫画」 — with an
- * arrow, because a print work's title is usually the same romaji as the anime
- * it belongs to and the cover alone does not say which one the card is.
+ * AniList in a new tab. Besides the relation in the top corner it carries a
+ * second label in the bottom one naming what it is — 「漫画」 — with an arrow,
+ * because a print work's title is usually the same romaji as the anime it
+ * belongs to and the cover alone does not say which one the card is. Two
+ * one-word labels rather than one 「改编 · 漫画」, which in English is wider
+ * than the narrowest card.
  */
 export default function RelationsSection({
   relations,
@@ -90,13 +93,12 @@ export default function RelationsSection({
                 ) : (
                   <span className={x.posterEmpty}>N/A</span>
                 )}
-                {link.kind === "print" ? (
-                  <span className={`${x.relBadge} ${x.relBadgeExt}`}>
-                    {label} · {printFormatLabel(link.format, lang)}
+                <span className={x.relBadge}>{label}</span>
+                {link.kind === "print" && (
+                  <span className={x.relFormat}>
+                    {printFormatLabel(link.format, lang)}
                     <ExternalArrow />
                   </span>
-                ) : (
-                  <span className={x.relBadge}>{label}</span>
                 )}
               </div>
               <p className={x.posterTitle}>{relTitle}</p>

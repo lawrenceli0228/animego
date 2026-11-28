@@ -381,17 +381,17 @@
   -webkit-box-orient: vertical;
 }
 
-/* Relation type, over the artwork. An opaque tint in the anime's own hue
- * carrying text in the matching tone — the one same-hue pairing lib/
- * oklch.test.ts proves clears 4.5:1 at every hue. A translucent wash or a
- * text-shadow would have no contrast guarantee at all here, because what is
- * behind it is an arbitrary cover. */
-.relBadge {
+/* Labels over the artwork: the relation type in the top corner, and on a
+ * print work what the work is in the bottom one. An opaque tint in the
+ * anime's own hue carrying text in the matching tone — the one same-hue
+ * pairing lib/oklch.test.ts proves clears 4.5:1 at every hue. A translucent
+ * wash or a text-shadow would have no contrast guarantee at all here,
+ * because what is behind it is an arbitrary cover. */
+.relBadge,
+.relFormat {
   position: absolute;
   left: 0;
-  top: 0;
   padding: 5px 8px 5px 7px;
-  border-bottom-right-radius: var(--radius-sm);
   background: var(--sec-tone-low);
   color: var(--sec-tone);
   font-size: 10px;
@@ -401,14 +401,22 @@
   pointer-events: none;
 }
 
-/* A print work's badge (RelationsSection): the relation, what the work is,
- * and an arrow for a card that opens AniList instead of a page here. Same
- * tint, size and corner as the plain badge, so it reads as the same label
- * with more to say rather than as a second kind of chip. */
-.relBadgeExt {
+.relBadge {
+  top: 0;
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+/* A print work's second label (RelationsSection): what the work is, and an
+ * arrow because the card opens AniList instead of a page here. A corner of
+ * its own rather than a suffix on the relation, so each label is one word
+ * and stays on one line on the narrowest card in every language. Same tint
+ * and size as the relation's, mirrored to the opposite corner. */
+.relFormat {
+  bottom: 0;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  border-top-right-radius: var(--radius-sm);
 }
 
 .relBadgeArrow {
